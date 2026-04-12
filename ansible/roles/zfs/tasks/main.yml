@@ -1,0 +1,119 @@
+- name: Install ZFS and partitioning packages
+  ansible.builtin.apt:
+    name:
+      - gdisk
+      - parted
+      - zfsutils-linux
+    state: present
+
+- name: Try loading the ZFS kernel module
+  ansible.builtin.command: modprobe zfs
+  register: terrarium_zfs_modprobe
+  changed_when: false
+  failed_when: false
+
+- name: Assert ZFS kernel support is available
+  ansible.builtin.assert:
+    that:
+      - terrarium_zfs_modprobe.rc == 0
+    fail_msg: >-
+      ZFS kernel support is unavailable on this host (kernel {{ ansible_kernel }}).
+      Terrarium requires a kernel that can load the zfs module.
+      Try a provider image or kernel with native ZFS support instead of this OrbStack kernel.
+
+- name: Ensure storage directory exists for loop mode
+  ansible.builtin.file:
+    path: "{{ terrarium_state_dir }}/storage"
+    state: directory
+    mode: "0755"
+  when: terrarium_storage_mode == 'loop'
+
+- name: Check whether the zpool already exists
+  ansible.builtin.command: "zpool list -H -o name {{ terrarium_lxd_pool_name }}"
+  register: terrarium_zpool_check
+  failed_when: false
+  changed_when: false
+
+- name: Create sparse file for loop-backed pool
+  ansible.builtin.command: "truncate -s {{ terrarium_storage_size }} {{ terrarium_loop_image_path }}"
+  when:
+    - terrarium_storage_mode == 'loop'
+    - terrarium_zpool_check.rc != 0
+
+- name: Create loop-backed zpool
+  ansible.builtin.command: >-
+    zpool create -f -o ashift=12
+    -O compression=zstd
+    -O atime=off
+    -O xattr=sa
+    -O normalization=formD
+    -m none
+    {{ terrarium_lxd_pool_name }} {{ terrarium_loop_image_path }}
+  when:
+    - terrarium_storage_mode == 'loop'
+    - terrarium_zpool_check.rc != 0
+
+- name: Check storage source type for partition mode
+  ansible.builtin.command: "lsblk -dn -o TYPE {{ terrarium_storage_source }}"
+  register: terrarium_partition_source_type
+  changed_when: false
+  when:
+    - terrarium_storage_mode == 'partition'
+    - terrarium_zpool_check.rc != 0
+
+- name: Create partition table on raw disk for partition mode
+  ansible.builtin.command: >-
+    parted -s {{ terrarium_storage_source }}
+    mklabel gpt mkpart terrarium-zfs 1MiB {{ terrarium_storage_size | default('100%', true) }}
+  when:
+    - terrarium_storage_mode == 'partition'
+    - terrarium_zpool_check.rc != 0
+    - terrarium_partition_source_type.stdout == 'disk'
+
+- name: Determine effective partition target
+  ansible.builtin.set_fact:
+    terrarium_zfs_effective_source: >-
+      {{
+        terrarium_storage_source
+        if terrarium_partition_source_type.stdout != 'disk'
+        else (
+          terrarium_storage_source ~ 'p1'
+          if terrarium_storage_source | regex_search('nvme[0-9]+n[0-9]+$')
+          else terrarium_storage_source ~ '1'
+        )
+      }}
+  when:
+    - terrarium_storage_mode == 'partition'
+    - terrarium_zpool_check.rc != 0
+
+- name: Set effective disk source for whole-disk mode
+  ansible.builtin.set_fact:
+    terrarium_zfs_effective_source: "{{ terrarium_storage_source }}"
+  when:
+    - terrarium_storage_mode == 'disk'
+    - terrarium_zpool_check.rc != 0
+
+- name: Zap whole disk before pool creation
+  ansible.builtin.command: "sgdisk --zap-all {{ terrarium_zfs_effective_source }}"
+  when:
+    - terrarium_storage_mode == 'disk'
+    - terrarium_zpool_check.rc != 0
+
+- name: Wipe filesystem signatures on target
+  ansible.builtin.command: "wipefs -af {{ terrarium_zfs_effective_source }}"
+  when:
+    - terrarium_storage_mode in ['disk', 'partition']
+    - terrarium_zpool_check.rc != 0
+
+- name: Create zpool from block device
+  ansible.builtin.command: >-
+    zpool create -f -o ashift=12
+    -O compression=zstd
+    -O atime=off
+    -O xattr=sa
+    -O normalization=formD
+    -m none
+    {{ terrarium_lxd_pool_name }} {{ terrarium_zfs_effective_source }}
+  when:
+    - terrarium_storage_mode in ['disk', 'partition']
+    - terrarium_zpool_check.rc != 0

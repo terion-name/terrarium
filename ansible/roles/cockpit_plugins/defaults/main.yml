@@ -1,0 +1,18 @@
+terrarium_cockpit_plugin_deps:
+  - build-essential
+  - git
+  - jq
+  - make
+  - msmtp
+  - nodejs
+  - npm
+  - python3-botocore
+  - python3-dateutil
+  - python3-libzfs
+  - rsync
+  - sqlite3
+
+terrarium_cockpit_zfs_repo: https://github.com/45Drives/cockpit-zfs.git
+terrarium_cockpit_zfs_ref: 53049cad63a45da1999376e811acef5b85af042a
+terrarium_cockpit_s3_repo: https://github.com/45Drives/cockpit-S3ObjectBroswer.git
+terrarium_cockpit_s3_ref: 8ff0bf98816cd6c03b9f82ccc21ecfd473e801d9

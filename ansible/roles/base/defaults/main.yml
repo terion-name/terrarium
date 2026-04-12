@@ -1,0 +1,21 @@
+terrarium_base_packages:
+  - acl
+  - apt-transport-https
+  - bash-completion
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - jq
+  - lsb-release
+  - python3
+  - python3-pip
+  - python3-venv
+  - python3-yaml
+  - rsync
+  - snapd
+  - software-properties-common
+  - ufw
+  - unzip
+  - vim
+  - zstd

@@ -1,0 +1,1 @@
+terrarium_sanoid_recursion_root: "{{ terrarium_lxd_pool_name }}/containers"

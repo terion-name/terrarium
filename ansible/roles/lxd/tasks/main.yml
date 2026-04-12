@@ -1,0 +1,70 @@
+- name: Install LXD snap
+  ansible.builtin.command: "snap install lxd --channel={{ terrarium_lxd_snap_channel }}"
+  args:
+    creates: /snap/bin/lxd
+
+- name: Enable LXD UI
+  ansible.builtin.command: snap set lxd ui.enable=true
+  changed_when: false
+
+- name: Wait for LXD unix socket
+  ansible.builtin.wait_for:
+    path: /var/snap/lxd/common/lxd/unix.socket
+    timeout: 120
+
+- name: Check whether LXD storage pool exists
+  ansible.builtin.command: /snap/bin/lxc storage show {{ terrarium_lxd_pool_name }}
+  register: terrarium_lxd_storage_pool
+  failed_when: false
+  changed_when: false
+
+- name: Render LXD preseed
+  ansible.builtin.template:
+    src: lxd-preseed.yml.j2
+    dest: "{{ terrarium_state_dir }}/lxd-preseed.yml"
+    mode: "0600"
+
+- name: Initialize LXD with ZFS pool
+  ansible.builtin.shell: "/snap/bin/lxd init --preseed < {{ terrarium_state_dir }}/lxd-preseed.yml"
+  args:
+    executable: /bin/bash
+  when: terrarium_lxd_storage_pool.rc != 0
+
+- name: Pin LXD API to loopback
+  ansible.builtin.command: /snap/bin/lxc config set core.https_address 127.0.0.1:8443
+  changed_when: false
+
+- name: Configure ACME email when custom domain is used
+  ansible.builtin.command: "/snap/bin/lxc config set acme.email {{ terrarium_email }}"
+  when:
+    - terrarium_email | length > 0
+    - not terrarium_lxd_domain.endswith('.traefik.me')
+  changed_when: false
+
+- name: Configure ACME domain when custom domain is used
+  ansible.builtin.command: "/snap/bin/lxc config set acme.domain {{ terrarium_lxd_domain }}"
+  when:
+    - terrarium_email | length > 0
+    - not terrarium_lxd_domain.endswith('.traefik.me')
+  changed_when: false
+
+- name: Check whether terrarium profile exists
+  ansible.builtin.command: /snap/bin/lxc profile show terrarium
+  register: terrarium_lxd_profile
+  failed_when: false
+  changed_when: false
+
+- name: Render terrarium profile
+  ansible.builtin.template:
+    src: terrarium-profile.yml.j2
+    dest: "{{ terrarium_state_dir }}/terrarium-profile.yml"
+    mode: "0600"
+
+- name: Create terrarium profile
+  ansible.builtin.command: /snap/bin/lxc profile create terrarium
+  when: terrarium_lxd_profile.rc != 0
+
+- name: Apply terrarium profile
+  ansible.builtin.shell: "/snap/bin/lxc profile edit terrarium < {{ terrarium_state_dir }}/terrarium-profile.yml"
+  args:
+    executable: /bin/bash

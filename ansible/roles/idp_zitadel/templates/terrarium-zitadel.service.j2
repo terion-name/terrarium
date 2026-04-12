@@ -1,0 +1,16 @@
+[Unit]
+Description=Terrarium self-hosted ZITADEL stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ terrarium_zitadel_dir }}
+ExecStart=/usr/bin/docker compose --project-name terrarium-zitadel -f {{ terrarium_zitadel_dir }}/docker-compose.yml up -d --wait --remove-orphans
+ExecStop=/usr/bin/docker compose --project-name terrarium-zitadel -f {{ terrarium_zitadel_dir }}/docker-compose.yml down
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

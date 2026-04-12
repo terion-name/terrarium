@@ -1,0 +1,70 @@
+- name: Install cockpit plugin build dependencies
+  ansible.builtin.apt:
+    name: "{{ terrarium_cockpit_plugin_deps }}"
+    state: present
+
+- name: Enable corepack for yarn-managed builds
+  ansible.builtin.shell: |
+    set -euo pipefail
+    npm install -g corepack
+    corepack enable
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure plugin source directory exists
+  ansible.builtin.file:
+    path: /usr/local/src
+    state: directory
+    mode: "0755"
+
+- name: Checkout cockpit-zfs source
+  ansible.builtin.git:
+    repo: "{{ terrarium_cockpit_zfs_repo }}"
+    dest: /usr/local/src/cockpit-zfs
+    version: "{{ terrarium_cockpit_zfs_ref }}"
+  register: terrarium_cockpit_zfs_checkout
+
+- name: Check cockpit-zfs install
+  ansible.builtin.stat:
+    path: /usr/share/cockpit/zfs/index.html
+  register: terrarium_cockpit_zfs_installed
+
+- name: Build and install cockpit-zfs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    corepack enable
+    make install RESTART_COCKPIT=0
+  args:
+    chdir: /usr/local/src/cockpit-zfs
+    executable: /bin/bash
+  when:
+    - terrarium_cockpit_zfs_checkout.changed or not terrarium_cockpit_zfs_installed.stat.exists
+
+- name: Checkout cockpit-S3ObjectBroswer source
+  ansible.builtin.git:
+    repo: "{{ terrarium_cockpit_s3_repo }}"
+    dest: /usr/local/src/cockpit-S3ObjectBroswer
+    version: "{{ terrarium_cockpit_s3_ref }}"
+  register: terrarium_cockpit_s3_checkout
+
+- name: Check cockpit-s3-browser install
+  ansible.builtin.stat:
+    path: /usr/share/cockpit/cockpit-s3-browser/index.html
+  register: terrarium_cockpit_s3_installed
+
+- name: Build and install cockpit-S3ObjectBroswer
+  ansible.builtin.shell: |
+    set -euo pipefail
+    corepack enable
+    make install RESTART_COCKPIT=0
+  args:
+    chdir: /usr/local/src/cockpit-S3ObjectBroswer
+    executable: /bin/bash
+  when:
+    - terrarium_cockpit_s3_checkout.changed or not terrarium_cockpit_s3_installed.stat.exists
+
+- name: Restart cockpit socket after plugin install
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    state: restarted

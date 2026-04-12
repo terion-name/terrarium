@@ -1,0 +1,93 @@
+- name: Refresh apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ terrarium_base_packages }}"
+    state: present
+
+- name: Enable snapd
+  ansible.builtin.systemd:
+    name: snapd
+    state: started
+    enabled: true
+
+- name: Create Terrarium directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/terrarium
+    - /etc/terrarium/secrets
+    - "{{ terrarium_state_dir }}"
+    - "{{ terrarium_state_dir }}/catalog"
+    - "{{ terrarium_state_dir }}/lastsnapshots"
+    - "{{ terrarium_state_dir }}/restore"
+    - /usr/local/lib/terrarium
+
+- name: Assert Terrarium compiled binaries are staged in the repo checkout
+  ansible.builtin.stat:
+    path: "{{ terrarium_repo_dir }}/dist/terrariumctl"
+  register: terrarium_compiled_cli
+
+- name: Fail when compiled binaries are missing
+  ansible.builtin.assert:
+    that:
+      - terrarium_compiled_cli.stat.exists
+    fail_msg: Compiled Terrarium binaries are missing from {{ terrarium_repo_dir }}/dist. Re-run install.sh.
+
+- name: Install terrariumctl
+  ansible.builtin.copy:
+    src: "{{ terrarium_repo_dir }}/dist/terrariumctl"
+    dest: /usr/local/bin/terrariumctl
+    mode: "0755"
+    remote_src: true
+
+- name: Persist resolved Terrarium config
+  ansible.builtin.copy:
+    content: "{{ terrarium_config_bundle | to_nice_yaml(indent=2) }}"
+    dest: "{{ terrarium_config_path }}"
+    mode: "0600"
+
+- name: Build Terrarium local hostnames list
+  ansible.builtin.set_fact:
+    terrarium_local_hostnames: >-
+      {{
+        [terrarium_manage_domain, terrarium_lxd_domain]
+        + ([terrarium_auth_domain] if terrarium_idp_mode == 'zitadel_self_hosted' else [])
+      }}
+
+- name: Ensure Terrarium domains resolve locally
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK terrarium-domains"
+    block: |
+      127.0.0.1 {{ terrarium_local_hostnames | reject('equalto', '') | unique | join(' ') }}
+  when: terrarium_local_hostnames | reject('equalto', '') | list | length > 0
+
+- name: Configure UFW default deny incoming
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Configure UFW default allow outgoing
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Allow required public ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "22"
+    - "80"
+    - "443"
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled

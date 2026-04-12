@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync LXC proxy labels into Traefik configuration
+After=traefik.service snap.lxd.daemon.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/terrariumctl proxy sync

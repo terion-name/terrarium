@@ -1,0 +1,115 @@
+- name: Install backup packages
+  ansible.builtin.apt:
+    name:
+      - awscli
+      - mbuffer
+      - sanoid
+      - zstd
+    state: present
+
+- name: Ensure backup directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/sanoid
+    - "{{ terrarium_state_dir }}/catalog"
+    - "{{ terrarium_state_dir }}/lastsnapshots"
+    - "{{ terrarium_state_dir }}/restore"
+
+- name: Render sanoid config
+  ansible.builtin.template:
+    src: sanoid.conf.j2
+    dest: /etc/sanoid/sanoid.conf
+    mode: "0644"
+
+- name: Render terrarium S3 env file
+  ansible.builtin.copy:
+    dest: /etc/terrarium/s3.env
+    mode: "0600"
+    content: |
+      AWS_ACCESS_KEY_ID={{ terrarium_s3_access_key }}
+      AWS_SECRET_ACCESS_KEY={{ terrarium_s3_secret_key }}
+      AWS_DEFAULT_REGION={{ terrarium_s3_region }}
+  when: terrarium_enable_s3
+
+- name: Install S3 backup systemd service
+  ansible.builtin.template:
+    src: terrarium-s3-backup.service.j2
+    dest: /etc/systemd/system/terrarium-s3-backup.service
+    mode: "0644"
+  when: terrarium_enable_s3
+  notify: reload systemd
+
+- name: Install S3 backup timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/terrarium-s3-backup.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run Terrarium S3 exports
+
+      [Timer]
+      OnCalendar=hourly
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  when: terrarium_enable_s3
+  notify: reload systemd
+
+- name: Enable S3 backup timer
+  ansible.builtin.systemd:
+    name: terrarium-s3-backup.timer
+    enabled: true
+    state: started
+  when: terrarium_enable_s3
+
+- name: Disable S3 backup timer when not configured
+  ansible.builtin.systemd:
+    name: terrarium-s3-backup.timer
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: not terrarium_enable_s3
+
+- name: Install syncoid service
+  ansible.builtin.template:
+    src: terrarium-syncoid.service.j2
+    dest: /etc/systemd/system/terrarium-syncoid.service
+    mode: "0644"
+  when: terrarium_enable_syncoid
+  notify: reload systemd
+
+- name: Install syncoid timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/terrarium-syncoid.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run Terrarium syncoid replication
+
+      [Timer]
+      OnCalendar=hourly
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  when: terrarium_enable_syncoid
+  notify: reload systemd
+
+- name: Enable syncoid timer
+  ansible.builtin.systemd:
+    name: terrarium-syncoid.timer
+    enabled: true
+    state: started
+  when: terrarium_enable_syncoid
+
+- name: Disable syncoid timer when not configured
+  ansible.builtin.systemd:
+    name: terrarium-syncoid.timer
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: not terrarium_enable_syncoid

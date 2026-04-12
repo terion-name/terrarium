@@ -1,0 +1,9 @@
+[Unit]
+Description=Export Terrarium ZFS snapshots to S3
+After=network-online.target snap.lxd.daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/terrarium/s3.env
+ExecStart=/usr/local/bin/terrariumctl backup export

@@ -1,0 +1,1 @@
+terrarium_loop_image_path: "{{ terrarium_state_dir }}/storage/{{ terrarium_lxd_pool_name }}.img"

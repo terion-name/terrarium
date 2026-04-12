@@ -1,0 +1,88 @@
+http:
+  middlewares:
+{% if terrarium_idp_mode == 'zitadel_self_hosted' %}
+    zitadel-root-rewrite:
+      replacePath:
+        path: /ui/v2/login/
+    zitadel-strip-api:
+      stripPrefix:
+        prefixes:
+          - /api
+        forceSlash: false
+{% endif %}
+  routers:
+    cockpit:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_manage_domain }}`)
+      service: cockpit
+      tls:
+        certResolver: letsencrypt
+{% if terrarium_idp_mode == 'zitadel_self_hosted' %}
+    zitadel-root:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_auth_domain }}`) && Path(`/`)
+      middlewares:
+        - zitadel-root-rewrite
+      service: zitadel-login
+      priority: 400
+      tls:
+        certResolver: letsencrypt
+    zitadel-login:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/ui/v2/login`)
+      service: zitadel-login
+      priority: 250
+      tls:
+        certResolver: letsencrypt
+    zitadel-api-alias:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/api`)
+      middlewares:
+        - zitadel-strip-api
+      service: zitadel-api
+      priority: 200
+      tls:
+        certResolver: letsencrypt
+    zitadel-canonical:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_auth_domain }}`) && !PathPrefix(`/ui/v2/login`) && !PathPrefix(`/api`) && !Path(`/`)
+      service: zitadel-api
+      priority: 100
+      tls:
+        certResolver: letsencrypt
+{% endif %}
+  services:
+    cockpit:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:9090
+{% if terrarium_idp_mode == 'zitadel_self_hosted' %}
+    zitadel-login:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:8083
+    zitadel-api:
+      loadBalancer:
+        servers:
+          - url: h2c://127.0.0.1:8082
+{% endif %}
+
+tcp:
+  routers:
+    lxd:
+      entryPoints:
+        - websecure
+      rule: HostSNI(`{{ terrarium_lxd_domain }}`)
+      service: lxd
+      tls:
+        passthrough: true
+  services:
+    lxd:
+      loadBalancer:
+        servers:
+          - address: 127.0.0.1:8443

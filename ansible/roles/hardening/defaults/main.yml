@@ -1,0 +1,10 @@
+sysctl_overwrite:
+  net.ipv4.ip_forward: "1"
+  net.ipv6.conf.all.forwarding: "1"
+
+os_firewall: false
+manage_ufw: false
+ssh_server_permitrootlogin: prohibit-password
+ssh_use_pam: true
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2

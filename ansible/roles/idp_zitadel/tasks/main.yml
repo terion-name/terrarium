@@ -1,0 +1,114 @@
+- name: Configure self-hosted ZITADEL
+  when: terrarium_zitadel_enabled | bool
+  block:
+    - name: Install ZITADEL runtime packages
+      ansible.builtin.apt:
+        name:
+          - docker.io
+        state: present
+
+    - name: Install Docker Compose v2 package
+      ansible.builtin.apt:
+        name: docker-compose-v2
+        state: present
+      register: terrarium_compose_v2_install
+      ignore_errors: true
+
+    - name: Install Docker Compose plugin fallback
+      ansible.builtin.apt:
+        name: docker-compose-plugin
+        state: present
+      when: terrarium_compose_v2_install is failed
+
+    - name: Enable Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create ZITADEL directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ terrarium_zitadel_dir }}"
+        - "{{ terrarium_zitadel_postgres_dir }}"
+        - "{{ terrarium_zitadel_bootstrap_dir }}"
+        - "{{ terrarium_zitadel_tf_dir }}"
+
+    - name: Generate ZITADEL master key
+      ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 > /etc/terrarium/secrets/zitadel_masterkey"
+      args:
+        creates: /etc/terrarium/secrets/zitadel_masterkey
+
+    - name: Generate ZITADEL Postgres password
+      ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48 > /etc/terrarium/secrets/zitadel_postgres_password"
+      args:
+        creates: /etc/terrarium/secrets/zitadel_postgres_password
+
+    - name: Generate ZITADEL bootstrap admin password
+      ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 > /etc/terrarium/secrets/zitadel_admin_password"
+      args:
+        creates: /etc/terrarium/secrets/zitadel_admin_password
+
+    - name: Read ZITADEL master key
+      ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_masterkey
+      register: terrarium_zitadel_masterkey_raw
+      changed_when: false
+
+    - name: Read ZITADEL Postgres password
+      ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_postgres_password
+      register: terrarium_zitadel_postgres_password_raw
+      changed_when: false
+
+    - name: Read ZITADEL bootstrap admin password
+      ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_admin_password
+      register: terrarium_zitadel_admin_password_raw
+      changed_when: false
+
+    - name: Render ZITADEL compose stack
+      ansible.builtin.template:
+        src: docker-compose.yml.j2
+        dest: "{{ terrarium_zitadel_dir }}/docker-compose.yml"
+        mode: "0600"
+      vars:
+        terrarium_zitadel_masterkey: "{{ terrarium_zitadel_masterkey_raw.stdout }}"
+        terrarium_zitadel_postgres_password: "{{ terrarium_zitadel_postgres_password_raw.stdout }}"
+        terrarium_zitadel_admin_password: "{{ terrarium_zitadel_admin_password_raw.stdout }}"
+      notify: restart terrarium zitadel
+
+    - name: Render ZITADEL Terraform config
+      ansible.builtin.template:
+        src: terraform-main.tf.j2
+        dest: "{{ terrarium_zitadel_tf_dir }}/main.tf"
+        mode: "0600"
+      notify: restart terrarium zitadel
+
+    - name: Render ZITADEL Terraform outputs
+      ansible.builtin.template:
+        src: terraform-outputs.tf.j2
+        dest: "{{ terrarium_zitadel_tf_dir }}/outputs.tf"
+        mode: "0600"
+
+    - name: Render ZITADEL systemd unit
+      ansible.builtin.template:
+        src: terrarium-zitadel.service.j2
+        dest: /etc/systemd/system/terrarium-zitadel.service
+        mode: "0644"
+      notify:
+        - reload terrarium zitadel systemd
+        - restart terrarium zitadel
+
+    - name: Flush ZITADEL handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable ZITADEL compose service
+      ansible.builtin.systemd:
+        name: terrarium-zitadel.service
+        state: started
+        enabled: true
+
+    - name: Run ZITADEL reconciliation
+      ansible.builtin.command: /usr/local/bin/terrariumctl idp sync
+      changed_when: false

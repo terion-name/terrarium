@@ -1,0 +1,29 @@
+- name: Install Cockpit
+  ansible.builtin.apt:
+    name:
+      - cockpit
+      - cockpit-packagekit
+    state: present
+
+- name: Create cockpit socket override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d
+    state: directory
+    mode: "0755"
+
+- name: Bind cockpit to loopback
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/cockpit.socket.d/override.conf
+    mode: "0644"
+    content: |
+      [Socket]
+      ListenStream=
+      ListenStream=127.0.0.1:9090
+  notify: restart cockpit
+
+- name: Enable cockpit socket
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    state: started
+    enabled: true
+    daemon_reload: true

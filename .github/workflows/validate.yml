@@ -1,0 +1,25 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+          bun install
+          bun run build
+          ansible-galaxy collection install -r requirements.yml
+      - name: Script validation
+        run: |
+          bash -n install.sh
+          test -x dist/terrariumctl
+      - name: Ansible syntax
+        run: ansible-playbook -i ansible/inventory.ini ansible/site.yml --syntax-check

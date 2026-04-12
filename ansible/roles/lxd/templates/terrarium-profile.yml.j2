@@ -1,0 +1,14 @@
+config:
+  security.idmap.isolated: "true"
+  security.nesting: "false"
+description: Terrarium baseline container profile
+devices:
+  eth0:
+    name: eth0
+    network: lxdbr0
+    type: nic
+  root:
+    path: /
+    pool: {{ terrarium_lxd_pool_name }}
+    type: disk
+name: terrarium

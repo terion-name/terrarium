@@ -1,0 +1,74 @@
+- name: Install Traefik
+  ansible.builtin.apt:
+    name: traefik
+    state: present
+
+- name: Create Traefik directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ terrarium_traefik_config_dir }}"
+    - "{{ terrarium_traefik_config_dir }}/dynamic"
+    - /var/lib/traefik
+
+- name: Create ACME storage file
+  ansible.builtin.file:
+    path: /var/lib/traefik/acme.json
+    state: touch
+    mode: "0600"
+
+- name: Render Traefik static config
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ terrarium_traefik_config_dir }}/traefik.yml"
+    mode: "0644"
+  notify: restart traefik
+
+- name: Render Traefik dynamic routes
+  ansible.builtin.template:
+    src: terrarium-dynamic.yml.j2
+    dest: "{{ terrarium_traefik_config_dir }}/dynamic/terrarium.yml"
+    mode: "0644"
+  notify: restart traefik
+
+- name: Install Traefik sync service
+  ansible.builtin.template:
+    src: terrarium-traefik-sync.service.j2
+    dest: /etc/systemd/system/terrarium-traefik-sync.service
+    mode: "0644"
+  notify: reload traefik sync timer
+
+- name: Install Traefik sync timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/terrarium-traefik-sync.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run Terrarium Traefik sync every minute
+
+      [Timer]
+      OnCalendar=*-*-* *:*:00
+      AccuracySec=1s
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  notify: reload traefik sync timer
+
+- name: Enable Traefik sync timer
+  ansible.builtin.systemd:
+    name: terrarium-traefik-sync.timer
+    state: started
+    enabled: true
+
+- name: Enable Traefik
+  ansible.builtin.systemd:
+    name: traefik
+    state: started
+    enabled: true
+
+- name: Run Traefik sync immediately
+  ansible.builtin.command: /usr/local/bin/terrariumctl proxy sync
+  changed_when: false

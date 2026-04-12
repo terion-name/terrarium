@@ -1,0 +1,18 @@
+output "issuer" {
+  value = "https://{{ terrarium_auth_domain }}/"
+}
+
+output "cockpit_client_id" {
+  value     = zitadel_application_oidc.cockpit.client_id
+  sensitive = true
+}
+
+output "cockpit_client_secret" {
+  value     = zitadel_application_oidc.cockpit.client_secret
+  sensitive = true
+}
+
+output "lxd_client_id" {
+  value     = zitadel_application_oidc.lxd.client_id
+  sensitive = true
+}

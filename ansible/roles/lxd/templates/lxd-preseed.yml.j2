@@ -1,0 +1,28 @@
+config:
+  core.https_address: 127.0.0.1:8443
+networks:
+  - name: lxdbr0
+    type: bridge
+    config:
+      ipv4.address: auto
+      ipv4.nat: "true"
+      ipv6.address: none
+storage_pools:
+  - name: {{ terrarium_lxd_pool_name }}
+    driver: zfs
+    config:
+      source: {{ terrarium_lxd_pool_name }}
+profiles:
+  - name: default
+    description: Default LXD profile
+    config: {}
+    devices:
+      eth0:
+        type: nic
+        name: eth0
+        network: lxdbr0
+      root:
+        type: disk
+        path: /
+        pool: {{ terrarium_lxd_pool_name }}
+cluster: null
