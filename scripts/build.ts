@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { mkdirSync } from "node:fs";
 
-const bun = Bun.which("bun");
+const bun = Bun.which("bun") ?? process.execPath;
 if (!bun) {
   throw new Error("bun binary not found in PATH");
 }
