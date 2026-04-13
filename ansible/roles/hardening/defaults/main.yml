@@ -1,13 +1,13 @@
-sysctl_overwrite:
+terrarium_hardening_sysctl_overwrite:
   net.ipv4.ip_forward: "1"
   net.ipv6.conf.all.forwarding: "1"
   kernel.unprivileged_userns_clone: "1"
 
-os_firewall: false
-manage_ufw: false
-ssh_permit_root_login: "without-password"
-ssh_server_password_login: false
-ssh_use_pam: true
-ssh_client_alive_interval: 300
-ssh_client_alive_count: 2
-ssh_max_auth_retries: 6
+terrarium_hardening_os_firewall: false
+terrarium_hardening_manage_ufw: false
+terrarium_hardening_ssh_permit_root_login: "without-password"
+terrarium_hardening_ssh_server_password_login: false
+terrarium_hardening_ssh_use_pam: true
+terrarium_hardening_ssh_client_alive_interval: 300
+terrarium_hardening_ssh_client_alive_count: 2
+terrarium_hardening_ssh_max_auth_retries: 6
