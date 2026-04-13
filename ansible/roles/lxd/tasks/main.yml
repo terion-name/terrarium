@@ -34,6 +34,25 @@
   ansible.builtin.command: /snap/bin/lxc config set core.https_address 127.0.0.1:8443
   changed_when: false
 
+- name: Allow LXD bridge DHCP and DNS through UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: lxdbr0
+    proto: "{{ item.proto }}"
+    port: "{{ item.port }}"
+  loop:
+    - { port: "67", proto: "udp" }
+    - { port: "53", proto: "udp" }
+    - { port: "53", proto: "tcp" }
+
+- name: Allow routed LXD bridge egress through UFW
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: lxdbr0
+    interface_out: "{{ ansible_default_ipv4.interface }}"
+
 - name: Configure ACME email when custom domain is used
   ansible.builtin.command: "/snap/bin/lxc config set acme.email {{ terrarium_email }}"
   when:
