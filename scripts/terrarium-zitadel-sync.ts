@@ -60,11 +60,11 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   }
 
   const authDomain = configString(config, "terrarium_auth_domain");
-  const zitadelDir = configString(config, "terrarium_zitadel_dir", DEFAULT_ZITADEL_DIR);
-  const bootstrapDir = configString(config, "terrarium_zitadel_bootstrap_dir", DEFAULT_BOOTSTRAP_DIR);
-  const tfDir = configString(config, "terrarium_zitadel_tf_dir", DEFAULT_TF_DIR);
-  const outputsPath = configString(config, "terrarium_zitadel_outputs_path", DEFAULT_OUTPUTS_PATH);
-  const tofuImage = configString(config, "terrarium_zitadel_tofu_image", DEFAULT_TOFU_IMAGE);
+  const zitadelDir = configString(config, "terrarium_zitadel_dir") || DEFAULT_ZITADEL_DIR;
+  const bootstrapDir = configString(config, "terrarium_zitadel_bootstrap_dir") || DEFAULT_BOOTSTRAP_DIR;
+  const tfDir = configString(config, "terrarium_zitadel_tf_dir") || DEFAULT_TF_DIR;
+  const outputsPath = configString(config, "terrarium_zitadel_outputs_path") || DEFAULT_OUTPUTS_PATH;
+  const tofuImage = configString(config, "terrarium_zitadel_tofu_image") || DEFAULT_TOFU_IMAGE;
 
   if (!authDomain) {
     throw new Error("terrarium_auth_domain is empty");
