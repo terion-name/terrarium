@@ -141,7 +141,7 @@ build_from_source() {
   (
     cd "${build_dir}/repo"
     /opt/bun/bin/bun install --frozen-lockfile || /opt/bun/bin/bun install --no-progress
-    /opt/bun/bin/bun run build
+    /opt/bun/bin/bun scripts/build.ts
   )
   TERRARIUM_BUNDLE_DIR="${build_dir}/repo" TERRARIUM_REPO_URL="${REPO_URL}" "${build_dir}/repo/dist/terrariumctl" install --ref "${source_ref}" "${FORWARD_ARGS[@]}"
 }
