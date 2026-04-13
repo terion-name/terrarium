@@ -1,1 +1,2 @@
 terrarium_traefik_config_dir: /etc/traefik
+terrarium_traefik_version: v3.6.7

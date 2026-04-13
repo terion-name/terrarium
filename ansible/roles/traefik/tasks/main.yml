@@ -1,7 +1,38 @@
-- name: Install Traefik
-  ansible.builtin.apt:
-    name: traefik
-    state: present
+- name: Map Traefik release architecture
+  ansible.builtin.set_fact:
+    terrarium_traefik_arch: >-
+      {{
+        {
+          'x86_64': 'amd64',
+          'aarch64': 'arm64'
+        }[ansible_architecture]
+      }}
+
+- name: Download Traefik release archive
+  ansible.builtin.get_url:
+    url: "https://github.com/traefik/traefik/releases/download/{{ terrarium_traefik_version }}/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
+    dest: "/tmp/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
+    mode: "0644"
+
+- name: Extract Traefik binary
+  ansible.builtin.unarchive:
+    src: "/tmp/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
+    dest: /tmp
+    remote_src: true
+
+- name: Install Traefik binary
+  ansible.builtin.copy:
+    src: /tmp/traefik
+    dest: /usr/local/bin/traefik
+    mode: "0755"
+    remote_src: true
+
+- name: Install Traefik systemd service
+  ansible.builtin.template:
+    src: traefik.service.j2
+    dest: /etc/systemd/system/traefik.service
+    mode: "0644"
+  notify: reload traefik systemd
 
 - name: Create Traefik directories
   ansible.builtin.file:
@@ -68,6 +99,7 @@
     name: traefik
     state: started
     enabled: true
+    daemon_reload: true
 
 - name: Run Traefik sync immediately
   ansible.builtin.command: /usr/local/bin/terrariumctl proxy sync

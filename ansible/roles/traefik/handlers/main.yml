@@ -1,3 +1,7 @@
+- name: reload traefik systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
 - name: restart traefik
   ansible.builtin.systemd:
     name: traefik
