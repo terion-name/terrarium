@@ -23,6 +23,7 @@
     repo: "{{ terrarium_cockpit_zfs_repo }}"
     dest: /usr/local/src/cockpit-zfs
     version: "{{ terrarium_cockpit_zfs_ref }}"
+    force: true
   register: terrarium_cockpit_zfs_checkout
 
 - name: Check cockpit-zfs install
@@ -46,6 +47,7 @@
     repo: "{{ terrarium_cockpit_s3_repo }}"
     dest: /usr/local/src/cockpit-S3ObjectBroswer
     version: "{{ terrarium_cockpit_s3_ref }}"
+    force: true
   register: terrarium_cockpit_s3_checkout
 
 - name: Check cockpit-s3-browser install
