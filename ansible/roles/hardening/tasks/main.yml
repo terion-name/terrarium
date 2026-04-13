@@ -1,7 +1,18 @@
 - name: Apply dev-sec OS hardening
   ansible.builtin.include_role:
     name: devsec.hardening.os_hardening
+  vars:
+    sysctl_overwrite: "{{ sysctl_overwrite }}"
+    os_firewall: "{{ os_firewall }}"
+    manage_ufw: "{{ manage_ufw }}"
 
 - name: Apply dev-sec SSH hardening
   ansible.builtin.include_role:
     name: devsec.hardening.ssh_hardening
+  vars:
+    ssh_permit_root_login: "{{ ssh_permit_root_login }}"
+    ssh_server_password_login: "{{ ssh_server_password_login }}"
+    ssh_use_pam: "{{ ssh_use_pam }}"
+    ssh_client_alive_interval: "{{ ssh_client_alive_interval }}"
+    ssh_client_alive_count: "{{ ssh_client_alive_count }}"
+    ssh_max_auth_retries: "{{ ssh_max_auth_retries }}"
