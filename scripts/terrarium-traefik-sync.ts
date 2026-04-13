@@ -213,7 +213,7 @@ function buildDynamicConfig(containers: LxcInstance[]): {
 
   for (const container of containers) {
     const name = container.name ?? "unknown";
-    const label = container.config?.user.proxy?.trim() ?? "";
+    const label = container.config?.["user.proxy"]?.trim() ?? "";
     if (!label) {
       continue;
     }
