@@ -53,8 +53,21 @@ export function yamlStringify(value: unknown): string {
 
 type CommandOptions = { cwd?: string; stdin?: string | Uint8Array };
 
+async function shellCommand(cmd: string[], options: CommandOptions = {}) {
+  const proc = $`${cmd}`.quiet().nothrow();
+  if (options.cwd) {
+    proc.cwd(options.cwd);
+  }
+  if (options.stdin !== undefined) {
+    const writer = proc.stdin.getWriter();
+    await writer.write(typeof options.stdin === "string" ? new TextEncoder().encode(options.stdin) : options.stdin);
+    await writer.close();
+  }
+  return await proc;
+}
+
 export async function runText(cmd: string[], prefix: string, options: CommandOptions = {}): Promise<string> {
-  const proc = await $({ cwd: options.cwd, stdin: options.stdin, stdout: "pipe", stderr: "pipe" })`${cmd}`.nothrow().quiet();
+  const proc = await shellCommand(cmd, options);
   if (proc.exitCode !== 0) {
     const stderr = proc.stderr.toString().trim();
     const rendered = stderr || `command failed: ${cmd.join(" ")}`;
@@ -72,7 +85,7 @@ export async function runAllowFailure(
   cmd: string[],
   options: CommandOptions = {}
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const proc = await $({ cwd: options.cwd, stdin: options.stdin, stdout: "pipe", stderr: "pipe" })`${cmd}`.nothrow().quiet();
+  const proc = await shellCommand(cmd, options);
   return {
     exitCode: proc.exitCode,
     stdout: proc.stdout.toString(),
