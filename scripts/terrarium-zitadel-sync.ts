@@ -1,15 +1,56 @@
 import { existsSync } from "node:fs";
-import { configString, loadConfig, readJsonFile, runText, writeIfChanged } from "./lib/common";
+import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged } from "./lib/common";
 
 const PREFIX = "terrariumctl idp sync";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
+const DEFAULT_ZITADEL_DIR = "/var/lib/terrarium/zitadel";
 const DEFAULT_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
 const DEFAULT_TF_DIR = "/var/lib/terrarium/zitadel/terraform";
 const DEFAULT_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
 const DEFAULT_TOFU_IMAGE = "ghcr.io/opentofu/opentofu:1.10.6";
+const WAIT_INTERVAL_MS = 5000;
+const WAIT_ATTEMPTS = 36;
 
 async function dockerRun(args: string[]): Promise<string> {
   return await runText(["docker", ...args], PREFIX);
+}
+
+async function waitForFile(path: string, label: string): Promise<void> {
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    if (existsSync(path)) {
+      return;
+    }
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  throw new Error(`timed out waiting for ${label}: ${path}`);
+}
+
+async function waitForApiReady(stackDir: string): Promise<void> {
+  let lastError = "";
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(
+      [
+        "docker",
+        "compose",
+        "--project-name",
+        "terrarium-zitadel",
+        "-f",
+        `${stackDir}/docker-compose.yml`,
+        "exec",
+        "-T",
+        "zitadel-api",
+        "/app/zitadel",
+        "ready"
+      ],
+      { cwd: stackDir }
+    );
+    if (result.exitCode === 0) {
+      return;
+    }
+    lastError = result.stderr.trim() || result.stdout.trim() || "container is not ready yet";
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  throw new Error(`timed out waiting for ZITADEL API readiness: ${lastError}`);
 }
 
 export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
@@ -19,6 +60,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   }
 
   const authDomain = configString(config, "terrarium_auth_domain");
+  const zitadelDir = configString(config, "terrarium_zitadel_dir", DEFAULT_ZITADEL_DIR);
   const bootstrapDir = configString(config, "terrarium_zitadel_bootstrap_dir", DEFAULT_BOOTSTRAP_DIR);
   const tfDir = configString(config, "terrarium_zitadel_tf_dir", DEFAULT_TF_DIR);
   const outputsPath = configString(config, "terrarium_zitadel_outputs_path", DEFAULT_OUTPUTS_PATH);
@@ -27,12 +69,13 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   if (!authDomain) {
     throw new Error("terrarium_auth_domain is empty");
   }
-  if (!existsSync(`${bootstrapDir}/admin-sa.json`)) {
-    throw new Error(`missing bootstrap machine key: ${bootstrapDir}/admin-sa.json`);
-  }
   if (!existsSync(tfDir)) {
     throw new Error(`terraform directory not found: ${tfDir}`);
   }
+
+  await waitForFile(`${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
+  await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
+  await waitForApiReady(zitadelDir);
 
   const commonArgs = [
     "run",

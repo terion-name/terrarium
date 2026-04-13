@@ -6,7 +6,7 @@ terrarium_zitadel_tf_dir: "{{ terrarium_zitadel_dir }}/terraform"
 terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
 terrarium_zitadel_api_port: 8082
 terrarium_zitadel_login_port: 8083
-terrarium_zitadel_version: v4.11.0
+terrarium_zitadel_version: v4.13.0
 terrarium_zitadel_postgres_image: postgres:17.2-alpine
 terrarium_zitadel_tofu_image: ghcr.io/opentofu/opentofu:1.10.6
 terrarium_zitadel_provider_version: 2.12.3
