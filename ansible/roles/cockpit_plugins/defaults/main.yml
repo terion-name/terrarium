@@ -3,6 +3,7 @@ terrarium_cockpit_plugin_deps:
   - git
   - jq
   - make
+  - moreutils
   - msmtp
   - nodejs
   - npm
