@@ -72,9 +72,9 @@ is_release_ref() {
 }
 
 resolve_latest_tag() {
-  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" |
+  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null |
     sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-    head -n1
+    head -n1 || true
 }
 
 parse_args() {
@@ -158,11 +158,10 @@ main() {
 
   if [[ -z "${REF}" ]]; then
     resolved_ref="$(resolve_latest_tag)"
-    [[ -n "${resolved_ref}" ]] || die "failed to resolve latest release tag"
-    if download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}"; then
+    if [[ -n "${resolved_ref}" ]] && download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}"; then
       exit 0
     fi
-    log "release bundle download failed; using source fallback"
+    log "release bundle is unavailable; using source fallback"
     build_from_source "${tmpdir}" "main"
     exit 0
   fi
