@@ -72,9 +72,11 @@ is_release_ref() {
 }
 
 resolve_latest_tag() {
-  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null |
-    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-    head -n1 || true
+  {
+    curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null |
+      sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+      head -n1
+  } || true
 }
 
 parse_args() {
