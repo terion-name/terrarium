@@ -1,11 +1,17 @@
 - name: Install backup packages
   ansible.builtin.apt:
     name:
-      - awscli
       - mbuffer
       - sanoid
       - zstd
     state: present
+
+- name: Install S3 backup packages
+  ansible.builtin.apt:
+    name:
+      - awscli
+    state: present
+  when: terrarium_enable_s3
 
 - name: Ensure backup directories exist
   ansible.builtin.file:
