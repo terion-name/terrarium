@@ -53,6 +53,23 @@ async function waitForApiReady(stackDir: string): Promise<void> {
   throw new Error(`timed out waiting for ZITADEL API readiness: ${lastError}`);
 }
 
+async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
+  let lastError = "";
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure([
+      "curl",
+      "-fsS",
+      `https://${authDomain}/.well-known/openid-configuration`
+    ]);
+    if (result.exitCode === 0) {
+      return;
+    }
+    lastError = result.stderr.trim() || result.stdout.trim() || "OIDC discovery is not reachable yet";
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
+}
+
 export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
   if (configString(config, "terrarium_idp_mode") !== "zitadel_self_hosted") {
@@ -76,6 +93,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   await waitForFile(`${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
   await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
   await waitForApiReady(zitadelDir);
+  await waitForHttpsDiscovery(authDomain);
 
   const commonArgs = [
     "run",

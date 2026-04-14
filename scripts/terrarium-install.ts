@@ -51,12 +51,27 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+const RESERVED_EMAIL_DOMAINS = new Set(["example.com", "example.org", "example.net"]);
+
 function info(message: string): void {
   console.log(chalk.cyan(`${PREFIX}: ${message}`));
 }
 
 function success(message: string): void {
   console.log(chalk.green(`${PREFIX}: ${message}`));
+}
+
+function validateEmail(email: string, fieldName: string): string {
+  const normalized = email.trim();
+  const match = normalized.match(/^[^@\s]+@([^@\s]+)$/);
+  if (!match) {
+    fail(`${fieldName} must be a valid email address`);
+  }
+  const domain = match[1].toLowerCase();
+  if (RESERVED_EMAIL_DOMAINS.has(domain)) {
+    fail(`${fieldName} must not use reserved example.* domains because ACME rejects them`);
+  }
+  return normalized;
 }
 
 function requireRoot(): void {
@@ -193,6 +208,24 @@ async function promptText(message: string, defaultValue = ""): Promise<string> {
   });
 }
 
+async function promptEmail(message: string, defaultValue = "", fieldName = "email"): Promise<string> {
+  return await input({
+    message,
+    default: defaultValue,
+    validate: (value) => {
+      const normalized = value.trim();
+      const match = normalized.match(/^[^@\s]+@([^@\s]+)$/);
+      if (!match) {
+        return "Enter a valid email address";
+      }
+      if (RESERVED_EMAIL_DOMAINS.has(match[1].toLowerCase())) {
+        return "Reserved example.* domains are not accepted";
+      }
+      return true;
+    }
+  }).then((value) => validateEmail(value, fieldName));
+}
+
 async function promptConfirm(message: string, defaultValue: boolean, assumeYes: boolean): Promise<boolean> {
   if (assumeYes) {
     return true;
@@ -204,7 +237,7 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   options.publicIp = await detectPublicIp(options.publicIp);
   const dashed = dashedIp(options.publicIp);
 
-  options.email = options.email || (await promptText("Email for ACME/notifications", `admin@${options.publicIp}.nip.io`));
+  options.email = options.email || (await promptEmail("Email for ACME/notifications", `admin@${options.publicIp}.nip.io`, "--email"));
   options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
 
   if (!options.domain && !options.manageDomain) {
@@ -237,7 +270,11 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
       options.authDomain ||
       (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
     options.authDomain = await promptText("ZITADEL auth domain", options.authDomain);
-    options.zitadelAdminEmail = await promptText("ZITADEL bootstrap admin email", options.zitadelAdminEmail || options.email);
+    options.zitadelAdminEmail = await promptEmail(
+      "ZITADEL bootstrap admin email",
+      options.zitadelAdminEmail || options.email,
+      "--zitadel-admin-email"
+    );
   } else {
     options.idpMode = "none";
     options.authDomain = "";
@@ -314,10 +351,12 @@ function validateNonInteractive(options: InstallOptions): void {
   if (!options.email) {
     fail("--email is required in non-interactive mode");
   }
+  options.email = validateEmail(options.email, "--email");
 
   if (options.idpMode === "zitadel_self_hosted") {
     options.authDomain = options.authDomain || (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
     options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
+    options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
   } else {
     options.authDomain = "";
   }

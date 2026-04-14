@@ -41,7 +41,7 @@ Non-interactive:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/terion-name/terrarium/refs/heads/main/install.sh | bash -s -- \
   --non-interactive \
-  --email admin@example.com \
+  --email admin@your-domain.tld \
   --idp-mode zitadel-self-hosted \
   --storage-mode loop \
   --yes

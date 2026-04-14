@@ -9,8 +9,6 @@ terraform {
 
 provider "zitadel" {
   domain           = "{{ terrarium_auth_domain }}"
-  insecure         = true
-  port             = "{{ terrarium_zitadel_api_port }}"
   jwt_profile_file = "/secrets/admin-sa.json"
 }
 
