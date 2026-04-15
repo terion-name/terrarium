@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged } from "./lib/common";
 
@@ -90,6 +90,15 @@ async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
   throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
 }
 
+function terraformResourceCount(tfDir: string): number {
+  const statePath = join(tfDir, "terraform.tfstate");
+  if (!existsSync(statePath)) {
+    return 0;
+  }
+  const state = readJsonFile<Record<string, unknown>>(statePath, {});
+  return Array.isArray(state.resources) ? state.resources.length : 0;
+}
+
 function recoverTerraformState(tfDir: string): void {
   const statePath = join(tfDir, "terraform.tfstate");
   const backupPath = join(tfDir, "terraform.tfstate.backup");
@@ -103,6 +112,62 @@ function recoverTerraformState(tfDir: string): void {
   const backupResources = Array.isArray(backup.resources) ? backup.resources.length : 0;
   if (stateResources === 0 && backupResources > 0) {
     copyFileSync(backupPath, statePath);
+  }
+}
+
+type ZitadelProject = { id: string; name: string };
+type ZitadelApp = { id: string; name: string };
+
+async function zitadelApi<T>(authDomain: string, pat: string, path: string): Promise<T> {
+  const stdout = await runText(
+    [
+      "curl",
+      "-fsS",
+      "-X",
+      "POST",
+      "-H",
+      `Authorization: Bearer ${pat}`,
+      "-H",
+      "Content-Type: application/json",
+      `https://${authDomain}${path}`,
+      "-d",
+      "{}"
+    ],
+    PREFIX
+  );
+  return JSON.parse(stdout) as T;
+}
+
+async function importExistingResources(commonArgs: string[], authDomain: string, bootstrapDir: string, tfDir: string): Promise<void> {
+  if (terraformResourceCount(tfDir) > 0) {
+    return;
+  }
+
+  const patPath = join(bootstrapDir, "admin-sa.pat");
+  if (!existsSync(patPath)) {
+    return;
+  }
+  const pat = readFileSync(patPath, "utf8").trim();
+  if (!pat) {
+    return;
+  }
+
+  const projects = await zitadelApi<{ result?: ZitadelProject[] }>(authDomain, pat, "/management/v1/projects/_search");
+  const project = (projects.result ?? []).find((entry) => entry.name === "Terrarium");
+  if (!project) {
+    return;
+  }
+
+  await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_project.terrarium", project.id]);
+  const apps = await zitadelApi<{ result?: ZitadelApp[] }>(authDomain, pat, `/management/v1/projects/${project.id}/apps/_search`);
+  const byName = new Map((apps.result ?? []).map((entry) => [entry.name, entry.id]));
+  const lxdId = byName.get("terrarium-lxd");
+  const cockpitId = byName.get("terrarium-cockpit");
+  if (lxdId) {
+    await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.lxd", `${lxdId}:${project.id}`]);
+  }
+  if (cockpitId) {
+    await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.cockpit", `${cockpitId}:${project.id}`]);
   }
 }
 
@@ -149,6 +214,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   ];
 
   await dockerRunWithRetry([...commonArgs, "init", "-input=false"], "OpenTofu init");
+  await importExistingResources(commonArgs, authDomain, bootstrapDir, tfDir);
   await dockerRunWithRetry([...commonArgs, "apply", "-input=false", "-auto-approve"], "OpenTofu apply");
   const outputsJson = await dockerRun([...commonArgs, "output", "-json"]);
   writeIfChanged(outputsPath, outputsJson.endsWith("\n") ? outputsJson : `${outputsJson}\n`);
