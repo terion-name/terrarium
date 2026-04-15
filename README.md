@@ -1,5 +1,11 @@
 # Terrarium
 
+<p align="center">
+    <picture>
+        <img src="https://raw.githubusercontent.com/terion-name/terrarium/main/assets/banner.webp" alt="Terrarium" width="500">
+    </picture>
+</p>
+
 Terrarium turns a plain Ubuntu 24.04 VPS into something much more useful: a secure, rewindable home for isolated environments. It is designed for the way people actually work with agents and development tools today, where giving software real freedom is powerful, but giving it unlimited freedom on your host is a bad idea.
 
 If you want to run agent systems like OpenClaw, Hermes, or other tools that need full shell access, custom packages, background services, and room to experiment, Terrarium gives them their own LXD containers on ZFS. That means they can operate inside real environments instead of cramped Docker setups, while the host stays hardened and recoverable. When an agent makes a mess, installs the wrong thing, or mutates a system beyond recognition, you can rewind the container state in small steps instead of rebuilding everything from scratch.
