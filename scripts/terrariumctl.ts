@@ -277,7 +277,11 @@ async function reconfigureCmd(): Promise<void> {
   if (!existsSync("/opt/terrarium/dist/terrariumctl")) {
     throw new Error("compiled Terrarium binaries are missing from /opt/terrarium/dist; rerun install.sh");
   }
-  await runText(["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`], PREFIX);
+  await runText(
+    ["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`],
+    PREFIX,
+    { cwd: "/opt/terrarium" }
+  );
 }
 
 async function setDomainsCmd(
