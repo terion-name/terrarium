@@ -25,6 +25,10 @@ type LxcInstance = {
   };
 };
 
+type LxcState = {
+  network?: Record<string, LxcNetwork>;
+};
+
 type DesiredPort = {
   proto: "tcp" | "udp";
   port: number;
@@ -84,6 +88,35 @@ function parseProxyItem(item: string):
 
 function loadUfwState(): DesiredPort[] {
   return readJsonFile<DesiredPort[]>(UFW_STATE_PATH, []);
+}
+
+async function enrichInstanceState(containers: LxcInstance[]): Promise<LxcInstance[]> {
+  const enriched: LxcInstance[] = [];
+
+  for (const container of containers) {
+    if (container.state?.network || !container.name) {
+      enriched.push(container);
+      continue;
+    }
+
+    const response = await runAllowFailure(["lxc", "query", `/1.0/instances/${container.name}/state`]);
+    if (response.exitCode !== 0) {
+      enriched.push(container);
+      continue;
+    }
+
+    try {
+      const state = JSON.parse(response.stdout || "{}") as LxcState;
+      enriched.push({
+        ...container,
+        state
+      });
+    } catch {
+      enriched.push(container);
+    }
+  }
+
+  return enriched;
 }
 
 async function ensureUfwRule(proto: "tcp" | "udp", port: number): Promise<void> {
@@ -340,7 +373,7 @@ function buildDynamicConfig(containers: LxcInstance[]): {
 
 export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
-  const containers = await runJson<LxcInstance[]>(["lxc", "list", "-f", "json"], PREFIX);
+  const containers = await enrichInstanceState(await runJson<LxcInstance[]>(["lxc", "list", "-f", "json"], PREFIX));
   const { dynamicYaml, extraEntrypoints, ufwPorts, errors } = buildDynamicConfig(containers);
   const staticYaml = buildStaticConfig(config, extraEntrypoints);
 
