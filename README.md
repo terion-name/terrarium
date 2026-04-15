@@ -1,8 +1,15 @@
 # Terrarium
 
-Terrarium bootstraps a single Ubuntu 24.04 VPS into a ZFS-backed LXD host for isolated workloads.
+Terrarium turns a plain Ubuntu 24.04 VPS into something much more useful: a secure, rewindable home for isolated environments. It is designed for the way people actually work with agents and development tools today, where giving software real freedom is powerful, but giving it unlimited freedom on your host is a bad idea.
 
-The intended entrypoint is:
+If you want to run agent systems like OpenClaw, Hermes, or other tools that need full shell access, custom packages, background services, and room to experiment, Terrarium gives them their own LXD containers on ZFS. That means they can operate inside real environments instead of cramped Docker setups, while the host stays hardened and recoverable. When an agent makes a mess, installs the wrong thing, or mutates a system beyond recognition, you can rewind the container state in small steps instead of rebuilding everything from scratch.
+
+Terrarium is just as useful for human workflows. You can spin up development environments, temporary sandboxes, internal tools, or web-based apps like browser-accessible editors and agent UIs, then expose them through Traefik with automatic proxying and TLS. Each environment stays isolated, configurable, and easy to back up, so you get the flexibility of a full VPS without turning the whole server into a shared blast radius.
+
+The goal is simple: make a single VPS feel safe enough for experimentation, capable enough for real work, and forgiving enough that you can move fast without being one bad command away from starting over.
+
+
+## Install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/terion-name/terrarium/refs/heads/main/install.sh | bash
