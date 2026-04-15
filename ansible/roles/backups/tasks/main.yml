@@ -11,7 +11,66 @@
     name:
       - awscli
     state: present
+  register: terrarium_awscli_apt_install
+  ignore_errors: true
   when: terrarium_enable_s3
+
+- name: Map AWS CLI fallback architecture
+  ansible.builtin.set_fact:
+    terrarium_awscli_arch: >-
+      {{
+        {
+          'x86_64': 'x86_64',
+          'amd64': 'x86_64',
+          'aarch64': 'aarch64',
+          'arm64': 'aarch64'
+        }[ansible_architecture] | default(ansible_architecture)
+      }}
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
+- name: Install AWS CLI fallback prerequisites
+  ansible.builtin.apt:
+    name:
+      - unzip
+    state: present
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
+- name: Download AWS CLI v2 fallback archive
+  ansible.builtin.get_url:
+    url: "https://awscli.amazonaws.com/awscli-exe-linux-{{ terrarium_awscli_arch }}.zip"
+    dest: "/tmp/awscliv2-{{ terrarium_awscli_arch }}.zip"
+    mode: "0644"
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
+- name: Remove extracted AWS CLI fallback directory
+  ansible.builtin.file:
+    path: /tmp/awscliv2
+    state: absent
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
+- name: Extract AWS CLI v2 fallback archive
+  ansible.builtin.unarchive:
+    src: "/tmp/awscliv2-{{ terrarium_awscli_arch }}.zip"
+    dest: /tmp
+    remote_src: true
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
+- name: Install AWS CLI v2 fallback
+  ansible.builtin.command:
+    cmd: /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
 
 - name: Ensure backup directories exist
   ansible.builtin.file:
