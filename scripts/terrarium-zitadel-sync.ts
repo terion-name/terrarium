@@ -15,6 +15,25 @@ async function dockerRun(args: string[]): Promise<string> {
   return await runText(["docker", ...args], PREFIX);
 }
 
+async function dockerRunWithRetry(args: string[], label: string): Promise<string> {
+  let lastError = "";
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(["docker", ...args]);
+    if (result.exitCode === 0) {
+      return result.stdout;
+    }
+    const stderr = result.stderr.trim();
+    const stdout = result.stdout.trim();
+    lastError = stderr || stdout || `${label} failed`;
+    const combined = `${stdout}\n${stderr}`;
+    if (!combined.includes("issuer does not match")) {
+      throw new Error(lastError);
+    }
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  throw new Error(`timed out waiting for ${label}: ${lastError}`);
+}
+
 async function waitForFile(path: string, label: string): Promise<void> {
   for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
     if (existsSync(path)) {
@@ -111,8 +130,8 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
     tofuImage
   ];
 
-  await dockerRun([...commonArgs, "init", "-input=false"]);
-  await dockerRun([...commonArgs, "apply", "-input=false", "-auto-approve"]);
+  await dockerRunWithRetry([...commonArgs, "init", "-input=false"], "OpenTofu init");
+  await dockerRunWithRetry([...commonArgs, "apply", "-input=false", "-auto-approve"], "OpenTofu apply");
   const outputsJson = await dockerRun([...commonArgs, "output", "-json"]);
   writeIfChanged(outputsPath, outputsJson.endsWith("\n") ? outputsJson : `${outputsJson}\n`);
 
