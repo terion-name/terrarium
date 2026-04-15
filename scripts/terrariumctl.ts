@@ -1,7 +1,7 @@
 import { confirm, input } from "@inquirer/prompts";
 import { cac } from "cac";
 import chalk from "chalk";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
 import { normalizeOidcIssuer, registerInstallCommand, validateEmail } from "./terrarium-install";
 import { backupExportCmd } from "./terrarium-s3-export";
@@ -50,7 +50,7 @@ function requireConfig(): Record<string, unknown> {
 }
 
 function loadMutableConfig(): Record<string, unknown> {
-  return parse(Bun.file(CONFIG_PATH).textSync()) as Record<string, unknown>;
+  return parse(readFileSync(CONFIG_PATH, "utf8")) as Record<string, unknown>;
 }
 
 function oidcIssuer(config: Record<string, unknown>): string {
