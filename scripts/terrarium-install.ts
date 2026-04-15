@@ -2,7 +2,7 @@ import { $ } from "bun";
 import { confirm, input, select } from "@inquirer/prompts";
 import type { CAC } from "cac";
 import chalk from "chalk";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
@@ -138,6 +138,15 @@ function syncBundleArtifacts(bundleDir: string, repoDir: string): void {
   cpSync(sourceDir, join(repoDir, "dist"), { recursive: true, force: true });
 }
 
+function stageRunningBinary(repoDir: string): void {
+  if (!process.execPath || !existsSync(process.execPath)) {
+    return;
+  }
+  const targetDir = join(repoDir, "dist");
+  mkdirSync(targetDir, { recursive: true });
+  copyFileSync(process.execPath, join(targetDir, "terrariumctl"));
+}
+
 function localSourcePath(repoUrl: string): string {
   if (repoUrl.startsWith("file://")) {
     return repoUrl.slice("file://".length);
@@ -177,6 +186,9 @@ async function prepareRepo(ref: string): Promise<void> {
   }
 
   syncBundleArtifacts(BUNDLE_DIR, REPO_DIR);
+  if (!existsSync(join(REPO_DIR, "dist", "terrariumctl"))) {
+    stageRunningBinary(REPO_DIR);
+  }
   if (!existsSync(join(REPO_DIR, "dist", "terrariumctl"))) {
     fail("compiled Terrarium binaries are missing from the repository checkout");
   }
