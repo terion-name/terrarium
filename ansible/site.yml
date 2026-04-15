@@ -16,7 +16,7 @@
     terrarium_lxd_domain: "{{ ('lxd.' ~ terrarium_root_domain) if terrarium_root_domain else ('lxd.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me') }}"
     terrarium_idp_mode: oidc
     terrarium_auth_domain: "{{ (('auth.' ~ terrarium_root_domain) if terrarium_root_domain else ('auth.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me')) if terrarium_idp_mode == 'local' else '' }}"
-    terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain ~ '/') if terrarium_idp_mode == 'local' else '' }}"
+    terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain) if terrarium_idp_mode == 'local' else '' }}"
     terrarium_oidc_client_id: ""
     terrarium_oidc_client_secret: ""
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
