@@ -166,7 +166,7 @@ async function prepareRepo(ref: string): Promise<void> {
   if (sourcePath && existsSync(join(sourcePath, "ansible", "site.yml"))) {
     info(`syncing local Terrarium source from ${sourcePath}`);
     syncLocalSourceRepo(sourcePath, REPO_DIR);
-  } else if (existsSync(join(REPO_DIR, "ansible", "site.yml"))) {
+  } else if (existsSync(join(REPO_DIR, ".git"))) {
     info(`updating existing checkout in ${REPO_DIR}`);
     await $`git -C ${REPO_DIR} fetch --tags origin`;
     await $`git -C ${REPO_DIR} checkout ${ref}`;
