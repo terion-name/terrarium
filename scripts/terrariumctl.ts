@@ -74,6 +74,16 @@ function setConfigValue(config: Record<string, unknown>, key: string, value: unk
   config[key] = value;
 }
 
+function cliOption(options: Record<string, unknown>, key: string, aliases: string[] = []): string | undefined {
+  for (const candidate of [key, ...aliases]) {
+    const value = options[candidate];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 async function persistAndReconcile(config: Record<string, unknown>, summary: string): Promise<void> {
   writeFileSync(CONFIG_PATH, stringify(config), "utf8");
   await reconfigureCmd();
@@ -531,53 +541,54 @@ cli
   .option("--disable", "Disable the selected integration")
   .usage("set domains [rootDomain] | set emails | set idp local|oidc | set s3 | set syncoid")
   .action(async (section, value, options) => {
+    const cliOptions = options as Record<string, unknown>;
     if (section === "domains") {
       await setDomainsCmd((value as string | undefined) || "", {
-        manageDomain: options.manageDomain as string | undefined,
-        lxdDomain: options.lxdDomain as string | undefined,
-        authDomain: options.authDomain as string | undefined
+        manageDomain: cliOption(cliOptions, "manageDomain"),
+        lxdDomain: cliOption(cliOptions, "lxdDomain"),
+        authDomain: cliOption(cliOptions, "authDomain")
       });
       return;
     }
     if (section === "emails") {
       await setEmailsCmd({
-        email: options.email as string | undefined,
-        acmeEmail: options.acmeEmail as string | undefined,
-        zitadelAdminEmail: options.zitadelAdminEmail as string | undefined
+        email: cliOption(cliOptions, "email"),
+        acmeEmail: cliOption(cliOptions, "acmeEmail"),
+        zitadelAdminEmail: cliOption(cliOptions, "zitadelAdminEmail")
       });
       return;
     }
     if (section === "idp") {
       await setIdpCmd({
         mode: value as string,
-        authDomain: options.authDomain as string | undefined,
-        oidc: options.oidc as string | undefined,
-        oidcClient: options.oidcClient as string | undefined,
-        oidcSecret: options.oidcSecret as string | undefined,
-        zitadelAdminEmail: options.zitadelAdminEmail as string | undefined
+        authDomain: cliOption(cliOptions, "authDomain"),
+        oidc: cliOption(cliOptions, "oidc"),
+        oidcClient: cliOption(cliOptions, "oidcClient"),
+        oidcSecret: cliOption(cliOptions, "oidcSecret"),
+        zitadelAdminEmail: cliOption(cliOptions, "zitadelAdminEmail")
       });
       return;
     }
     if (section === "s3") {
       await setS3Cmd({
-        enable: Boolean(options.enable),
-        disable: Boolean(options.disable),
-        s3Endpoint: options.s3Endpoint as string | undefined,
-        s3Bucket: options.s3Bucket as string | undefined,
-        s3Region: options.s3Region as string | undefined,
-        s3Prefix: options.s3Prefix as string | undefined,
-        s3AccessKey: options.s3AccessKey as string | undefined,
-        s3SecretKey: options.s3SecretKey as string | undefined
+        enable: Boolean(cliOptions.enable),
+        disable: Boolean(cliOptions.disable),
+        s3Endpoint: cliOption(cliOptions, "s3Endpoint", ["s3-endpoint"]),
+        s3Bucket: cliOption(cliOptions, "s3Bucket", ["s3-bucket"]),
+        s3Region: cliOption(cliOptions, "s3Region", ["s3-region"]),
+        s3Prefix: cliOption(cliOptions, "s3Prefix", ["s3-prefix"]),
+        s3AccessKey: cliOption(cliOptions, "s3AccessKey", ["s3-accessKey", "s3-access-key"]),
+        s3SecretKey: cliOption(cliOptions, "s3SecretKey", ["s3-secretKey", "s3-secret-key"])
       });
       return;
     }
     if (section === "syncoid") {
       await setSyncoidCmd({
-        enable: Boolean(options.enable),
-        disable: Boolean(options.disable),
-        syncoidTarget: options.syncoidTarget as string | undefined,
-        syncoidTargetDataset: options.syncoidTargetDataset as string | undefined,
-        syncoidSshKey: options.syncoidSshKey as string | undefined
+        enable: Boolean(cliOptions.enable),
+        disable: Boolean(cliOptions.disable),
+        syncoidTarget: cliOption(cliOptions, "syncoidTarget"),
+        syncoidTargetDataset: cliOption(cliOptions, "syncoidTargetDataset"),
+        syncoidSshKey: cliOption(cliOptions, "syncoidSshKey")
       });
       return;
     }

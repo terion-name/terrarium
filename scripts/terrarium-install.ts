@@ -591,6 +591,16 @@ function defaultOptions(): InstallOptions {
   };
 }
 
+function readCliOption(rawOptions: Record<string, unknown>, key: string, aliases: string[] = []): string {
+  for (const candidate of [key, ...aliases]) {
+    const value = rawOptions[candidate];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return "";
+}
+
 async function installTerrarium(options: InstallOptions): Promise<void> {
   requireRoot();
   ensureOs();
@@ -657,35 +667,36 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset")
     .option("--syncoid-ssh-key <path>", "SSH key path for syncoid")
     .action(async (rawOptions) => {
+      const cliOptions = rawOptions as Record<string, unknown>;
       const options = defaultOptions();
-      options.ref = (rawOptions.ref as string | undefined) || options.ref;
-      options.mode = rawOptions.nonInteractive ? "non-interactive" : "interactive";
-      options.assumeYes = Boolean(rawOptions.yes);
-      options.email = (rawOptions.email as string | undefined) ?? "";
-      options.acmeEmail = (rawOptions.acmeEmail as string | undefined) ?? "";
-      options.domain = (rawOptions.domain as string | undefined) ?? "";
-      options.manageDomain = (rawOptions.manageDomain as string | undefined) ?? "";
-      options.lxdDomain = (rawOptions.lxdDomain as string | undefined) ?? "";
-      options.idpMode = ((rawOptions.idp as string | undefined) ?? "").trim().toLowerCase() as IdpMode | "";
-      options.oidcIssuer = (rawOptions.oidc as string | undefined) ?? "";
-      options.oidcClientId = (rawOptions.oidcClient as string | undefined) ?? "";
-      options.oidcClientSecret = (rawOptions.oidcSecret as string | undefined) ?? "";
-      options.authDomain = (rawOptions.authDomain as string | undefined) ?? "";
-      options.zitadelAdminEmail = (rawOptions.zitadelAdminEmail as string | undefined) ?? "";
-      options.storageMode = ((rawOptions.storageMode as string | undefined) ?? "").replace("loop", "file");
-      options.storageSource = (rawOptions.storageSource as string | undefined) ?? "";
-      options.storageSize = (rawOptions.storageSize as string | undefined) ?? "";
-      options.enableS3 = Boolean(rawOptions.enableS3);
-      options.s3Endpoint = (rawOptions.s3Endpoint as string | undefined) ?? "";
-      options.s3Bucket = (rawOptions.s3Bucket as string | undefined) ?? "";
-      options.s3Region = (rawOptions.s3Region as string | undefined) ?? "";
-      options.s3Prefix = (rawOptions.s3Prefix as string | undefined) ?? options.s3Prefix;
-      options.s3AccessKey = (rawOptions.s3AccessKey as string | undefined) ?? "";
-      options.s3SecretKey = (rawOptions.s3SecretKey as string | undefined) ?? "";
-      options.enableSyncoid = Boolean(rawOptions.enableSyncoid);
-      options.syncoidTarget = (rawOptions.syncoidTarget as string | undefined) ?? "";
-      options.syncoidTargetDataset = (rawOptions.syncoidTargetDataset as string | undefined) ?? "";
-      options.syncoidSshKey = (rawOptions.syncoidSshKey as string | undefined) ?? "";
+      options.ref = readCliOption(cliOptions, "ref") || options.ref;
+      options.mode = Boolean(cliOptions.nonInteractive) ? "non-interactive" : "interactive";
+      options.assumeYes = Boolean(cliOptions.yes);
+      options.email = readCliOption(cliOptions, "email");
+      options.acmeEmail = readCliOption(cliOptions, "acmeEmail");
+      options.domain = readCliOption(cliOptions, "domain");
+      options.manageDomain = readCliOption(cliOptions, "manageDomain");
+      options.lxdDomain = readCliOption(cliOptions, "lxdDomain");
+      options.idpMode = readCliOption(cliOptions, "idp").trim().toLowerCase() as IdpMode | "";
+      options.oidcIssuer = readCliOption(cliOptions, "oidc");
+      options.oidcClientId = readCliOption(cliOptions, "oidcClient");
+      options.oidcClientSecret = readCliOption(cliOptions, "oidcSecret");
+      options.authDomain = readCliOption(cliOptions, "authDomain");
+      options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail");
+      options.storageMode = readCliOption(cliOptions, "storageMode").replace("loop", "file");
+      options.storageSource = readCliOption(cliOptions, "storageSource");
+      options.storageSize = readCliOption(cliOptions, "storageSize");
+      options.enableS3 = Boolean(cliOptions.enableS3);
+      options.s3Endpoint = readCliOption(cliOptions, "s3Endpoint", ["s3-endpoint"]);
+      options.s3Bucket = readCliOption(cliOptions, "s3Bucket", ["s3-bucket"]);
+      options.s3Region = readCliOption(cliOptions, "s3Region", ["s3-region"]);
+      options.s3Prefix = readCliOption(cliOptions, "s3Prefix", ["s3-prefix"]) || options.s3Prefix;
+      options.s3AccessKey = readCliOption(cliOptions, "s3AccessKey", ["s3-accessKey", "s3-access-key"]);
+      options.s3SecretKey = readCliOption(cliOptions, "s3SecretKey", ["s3-secretKey", "s3-secret-key"]);
+      options.enableSyncoid = Boolean(cliOptions.enableSyncoid);
+      options.syncoidTarget = readCliOption(cliOptions, "syncoidTarget");
+      options.syncoidTargetDataset = readCliOption(cliOptions, "syncoidTargetDataset");
+      options.syncoidSshKey = readCliOption(cliOptions, "syncoidSshKey");
       await installTerrarium(options);
     });
 }
