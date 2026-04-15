@@ -153,6 +153,14 @@ async function backupListCmd(): Promise<void> {
   const bucket = configString(config, "terrarium_s3_bucket");
   const prefix = configString(config, "terrarium_s3_prefix", "terrarium");
   const endpoint = configString(config, "terrarium_s3_endpoint");
+  const awsEnv: Record<string, string> = {};
+  const accessKey = configString(config, "terrarium_s3_access_key");
+  const secretKey = configString(config, "terrarium_s3_secret_key");
+  const region = configString(config, "terrarium_s3_region", "us-east-1");
+  if (accessKey) awsEnv.AWS_ACCESS_KEY_ID = accessKey;
+  if (secretKey) awsEnv.AWS_SECRET_ACCESS_KEY = secretKey;
+  if (region) awsEnv.AWS_DEFAULT_REGION = region;
+  awsEnv.AWS_EC2_METADATA_DISABLED = "true";
   const awsBase = ["aws"];
   if (endpoint) {
     awsBase.push("--endpoint-url", endpoint);
@@ -170,7 +178,9 @@ async function backupListCmd(): Promise<void> {
 
   if (configBoolean(config, "terrarium_enable_s3") && bucket) {
     console.log(`\n${heading("S3 manifests")}`);
-    const output = (await runAllowFailure([...awsBase, "s3", "ls", `s3://${bucket}/${prefix}/manifests/`, "--recursive"])).stdout.trim();
+    const output = (
+      await runAllowFailure([...awsBase, "s3", "ls", `s3://${bucket}/${prefix}/manifests/`, "--recursive"], { env: awsEnv })
+    ).stdout.trim();
     if (output) {
       console.log(output);
     }

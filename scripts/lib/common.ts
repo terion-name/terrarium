@@ -51,12 +51,15 @@ export function yamlStringify(value: unknown): string {
   return stringify(value);
 }
 
-type CommandOptions = { cwd?: string; stdin?: string | Uint8Array };
+type CommandOptions = { cwd?: string; stdin?: string | Uint8Array; env?: Record<string, string> };
 
 async function shellCommand(cmd: string[], options: CommandOptions = {}) {
   const proc = $`${cmd}`.quiet().nothrow();
   if (options.cwd) {
     proc.cwd(options.cwd);
+  }
+  if (options.env) {
+    proc.env(options.env);
   }
   if (options.stdin !== undefined) {
     const writer = proc.stdin.getWriter();
@@ -76,7 +79,7 @@ export async function runText(cmd: string[], prefix: string, options: CommandOpt
   return proc.stdout.toString();
 }
 
-export async function runJson<T>(cmd: string[], prefix: string, options: { cwd?: string } = {}): Promise<T> {
+export async function runJson<T>(cmd: string[], prefix: string, options: { cwd?: string; env?: Record<string, string> } = {}): Promise<T> {
   const stdout = await runText(cmd, prefix, options);
   return JSON.parse(stdout || "null") as T;
 }
@@ -93,8 +96,8 @@ export async function runAllowFailure(
   };
 }
 
-export async function runShell(command: string, prefix: string, cwd?: string): Promise<void> {
-  await runText(["bash", "-lc", command], prefix, { cwd });
+export async function runShell(command: string, prefix: string, options: { cwd?: string; env?: Record<string, string> } = {}): Promise<void> {
+  await runText(["bash", "-lc", command], prefix, options);
 }
 
 export async function runInteractive(cmd: string[], prefix: string, options: { cwd?: string } = {}): Promise<void> {

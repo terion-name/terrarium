@@ -12,6 +12,18 @@ type Manifest = {
   created_at: string;
 };
 
+function s3Env(config: Record<string, unknown>): Record<string, string> {
+  const env: Record<string, string> = {};
+  const accessKey = configString(config, "terrarium_s3_access_key");
+  const secretKey = configString(config, "terrarium_s3_secret_key");
+  const region = configString(config, "terrarium_s3_region", "us-east-1");
+  if (accessKey) env.AWS_ACCESS_KEY_ID = accessKey;
+  if (secretKey) env.AWS_SECRET_ACCESS_KEY = secretKey;
+  if (region) env.AWS_DEFAULT_REGION = region;
+  env.AWS_EC2_METADATA_DISABLED = "true";
+  return env;
+}
+
 function selectChain(directory: string, match = ""): Manifest[] {
   const manifests: Manifest[] = [];
   for (const entry of new Bun.Glob("*.json").scanSync(directory)) {
@@ -45,6 +57,7 @@ export async function reconstructFromS3(instance: string, at: string, targetData
   const bucket = configString(config, "terrarium_s3_bucket");
   const endpoint = configString(config, "terrarium_s3_endpoint");
   const prefix = configString(config, "terrarium_s3_prefix", "terrarium");
+  const awsEnv = s3Env(config);
   const awsBase = ["aws"];
   if (endpoint) {
     awsBase.push("--endpoint-url", endpoint);
@@ -52,7 +65,9 @@ export async function reconstructFromS3(instance: string, at: string, targetData
 
   const tempDir = makeTempDir("terrarium-restore.");
   try {
-    await runText([...awsBase, "s3", "cp", `s3://${bucket}/${prefix}/manifests/${instance}/`, `${tempDir}/`, "--recursive"], PREFIX);
+    await runText([...awsBase, "s3", "cp", `s3://${bucket}/${prefix}/manifests/${instance}/`, `${tempDir}/`, "--recursive"], PREFIX, {
+      env: awsEnv
+    });
     const chain = selectChain(tempDir, at);
 
     const datasetCheck = await runAllowFailure(["zfs", "list", "-H", targetDataset]);
@@ -63,7 +78,8 @@ export async function reconstructFromS3(instance: string, at: string, targetData
     for (const manifest of chain) {
       await runShell(
         `${awsBase.map(shellEscape).join(" ")} s3 cp ${shellEscape(`s3://${bucket}/${manifest.object_key}`)} - | zstd -d | zfs receive -F ${shellEscape(targetDataset)}`,
-        PREFIX
+        PREFIX,
+        { env: awsEnv }
       );
     }
   } finally {

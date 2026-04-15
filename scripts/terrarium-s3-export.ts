@@ -11,6 +11,18 @@ type LxcInstance = {
   type?: string;
 };
 
+function s3Env(config: Record<string, unknown>): Record<string, string> {
+  const env: Record<string, string> = {};
+  const accessKey = configString(config, "terrarium_s3_access_key");
+  const secretKey = configString(config, "terrarium_s3_secret_key");
+  const region = configString(config, "terrarium_s3_region", "us-east-1");
+  if (accessKey) env.AWS_ACCESS_KEY_ID = accessKey;
+  if (secretKey) env.AWS_SECRET_ACCESS_KEY = secretKey;
+  if (region) env.AWS_DEFAULT_REGION = region;
+  env.AWS_EC2_METADATA_DISABLED = "true";
+  return env;
+}
+
 async function latestSnapshot(dataset: string): Promise<string> {
   const stdout = await runText(["zfs", "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation"], PREFIX);
   let latest = "";
@@ -36,6 +48,7 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
   const endpoint = configString(config, "terrarium_s3_endpoint");
   const prefix = configString(config, "terrarium_s3_prefix", "terrarium");
   const pool = configString(config, "terrarium_lxd_pool_name", "terrarium");
+  const awsEnv = s3Env(config);
   const awsBase = ["aws"];
   if (endpoint) {
     awsBase.push("--endpoint-url", endpoint);
@@ -76,7 +89,8 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
 
     await runShell(
       `${streamSource} | zstd -T0 | ${awsBase.map(shellEscape).join(" ")} s3 cp - ${shellEscape(`s3://${bucket}/${objectKey}`)}`,
-      PREFIX
+      PREFIX,
+      { env: awsEnv }
     );
 
     const manifest = {
@@ -89,7 +103,7 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
       created_at: new Date().toISOString()
     };
     writeJsonFile(manifestPath, manifest);
-    await runText([...awsBase, "s3", "cp", manifestPath, `s3://${bucket}/${manifestKey}`], PREFIX);
+    await runText([...awsBase, "s3", "cp", manifestPath, `s3://${bucket}/${manifestKey}`], PREFIX, { env: awsEnv });
     writeFileSync(stateFile, `${latest}\n`, "utf8");
   }
 }
