@@ -1,5 +1,5 @@
 import { URL } from "node:url";
-import { configString, loadConfig, readJsonFile, runAllowFailure, runJson, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
+import { configString, loadConfig, readJsonFile, runAllowFailure, runJson, runShell, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
 
 const PREFIX = "terrariumctl proxy sync";
 const DEFAULT_CONFIG_PATH = "/etc/terrarium/config.yaml";
@@ -88,13 +88,13 @@ function loadUfwState(): DesiredPort[] {
 
 async function ensureUfwRule(proto: "tcp" | "udp", port: number): Promise<void> {
   await runText(
-    ["ufw", "--force", "allow", "proto", proto, "from", "any", "to", "any", "port", String(port), "comment", "terrarium-proxy"],
+    ["ufw", "allow", "proto", proto, "from", "any", "to", "any", "port", String(port), "comment", "terrarium-proxy"],
     PREFIX
   );
 }
 
 async function deleteUfwRule(proto: "tcp" | "udp", port: number): Promise<void> {
-  await runAllowFailure(["ufw", "--force", "delete", "allow", "proto", proto, "from", "any", "to", "any", "port", String(port)]);
+  await runAllowFailure(["bash", "-lc", `yes | ufw delete allow proto ${proto} from any to any port ${port} comment terrarium-proxy`]);
 }
 
 async function syncUfw(desiredPorts: DesiredPort[]): Promise<string[]> {
