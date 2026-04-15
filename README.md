@@ -12,10 +12,16 @@ The goal is simple: make a single VPS feel safe enough for experimentation, capa
 ## Install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/terion-name/terrarium/refs/heads/main/install.sh | bash
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-The shell bootstrap is intentionally thin. It downloads a compiled `terrariumctl` bundle from GitHub Releases when possible, clones the Terrarium repo into `/opt/terrarium`, stages the bundled binary into that checkout, and falls back to a source build only when you target a branch-like `--ref` such as `main`.
+The shell bootstrap is intentionally thin. The release-published `install.sh` is pinned to the release it came from, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, clones the Terrarium repo into `/opt/terrarium`, and stages that binary into the checkout. If you explicitly target a branch-like `--ref` such as `main`, it falls back to a source build.
+
+If you want to pin a specific release instead of `latest`, use the tagged release asset directly:
+
+```bash
+curl -fsSL https://github.com/terion-name/terrarium/releases/download/0.0.0-beta1/install.sh | bash
+```
 
 Terrarium provisions the host with:
 
@@ -41,13 +47,13 @@ Terrarium provisions the host with:
 Interactive:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/terion-name/terrarium/refs/heads/main/install.sh | bash
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
 Non-interactive:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/terion-name/terrarium/refs/heads/main/install.sh | bash -s -- \
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --non-interactive \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \

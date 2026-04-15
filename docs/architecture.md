@@ -3,7 +3,7 @@
 Terrarium is intentionally split into three layers:
 
 1. `install.sh`
-   Thin bootstrap only. It downloads a compiled `terrariumctl` bundle from Releases when possible and falls back to a source build only for branch-like refs.
+   Thin bootstrap only. The release-published installer is pinned to its own release, downloads the matching compiled `terrariumctl` bundle from Releases, and falls back to a source build only for branch-like refs.
 2. `terrariumctl`
    Single Terrarium binary. It provides `install`, `backup`, `proxy`, `idp`, and maintenance subcommands, clones or updates the Terrarium repository into `/opt/terrarium`, stages the compiled binary into that checkout, and invokes Ansible locally when needed.
 3. Ansible

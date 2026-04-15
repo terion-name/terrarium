@@ -1,0 +1,94 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x64
+          - arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Terrarium binary
+        run: |
+          mkdir -p release/dist
+          bun build --compile --target=bun-linux-${{ matrix.arch }} scripts/terrariumctl.ts --outfile release/dist/terrariumctl
+
+      - name: Package release bundle
+        run: |
+          cd release
+          zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terrarium-linux-${{ matrix.arch }}
+          path: terrarium-linux-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "${INPUT_TAG}" ]; then
+            echo "value=${INPUT_TAG}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "value=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Prepare release assets
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          mkdir -p release-assets
+          cp artifacts/terrarium-linux-x64/terrarium-linux-x64.zip release-assets/
+          cp artifacts/terrarium-linux-arm64/terrarium-linux-arm64.zip release-assets/
+          sed "s|^EMBEDDED_BOOTSTRAP_REF=\"\" # TERRARIUM_RELEASE_REF$|EMBEDDED_BOOTSTRAP_REF=\"${RELEASE_TAG}\" # TERRARIUM_RELEASE_REF|" install.sh > release-assets/install.sh
+          chmod 0644 release-assets/install.sh
+          (
+            cd release-assets
+            sha256sum terrarium-linux-x64.zip terrarium-linux-arm64.zip install.sh > SHA256SUMS
+          )
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          files: |
+            release-assets/install.sh
+            release-assets/terrarium-linux-x64.zip
+            release-assets/terrarium-linux-arm64.zip
+            release-assets/SHA256SUMS
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.tag.outputs.value, '-') }}

@@ -4,7 +4,13 @@ set -Eeuo pipefail
 REPO_URL="${TERRARIUM_REPO_URL:-https://github.com/terion-name/terrarium.git}"
 GITHUB_REPO="${TERRARIUM_GITHUB_REPO:-terion-name/terrarium}"
 REF=""
+EMBEDDED_BOOTSTRAP_REF="" # TERRARIUM_RELEASE_REF
+BOOTSTRAP_REF="${TERRARIUM_BOOTSTRAP_REF:-}"
 TMPDIR_PATH=""
+
+if [[ -z "${BOOTSTRAP_REF}" && -n "${EMBEDDED_BOOTSTRAP_REF}" ]]; then
+  BOOTSTRAP_REF="${EMBEDDED_BOOTSTRAP_REF}"
+fi
 
 usage() {
   cat <<'EOF'
@@ -16,7 +22,8 @@ Usage: install.sh [options]
 All other flags are forwarded to `terrariumctl install`.
 
 Behavior:
-  - without --ref, the bootstrap downloads the latest Terrarium release bundle
+  - without --ref, the bootstrap downloads the bundled release when the installer is release-pinned
+  - otherwise without --ref, it downloads the latest Terrarium release bundle
   - with a tag-like --ref, it downloads that release bundle
   - with a branch-like --ref (for example main), it falls back to a source build
 EOF
@@ -159,6 +166,9 @@ main() {
   arch="$(detect_arch)"
 
   if [[ -z "${REF}" ]]; then
+    if [[ -n "${BOOTSTRAP_REF}" ]] && download_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}"; then
+      exit 0
+    fi
     resolved_ref="$(resolve_latest_tag)"
     if [[ -n "${resolved_ref}" ]] && download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}"; then
       exit 0
