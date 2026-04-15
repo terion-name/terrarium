@@ -54,18 +54,43 @@
     interface_out: "{{ ansible_default_ipv4.interface }}"
 
 - name: Configure ACME email when custom domain is used
-  ansible.builtin.command: "/snap/bin/lxc config set acme.email {{ terrarium_email }}"
+  ansible.builtin.command: "/snap/bin/lxc config set acme.email {{ terrarium_acme_email }}"
   when:
-    - terrarium_email | length > 0
+    - terrarium_acme_email | length > 0
     - not terrarium_lxd_domain.endswith('.traefik.me')
   changed_when: false
 
 - name: Configure ACME domain when custom domain is used
   ansible.builtin.command: "/snap/bin/lxc config set acme.domain {{ terrarium_lxd_domain }}"
   when:
-    - terrarium_email | length > 0
+    - terrarium_acme_email | length > 0
     - not terrarium_lxd_domain.endswith('.traefik.me')
   changed_when: false
+
+- name: Configure OIDC issuer when provided
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.issuer {{ terrarium_oidc_issuer }}"
+  when: terrarium_oidc_issuer | length > 0
+  changed_when: false
+
+- name: Configure OIDC client ID when provided
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.client.id {{ terrarium_oidc_client_id }}"
+  when:
+    - terrarium_idp_mode == 'oidc'
+    - terrarium_oidc_client_id | length > 0
+  changed_when: false
+
+- name: Configure OIDC client secret when provided
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.client.secret {{ terrarium_oidc_client_secret }}"
+  when:
+    - terrarium_idp_mode == 'oidc'
+    - terrarium_oidc_client_secret | length > 0
+  changed_when: false
+
+- name: Clear external OIDC client secret when using local IDP
+  ansible.builtin.command: /snap/bin/lxc config unset oidc.client.secret
+  when: terrarium_idp_mode == 'local'
+  changed_when: false
+  failed_when: false
 
 - name: Check whether terrarium profile exists
   ansible.builtin.command: /snap/bin/lxc profile show terrarium

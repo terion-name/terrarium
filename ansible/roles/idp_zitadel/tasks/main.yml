@@ -112,3 +112,19 @@
     - name: Run ZITADEL reconciliation
       ansible.builtin.command: /usr/local/bin/terrariumctl idp sync
       changed_when: false
+
+- name: Disable self-hosted ZITADEL service when not enabled
+  when: not (terrarium_zitadel_enabled | bool)
+  block:
+    - name: Stop and disable ZITADEL compose service
+      ansible.builtin.systemd:
+        name: terrarium-zitadel.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove ZITADEL systemd unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/terrarium-zitadel.service
+        state: absent
+      notify: reload terrarium zitadel systemd

@@ -15,8 +15,8 @@ const BUNDLE_DIR = process.env.TERRARIUM_BUNDLE_DIR ?? "";
 $.throws(true);
 
 type InstallMode = "interactive" | "non-interactive";
-type IdpMode = "none" | "zitadel_self_hosted";
-type StorageMode = "disk" | "partition" | "loop";
+type IdpMode = "local" | "oidc";
+type StorageMode = "disk" | "partition" | "file";
 
 type InstallOptions = {
   ref: string;
@@ -24,11 +24,15 @@ type InstallOptions = {
   assumeYes: boolean;
   publicIp: string;
   email: string;
+  acmeEmail: string;
   domain: string;
   manageDomain: string;
   lxdDomain: string;
-  idpMode: IdpMode;
+  idpMode: IdpMode | "";
   authDomain: string;
+  oidcIssuer: string;
+  oidcClientId: string;
+  oidcClientSecret: string;
   zitadelAdminEmail: string;
   storageMode: string;
   storageSource: string;
@@ -61,7 +65,7 @@ function success(message: string): void {
   console.log(chalk.green(`${PREFIX}: ${message}`));
 }
 
-function validateEmail(email: string, fieldName: string): string {
+export function validateEmail(email: string, fieldName: string): string {
   const normalized = email.trim();
   const match = normalized.match(/^[^@\s]+@([^@\s]+)$/);
   if (!match) {
@@ -72,6 +76,23 @@ function validateEmail(email: string, fieldName: string): string {
     fail(`${fieldName} must not use reserved example.* domains because ACME rejects them`);
   }
   return normalized;
+}
+
+export function normalizeOidcIssuer(value: string, fieldName: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    fail(`${fieldName} must not be empty`);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    fail(`${fieldName} must be a valid URL`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    fail(`${fieldName} must use http or https`);
+  }
+  return parsed.toString().endsWith("/") ? parsed.toString() : `${parsed.toString()}/`;
 }
 
 function requireRoot(): void {
@@ -237,7 +258,8 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   options.publicIp = await detectPublicIp(options.publicIp);
   const dashed = dashedIp(options.publicIp);
 
-  options.email = options.email || (await promptEmail("Email for ACME/notifications", `admin@${options.publicIp}.nip.io`, "--email"));
+  options.email = options.email || (await promptEmail("Terrarium contact/admin email", `admin@${options.publicIp}.nip.io`, "--email"));
+  options.acmeEmail = options.acmeEmail || (await promptEmail("ACME account email", options.email, "--acme-email"));
   options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
 
   if (!options.domain && !options.manageDomain) {
@@ -257,27 +279,39 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
 
   if (!options.idpMode) {
     options.idpMode = (await select({
-      message: "Identity provider",
+      message: "Identity provider mode",
       choices: [
-        { name: "none", value: "none" },
-        { name: "zitadel-self-hosted", value: "zitadel_self_hosted" }
+        { name: "local", value: "local" },
+        { name: "oidc", value: "oidc" }
       ]
     })) as IdpMode;
   }
 
-  if (options.idpMode === "zitadel_self_hosted") {
+  if (options.idpMode === "local") {
     options.authDomain =
       options.authDomain ||
       (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
     options.authDomain = await promptText("ZITADEL auth domain", options.authDomain);
+    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc");
     options.zitadelAdminEmail = await promptEmail(
       "ZITADEL bootstrap admin email",
       options.zitadelAdminEmail || options.email,
       "--zitadel-admin-email"
     );
   } else {
-    options.idpMode = "none";
     options.authDomain = "";
+    options.oidcIssuer = normalizeOidcIssuer(
+      options.oidcIssuer || (await promptText("External OIDC issuer URL", "")),
+      "--oidc"
+    );
+    options.oidcClientId = options.oidcClientId || (await promptText("External OIDC client ID", ""));
+    options.oidcClientSecret = options.oidcClientSecret || (await promptText("External OIDC client secret", ""));
+    if (!options.oidcClientId) {
+      fail("--oidc-client is required for external OIDC mode");
+    }
+    if (!options.oidcClientSecret) {
+      fail("--oidc-secret is required for external OIDC mode");
+    }
   }
 
   const disks = await listCandidateDisks();
@@ -291,15 +325,15 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
         choices: [
           { name: "disk", value: "disk" },
           { name: "partition", value: "partition" },
-          { name: "loop", value: "loop" }
+          { name: "file", value: "file" }
         ]
       })) as StorageMode;
     }
   } else {
     info("No extra block volume detected.");
     info("Recommended production setup: attach block storage to the VPS and re-run Terrarium.");
-    info("Falling back to loop mode keeps everything on the root filesystem.");
-    options.storageMode = options.storageMode || "loop";
+    info("Falling back to file mode keeps everything on the root filesystem.");
+    options.storageMode = options.storageMode || "file";
   }
 
   switch (options.storageMode) {
@@ -312,8 +346,8 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
         fail(`storage source is required for ${options.storageMode}`);
       }
       break;
-    case "loop":
-      options.storageSize = options.storageSize || (await promptText("Loop-backed ZFS pool size", "64G"));
+    case "file":
+      options.storageSize = options.storageSize || (await promptText("File-backed ZFS pool size", "64G"));
       break;
     default:
       fail(`unsupported storage mode: ${options.storageMode}`);
@@ -339,10 +373,10 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
 
 function validateNonInteractive(options: InstallOptions): void {
   if (!options.idpMode) {
-    options.idpMode = "none";
+    fail("--idp must be either local or oidc");
   }
-  if (options.idpMode !== "none" && options.idpMode !== "zitadel_self_hosted") {
-    fail(`invalid --idp-mode value: ${options.idpMode}`);
+  if (!["local", "oidc"].includes(options.idpMode)) {
+    fail(`invalid --idp value: ${options.idpMode}`);
   }
   const dashed = dashedIp(options.publicIp);
   options.manageDomain = options.manageDomain || (options.domain ? `manage.${options.domain}` : `manage.${dashed}.traefik.me`);
@@ -352,13 +386,27 @@ function validateNonInteractive(options: InstallOptions): void {
     fail("--email is required in non-interactive mode");
   }
   options.email = validateEmail(options.email, "--email");
+  options.acmeEmail = validateEmail(options.acmeEmail || options.email, "--acme-email");
 
-  if (options.idpMode === "zitadel_self_hosted") {
+  if (options.idpMode === "local") {
     options.authDomain = options.authDomain || (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
+    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc");
     options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
     options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
+    options.oidcClientId = "";
+    options.oidcClientSecret = "";
   } else {
     options.authDomain = "";
+    if (!options.oidcIssuer) {
+      fail("--oidc is required when --idp=oidc");
+    }
+    options.oidcIssuer = normalizeOidcIssuer(options.oidcIssuer, "--oidc");
+    if (!options.oidcClientId) {
+      fail("--oidc-client is required when --idp=oidc");
+    }
+    if (!options.oidcClientSecret) {
+      fail("--oidc-secret is required when --idp=oidc");
+    }
   }
 
   if (!options.storageMode) {
@@ -372,7 +420,7 @@ function validateNonInteractive(options: InstallOptions): void {
         fail(`--storage-source is required for ${options.storageMode}`);
       }
       break;
-    case "loop":
+    case "file":
       options.storageSize = options.storageSize || "64G";
       break;
     default:
@@ -411,7 +459,7 @@ async function resolveNonInteractiveStorage(options: InstallOptions): Promise<vo
       options.storageMode = "disk";
       options.storageSource = disks[0]?.path ?? "";
     } else {
-      options.storageMode = "loop";
+      options.storageMode = "file";
       options.storageSize = options.storageSize || "64G";
     }
   }
@@ -442,10 +490,14 @@ function buildConfig(options: InstallOptions): string {
     terrarium_public_ip: options.publicIp,
     terrarium_root_domain: options.domain,
     terrarium_email: options.email,
+    terrarium_acme_email: options.acmeEmail,
     terrarium_manage_domain: options.manageDomain,
     terrarium_lxd_domain: options.lxdDomain,
     terrarium_idp_mode: options.idpMode,
     terrarium_auth_domain: options.authDomain,
+    terrarium_oidc_issuer: options.oidcIssuer,
+    terrarium_oidc_client_id: options.oidcClientId,
+    terrarium_oidc_client_secret: options.oidcClientSecret,
     terrarium_zitadel_admin_email: options.zitadelAdminEmail,
     terrarium_storage_mode: options.storageMode,
     terrarium_storage_source: options.storageSource,
@@ -478,12 +530,12 @@ function printDnsGuidance(options: InstallOptions): void {
     options.domain ||
     options.manageDomain !== defaultManage ||
     options.lxdDomain !== defaultLxd ||
-    (options.idpMode === "zitadel_self_hosted" && options.authDomain !== defaultAuth)
+    (options.idpMode === "local" && options.authDomain !== defaultAuth)
   ) {
     info("DNS records to create if you are using custom domains:");
     info(`  A ${options.manageDomain} -> ${options.publicIp}`);
     info(`  A ${options.lxdDomain} -> ${options.publicIp}`);
-    if (options.idpMode === "zitadel_self_hosted") {
+    if (options.idpMode === "local") {
       info(`  A ${options.authDomain} -> ${options.publicIp}`);
     }
   }
@@ -496,11 +548,15 @@ function defaultOptions(): InstallOptions {
     assumeYes: false,
     publicIp: "",
     email: "",
+    acmeEmail: "",
     domain: "",
     manageDomain: "",
     lxdDomain: "",
-    idpMode: "none",
+    idpMode: "",
     authDomain: "",
+    oidcIssuer: "",
+    oidcClientId: "",
+    oidcClientSecret: "",
     zitadelAdminEmail: "",
     storageMode: "",
     storageSource: "",
@@ -545,30 +601,34 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   success("Terrarium installation finished.");
   console.log(`${chalk.cyan("Cockpit:")} ${chalk.white(`https://${options.manageDomain}`)}`);
   console.log(`${chalk.cyan("LXD UI/API:")} ${chalk.white(`https://${options.lxdDomain}`)}`);
-  if (options.idpMode === "zitadel_self_hosted") {
+  if (options.idpMode === "local") {
     console.log(`${chalk.cyan("ZITADEL:")} ${chalk.white(`https://${options.authDomain}`)}`);
     console.log(`${chalk.cyan("ZITADEL bootstrap password:")} ${chalk.white("/etc/terrarium/secrets/zitadel_admin_password")}`);
   }
+  console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
   console.log(`${chalk.cyan("Resolved config:")} ${chalk.white("/etc/terrarium/config.yaml")}`);
 }
 
 export function registerInstallCommand(cli: CAC): void {
   cli
     .command("install", "Install Terrarium on the current host")
-    .option("--interactive", "Run with interactive prompts")
-    .option("--non-interactive", "Require full configuration through flags")
+    .option("--non-interactive", "Disable prompts and require full configuration through flags")
     .option("--yes", "Assume yes for confirmation prompts")
     .option("--ref <ref>", "Git branch or tag to checkout for the Terrarium repo")
-    .option("--email <email>", "ACME/notification email")
+    .option("--email <email>", "Terrarium contact/admin email")
+    .option("--acme-email <email>", "ACME account email for Traefik and LXD")
     .option("--domain <domain>", "Root domain used to derive service subdomains")
     .option("--manage-domain <domain>", "Cockpit domain")
     .option("--lxd-domain <domain>", "LXD domain")
-    .option("--idp-mode <mode>", "Identity provider mode: none or zitadel-self-hosted")
+    .option("--idp <mode>", "Identity provider mode: local or oidc")
+    .option("--oidc <issuer>", "OIDC issuer URL; required when --idp=oidc")
+    .option("--oidc-client <clientId>", "OIDC client ID; required when --idp=oidc")
+    .option("--oidc-secret <clientSecret>", "OIDC client secret; required when --idp=oidc")
     .option("--auth-domain <domain>", "ZITADEL auth domain")
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL")
-    .option("--storage-mode <mode>", "Storage mode: disk, partition, or loop")
+    .option("--storage-mode <mode>", "Storage mode: disk, partition, or file")
     .option("--storage-source <path>", "Disk or partition path for disk/partition mode")
-    .option("--storage-size <size>", "Loop-backed pool size")
+    .option("--storage-size <size>", "File-backed pool size")
     .option("--enable-s3", "Enable S3 archive backups")
     .option("--s3-endpoint <url>", "S3 endpoint URL")
     .option("--s3-bucket <name>", "S3 bucket name")
@@ -584,19 +644,19 @@ export function registerInstallCommand(cli: CAC): void {
       const options = defaultOptions();
       options.ref = (rawOptions.ref as string | undefined) || options.ref;
       options.mode = rawOptions.nonInteractive ? "non-interactive" : "interactive";
-      if (rawOptions.interactive) {
-        options.mode = "interactive";
-      }
       options.assumeYes = Boolean(rawOptions.yes);
       options.email = (rawOptions.email as string | undefined) ?? "";
+      options.acmeEmail = (rawOptions.acmeEmail as string | undefined) ?? "";
       options.domain = (rawOptions.domain as string | undefined) ?? "";
       options.manageDomain = (rawOptions.manageDomain as string | undefined) ?? "";
       options.lxdDomain = (rawOptions.lxdDomain as string | undefined) ?? "";
-      const idpMode = ((rawOptions.idpMode as string | undefined) ?? "none").replaceAll("-", "_");
-      options.idpMode = (idpMode === "zitadel_self_hosted" ? "zitadel_self_hosted" : "none") as IdpMode;
+      options.idpMode = ((rawOptions.idp as string | undefined) ?? "").trim().toLowerCase() as IdpMode | "";
+      options.oidcIssuer = (rawOptions.oidc as string | undefined) ?? "";
+      options.oidcClientId = (rawOptions.oidcClient as string | undefined) ?? "";
+      options.oidcClientSecret = (rawOptions.oidcSecret as string | undefined) ?? "";
       options.authDomain = (rawOptions.authDomain as string | undefined) ?? "";
       options.zitadelAdminEmail = (rawOptions.zitadelAdminEmail as string | undefined) ?? "";
-      options.storageMode = (rawOptions.storageMode as string | undefined) ?? "";
+      options.storageMode = ((rawOptions.storageMode as string | undefined) ?? "").replace("loop", "file");
       options.storageSource = (rawOptions.storageSource as string | undefined) ?? "";
       options.storageSize = (rawOptions.storageSize as string | undefined) ?? "";
       options.enableS3 = Boolean(rawOptions.enableS3);

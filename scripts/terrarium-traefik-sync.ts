@@ -159,7 +159,7 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
     certificatesResolvers: {
       letsencrypt: {
         acme: {
-          email: configString(config, "terrarium_email"),
+          email: configString(config, "terrarium_acme_email") || configString(config, "terrarium_email"),
           storage: "/var/lib/traefik/acme.json",
           httpChallenge: {
             entryPoint: "web"

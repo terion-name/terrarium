@@ -97,6 +97,20 @@ export async function runShell(command: string, prefix: string, cwd?: string): P
   await runText(["bash", "-lc", command], prefix, { cwd });
 }
 
+export async function runInteractive(cmd: string[], prefix: string, options: { cwd?: string } = {}): Promise<void> {
+  const proc = Bun.spawn({
+    cmd,
+    cwd: options.cwd,
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit"
+  });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    fail(prefix, `command failed: ${cmd.join(" ")}`);
+  }
+}
+
 export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -129,7 +143,16 @@ export function configString(config: Record<string, unknown>, key: string, fallb
 
 export function configBoolean(config: Record<string, unknown>, key: string): boolean {
   const value = configValue(config, key);
-  return value === true || value === "true";
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    return ["true", "1", "yes", "on"].includes(value.trim().toLowerCase());
+  }
+  return false;
 }
 
 export function makeTempDir(prefix: string): string {

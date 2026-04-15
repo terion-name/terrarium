@@ -57,7 +57,7 @@
     terrarium_local_hostnames: >-
       {{
         [terrarium_manage_domain, terrarium_lxd_domain]
-        + ([terrarium_auth_domain] if terrarium_idp_mode == 'zitadel_self_hosted' else [])
+        + ([terrarium_auth_domain] if terrarium_idp_mode == 'local' else [])
       }}
 
 - name: Ensure Terrarium domains resolve locally

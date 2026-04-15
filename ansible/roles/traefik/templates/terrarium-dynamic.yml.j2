@@ -1,6 +1,6 @@
 http:
   middlewares:
-{% if terrarium_idp_mode == 'zitadel_self_hosted' %}
+{% if terrarium_idp_mode == 'local' %}
     zitadel-root-rewrite:
       replacePath:
         path: /ui/v2/login/
@@ -18,7 +18,7 @@ http:
       service: cockpit
       tls:
         certResolver: letsencrypt
-{% if terrarium_idp_mode == 'zitadel_self_hosted' %}
+{% if terrarium_idp_mode == 'local' %}
     zitadel-root:
       entryPoints:
         - websecure
@@ -61,7 +61,7 @@ http:
       loadBalancer:
         servers:
           - url: http://127.0.0.1:9090
-{% if terrarium_idp_mode == 'zitadel_self_hosted' %}
+{% if terrarium_idp_mode == 'local' %}
     zitadel-login:
       loadBalancer:
         servers:

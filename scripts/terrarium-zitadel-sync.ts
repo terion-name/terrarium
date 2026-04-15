@@ -72,7 +72,7 @@ async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
 
 export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
-  if (configString(config, "terrarium_idp_mode") !== "zitadel_self_hosted") {
+  if (configString(config, "terrarium_idp_mode") !== "local") {
     return;
   }
 
@@ -119,7 +119,8 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   const outputs = readJsonFile<Record<string, { value?: string }>>(outputsPath, {});
   const lxdClientId = outputs.lxd_client_id?.value ?? "";
   if (lxdClientId && existsSync("/snap/bin/lxc")) {
-    await runText(["/snap/bin/lxc", "config", "set", "oidc.issuer", `https://${authDomain}/`], PREFIX);
+    const issuer = configString(config, "terrarium_oidc_issuer") || `https://${authDomain}/`;
+    await runText(["/snap/bin/lxc", "config", "set", "oidc.issuer", issuer], PREFIX);
     await runText(["/snap/bin/lxc", "config", "set", "oidc.client.id", lxdClientId], PREFIX);
   }
 }

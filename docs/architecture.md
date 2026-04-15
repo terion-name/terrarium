@@ -33,7 +33,7 @@ Terrarium is intentionally split into three layers:
 ## Restore Model
 
 - Local in-place restore is a `zfs rollback`.
-- Local as-new restore is a `zfs clone` followed by guided `lxd recover`.
+- Local as-new restore is a `zfs clone`; Terrarium then explains the next steps and hands off into interactive `lxd recover` because the final LXD import step is still interactive upstream.
 - S3 restore reconstructs a chosen chain into a target dataset and then either:
   - reuses the existing LXD instance path for in-place restore, or
-  - requires guided `lxd recover` for as-new restore.
+  - explains the next steps and hands off into interactive `lxd recover` for as-new restore.

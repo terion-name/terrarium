@@ -1,4 +1,4 @@
-terrarium_zitadel_enabled: "{{ terrarium_idp_mode == 'zitadel_self_hosted' }}"
+terrarium_zitadel_enabled: "{{ terrarium_idp_mode == 'local' }}"
 terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
 terrarium_zitadel_postgres_dir: "{{ terrarium_zitadel_dir }}/postgres"
 terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"

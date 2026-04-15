@@ -21,12 +21,12 @@
       Terrarium requires a kernel that can load the zfs module.
       Try a provider image or kernel with native ZFS support instead of this OrbStack kernel.
 
-- name: Ensure storage directory exists for loop mode
+- name: Ensure storage directory exists for file mode
   ansible.builtin.file:
     path: "{{ terrarium_state_dir }}/storage"
     state: directory
     mode: "0755"
-  when: terrarium_storage_mode == 'loop'
+  when: terrarium_storage_mode == 'file'
 
 - name: Check whether the zpool already exists
   ansible.builtin.command: "zpool list -H -o name {{ terrarium_lxd_pool_name }}"
@@ -34,13 +34,13 @@
   failed_when: false
   changed_when: false
 
-- name: Create sparse file for loop-backed pool
+- name: Create sparse file for file-backed pool
   ansible.builtin.command: "truncate -s {{ terrarium_storage_size }} {{ terrarium_loop_image_path }}"
   when:
-    - terrarium_storage_mode == 'loop'
+    - terrarium_storage_mode == 'file'
     - terrarium_zpool_check.rc != 0
 
-- name: Create loop-backed zpool
+- name: Create file-backed zpool
   ansible.builtin.command: >-
     zpool create -f -o ashift=12
     -O compression=zstd
@@ -50,7 +50,7 @@
     -m none
     {{ terrarium_lxd_pool_name }} {{ terrarium_loop_image_path }}
   when:
-    - terrarium_storage_mode == 'loop'
+    - terrarium_storage_mode == 'file'
     - terrarium_zpool_check.rc != 0
 
 - name: Check storage source type for partition mode

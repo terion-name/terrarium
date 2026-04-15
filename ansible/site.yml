@@ -7,17 +7,21 @@
     terrarium_config_path: /etc/terrarium/config.yaml
     terrarium_state_dir: /var/lib/terrarium
     terrarium_lxd_pool_name: terrarium
-    terrarium_storage_mode: loop
+    terrarium_storage_mode: file
     terrarium_storage_source: ""
     terrarium_storage_size: ""
     terrarium_public_ip: "{{ ansible_default_ipv4.address }}"
     terrarium_root_domain: ""
     terrarium_manage_domain: "{{ ('manage.' ~ terrarium_root_domain) if terrarium_root_domain else ('manage.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me') }}"
     terrarium_lxd_domain: "{{ ('lxd.' ~ terrarium_root_domain) if terrarium_root_domain else ('lxd.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me') }}"
-    terrarium_idp_mode: none
-    terrarium_auth_domain: "{{ (('auth.' ~ terrarium_root_domain) if terrarium_root_domain else ('auth.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me')) if terrarium_idp_mode == 'zitadel_self_hosted' else '' }}"
+    terrarium_idp_mode: oidc
+    terrarium_auth_domain: "{{ (('auth.' ~ terrarium_root_domain) if terrarium_root_domain else ('auth.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me')) if terrarium_idp_mode == 'local' else '' }}"
+    terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain ~ '/') if terrarium_idp_mode == 'local' else '' }}"
+    terrarium_oidc_client_id: ""
+    terrarium_oidc_client_secret: ""
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
     terrarium_email: ""
+    terrarium_acme_email: "{{ terrarium_email }}"
     terrarium_enable_s3: false
     terrarium_s3_endpoint: https://s3.amazonaws.com
     terrarium_s3_bucket: ""
@@ -36,10 +40,14 @@
       terrarium_public_ip: "{{ terrarium_public_ip }}"
       terrarium_root_domain: "{{ terrarium_root_domain }}"
       terrarium_email: "{{ terrarium_email }}"
+      terrarium_acme_email: "{{ terrarium_acme_email }}"
       terrarium_manage_domain: "{{ terrarium_manage_domain }}"
       terrarium_lxd_domain: "{{ terrarium_lxd_domain }}"
       terrarium_idp_mode: "{{ terrarium_idp_mode }}"
       terrarium_auth_domain: "{{ terrarium_auth_domain }}"
+      terrarium_oidc_issuer: "{{ terrarium_oidc_issuer }}"
+      terrarium_oidc_client_id: "{{ terrarium_oidc_client_id }}"
+      terrarium_oidc_client_secret: "{{ terrarium_oidc_client_secret }}"
       terrarium_zitadel_admin_email: "{{ terrarium_zitadel_admin_email }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
       terrarium_storage_mode: "{{ terrarium_storage_mode }}"

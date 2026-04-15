@@ -3,12 +3,12 @@ import { cac } from "cac";
 import chalk from "chalk";
 import { existsSync, writeFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
-import { registerInstallCommand } from "./terrarium-install";
+import { normalizeOidcIssuer, registerInstallCommand, validateEmail } from "./terrarium-install";
 import { backupExportCmd } from "./terrarium-s3-export";
 import { proxySyncCmd as syncProxyConfig } from "./terrarium-traefik-sync";
 import { idpSyncCmd as syncIdpConfig } from "./terrarium-zitadel-sync";
 import { reconstructFromS3 } from "./terrarium-zfs-reconstruct";
-import { configBoolean, configString, loadConfig, runAllowFailure, runText } from "./lib/common";
+import { configBoolean, configString, loadConfig, runAllowFailure, runInteractive, runText } from "./lib/common";
 
 const PREFIX = "terrariumctl";
 const CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
@@ -49,11 +49,46 @@ function requireConfig(): Record<string, unknown> {
   return loadConfig(CONFIG_PATH, PREFIX);
 }
 
-async function findSnapshot(dataset: string, query: string): Promise<string> {
+function loadMutableConfig(): Record<string, unknown> {
+  return parse(Bun.file(CONFIG_PATH).textSync()) as Record<string, unknown>;
+}
+
+function oidcIssuer(config: Record<string, unknown>): string {
+  return configString(config, "terrarium_oidc_issuer");
+}
+
+function idpMode(config: Record<string, unknown>): string {
+  return configString(config, "terrarium_idp_mode", "oidc");
+}
+
+function idpEnabled(config: Record<string, unknown>): boolean {
+  return idpMode(config) === "local";
+}
+
+function defaultServiceDomain(rootDomain: string, publicIp: string, prefix: string): string {
+  const dashed = publicIp.replaceAll(".", "-");
+  return rootDomain ? `${prefix}.${rootDomain}` : `${prefix}.${dashed}.traefik.me`;
+}
+
+function setConfigValue(config: Record<string, unknown>, key: string, value: unknown): void {
+  config[key] = value;
+}
+
+async function persistAndReconcile(config: Record<string, unknown>, summary: string): Promise<void> {
+  writeFileSync(CONFIG_PATH, stringify(config), "utf8");
+  await reconfigureCmd();
+  await syncProxyConfig();
+  if (idpEnabled(config)) {
+    await syncIdpConfig();
+  }
+  console.log(success(summary));
+}
+
+async function findSnapshot(dataset: string, query = ""): Promise<string> {
   const stdout = await runText(["zfs", "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation"], PREFIX);
   let match = "";
   for (const line of stdout.split("\n")) {
-    if (line.startsWith(`${dataset}@`) && line.includes(query)) {
+    if (line.startsWith(`${dataset}@`) && (!query || line.includes(query))) {
       match = line.trim();
     }
   }
@@ -66,12 +101,14 @@ async function statusCmd(): Promise<void> {
   const manage = configString(config, "terrarium_manage_domain");
   const lxd = configString(config, "terrarium_lxd_domain");
   const auth = configString(config, "terrarium_auth_domain");
-  const idpMode = configString(config, "terrarium_idp_mode");
+  const oidc = oidcIssuer(config);
+  const mode = idpMode(config);
+  const idp = idpEnabled(config);
 
   const traefik = await runAllowFailure(["systemctl", "is-active", "traefik"]);
   const cockpit = await runAllowFailure(["systemctl", "is-active", "cockpit.socket"]);
   const lxdState = await runAllowFailure(["systemctl", "is-active", "snap.lxd.daemon"]);
-  const zitadel = idpMode === "zitadel_self_hosted" ? await runAllowFailure(["systemctl", "is-active", "terrarium-zitadel.service"]) : null;
+  const zitadel = idp ? await runAllowFailure(["systemctl", "is-active", "terrarium-zitadel.service"]) : null;
   const s3Timer = await runAllowFailure(["systemctl", "is-active", "terrarium-s3-backup.timer"]);
   const syncoidTimer = await runAllowFailure(["systemctl", "is-active", "terrarium-syncoid.timer"]);
   const traefikSyncTimer = await runAllowFailure(["systemctl", "is-active", "terrarium-traefik-sync.timer"]);
@@ -81,7 +118,11 @@ async function statusCmd(): Promise<void> {
   console.log(`  ${label("Pool:")} ${value(pool)}`);
   console.log(`  ${label("Cockpit:")} ${value(`https://${manage}`)}`);
   console.log(`  ${label("LXD:")} ${value(`https://${lxd}`)}`);
-  if (idpMode === "zitadel_self_hosted") {
+  console.log(`  ${label("IDP mode:")} ${value(mode)}`);
+  if (oidc) {
+    console.log(`  ${label("OIDC issuer:")} ${value(oidc)}`);
+  }
+  if (idp) {
     console.log(`  ${label("ZITADEL:")} ${value(`https://${auth}`)}`);
     console.log(`  ${label("ZITADEL bootstrap password:")} ${value("/etc/terrarium/secrets/zitadel_admin_password")}`);
   }
@@ -133,6 +174,23 @@ async function confirmDestructive(message: string): Promise<void> {
   }
 }
 
+function printAsNewRecoveryNotice(pool: string, dataset: string, instanceName: string): void {
+  console.log(`\n${heading("Manual LXD Import Required")}`);
+  console.log("Terrarium restored the ZFS dataset, but LXD has not imported it as an instance yet.");
+  console.log("This step is interactive in upstream LXD and cannot be completed non-interactively.");
+  console.log(`${label("Recovered dataset:")} ${value(dataset)}`);
+  console.log(`${label("Target instance name:")} ${value(instanceName)}`);
+  console.log(`${label("Next steps:")} 1) Terrarium will now start ${value("lxd recover")}`);
+  console.log(`            2) Select storage pool ${value(pool)} when prompted`);
+  console.log(`            3) Import the recovered volume as instance ${value(instanceName)}`);
+  console.log(`            4) Verify it with ${value(`lxc list ${instanceName}`)}`);
+}
+
+async function handOffToLxdRecover(): Promise<void> {
+  console.log(`\n${label("Starting:")} ${value("lxd recover")}`);
+  await runInteractive(["lxd", "recover"], PREFIX);
+}
+
 async function restoreLocal(
   config: Record<string, unknown>,
   instance: string,
@@ -144,7 +202,7 @@ async function restoreLocal(
   const dataset = `${pool}/containers/${instance}`;
   const snapshot = await findSnapshot(dataset, at);
   if (!snapshot) {
-    throw new Error(`no local snapshot matched '${at}'`);
+    throw new Error(at ? `no local snapshot matched '${at}'` : `no local snapshots found for '${instance}'`);
   }
 
   if (mode === "in-place") {
@@ -159,9 +217,11 @@ async function restoreLocal(
   if (!newName) {
     throw new Error("--as-new requires a target name");
   }
-  await runText(["zfs", "clone", snapshot, `${pool}/containers/${newName}`], PREFIX);
-  console.log(success(`Cloned ${snapshot} to ${pool}/containers/${newName}`));
-  console.log(`${label("Next:")} ${value(`run lxd recover and import the new dataset as instance ${newName}`)}`);
+  const targetDataset = `${pool}/containers/${newName}`;
+  await runText(["zfs", "clone", snapshot, targetDataset], PREFIX);
+  console.log(success(`Cloned ${snapshot} to ${targetDataset}`));
+  printAsNewRecoveryNotice(pool, targetDataset, newName);
+  await handOffToLxdRecover();
 }
 
 async function restoreS3(
@@ -186,7 +246,8 @@ async function restoreS3(
     console.log(`${label("Next:")} ${value(`lxc start ${instance}`)}`);
   } else {
     console.log(success(`Reconstructed dataset into ${target}`));
-    console.log(`${label("Next:")} ${value(`run lxd recover and import the new dataset as instance ${newName}`)}`);
+    printAsNewRecoveryNotice(pool, target, newName);
+    await handOffToLxdRecover();
   }
 }
 
@@ -194,10 +255,10 @@ async function backupRestoreCmd(
   source: string,
   instance: string,
   at: string,
-  options: { asNew?: string; inPlace?: boolean }
+  options: { asNew?: string }
 ): Promise<void> {
   const config = requireConfig();
-  const mode = options.inPlace ? "in-place" : "as-new";
+  const mode = options.asNew ? "as-new" : "in-place";
   const newName = options.asNew ?? "";
 
   if (source === "local") {
@@ -219,44 +280,165 @@ async function reconfigureCmd(): Promise<void> {
   await runText(["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`], PREFIX);
 }
 
-async function setdomainCmd(
+async function setDomainsCmd(
   rootDomainArg?: string,
   options: { manageDomain?: string; lxdDomain?: string; authDomain?: string } = {}
 ): Promise<void> {
+  const config = loadMutableConfig();
+  const publicIp = configString(config, "terrarium_public_ip");
   const rootDomain =
-    rootDomainArg ??
+    rootDomainArg ||
     (await input({
       message: "Root domain",
+      default: configString(config, "terrarium_root_domain"),
       validate: (value) => (value.trim() ? true : "Root domain is required")
     }));
 
-  const rendered = parse(Bun.file(CONFIG_PATH).textSync()) as Record<string, unknown>;
-  rendered.terrarium_root_domain = rootDomain;
-  rendered.terrarium_manage_domain = options.manageDomain || `manage.${rootDomain}`;
-  rendered.terrarium_lxd_domain = options.lxdDomain || `lxd.${rootDomain}`;
-  if (rendered.terrarium_idp_mode === "zitadel_self_hosted" || rendered.terrarium_auth_domain) {
-    rendered.terrarium_auth_domain = options.authDomain || `auth.${rootDomain}`;
+  setConfigValue(config, "terrarium_root_domain", rootDomain);
+  setConfigValue(config, "terrarium_manage_domain", options.manageDomain || defaultServiceDomain(rootDomain, publicIp, "manage"));
+  setConfigValue(config, "terrarium_lxd_domain", options.lxdDomain || defaultServiceDomain(rootDomain, publicIp, "lxd"));
+  if (idpEnabled(config)) {
+    const authDomain = options.authDomain || defaultServiceDomain(rootDomain, publicIp, "auth");
+    setConfigValue(config, "terrarium_auth_domain", authDomain);
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
   }
 
   await confirmDestructive(
-    `Apply domains: manage=${String(rendered.terrarium_manage_domain)}, lxd=${String(rendered.terrarium_lxd_domain)}${
-      rendered.terrarium_auth_domain ? `, auth=${String(rendered.terrarium_auth_domain)}` : ""
+    `Apply domains: manage=${String(config.terrarium_manage_domain)}, lxd=${String(config.terrarium_lxd_domain)}${
+      config.terrarium_auth_domain ? `, auth=${String(config.terrarium_auth_domain)}` : ""
     }?`
   );
+  await persistAndReconcile(config, "Updated domains");
+}
 
-  writeFileSync(CONFIG_PATH, stringify(rendered), "utf8");
-  await reconfigureCmd();
-  await syncProxyConfig();
-  if (configString(rendered, "terrarium_idp_mode") === "zitadel_self_hosted") {
-    await syncIdpConfig();
+async function setEmailsCmd(options: { email?: string; acmeEmail?: string; zitadelAdminEmail?: string }): Promise<void> {
+  const config = loadMutableConfig();
+  if (!options.email && !options.acmeEmail && !options.zitadelAdminEmail) {
+    throw new Error("set emails requires at least one of --email, --acme-email, or --zitadel-admin-email");
+  }
+  if (options.email) {
+    setConfigValue(config, "terrarium_email", validateEmail(options.email, "--email"));
+  }
+  if (options.acmeEmail) {
+    setConfigValue(config, "terrarium_acme_email", validateEmail(options.acmeEmail, "--acme-email"));
+  } else if (!configString(config, "terrarium_acme_email")) {
+    setConfigValue(config, "terrarium_acme_email", configString(config, "terrarium_email"));
+  }
+  if (options.zitadelAdminEmail) {
+    setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email"));
+  }
+  await persistAndReconcile(config, "Updated email settings");
+}
+
+async function setIdpCmd(options: {
+  mode: string;
+  authDomain?: string;
+  oidc?: string;
+  oidcClient?: string;
+  oidcSecret?: string;
+  zitadelAdminEmail?: string;
+}): Promise<void> {
+  const config = loadMutableConfig();
+  const publicIp = configString(config, "terrarium_public_ip");
+  const rootDomain = configString(config, "terrarium_root_domain");
+  const nextMode = options.mode.trim().toLowerCase();
+  if (!["local", "oidc"].includes(nextMode)) {
+    throw new Error("set idp requires mode 'local' or 'oidc'");
   }
 
-  console.log(success("Updated domains"));
-  console.log(`  ${label("Cockpit:")} ${value(`https://${rendered.terrarium_manage_domain}`)}`);
-  console.log(`  ${label("LXD:")} ${value(`https://${rendered.terrarium_lxd_domain}`)}`);
-  if (rendered.terrarium_idp_mode === "zitadel_self_hosted") {
-    console.log(`  ${label("ZITADEL:")} ${value(`https://${rendered.terrarium_auth_domain}`)}`);
+  setConfigValue(config, "terrarium_idp_mode", nextMode);
+  if (nextMode === "local") {
+    const authDomain = options.authDomain || configString(config, "terrarium_auth_domain") || defaultServiceDomain(rootDomain, publicIp, "auth");
+    setConfigValue(config, "terrarium_auth_domain", authDomain);
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
+    setConfigValue(config, "terrarium_oidc_client_id", "");
+    setConfigValue(config, "terrarium_oidc_client_secret", "");
+    const currentAdmin = options.zitadelAdminEmail || configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
+    setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(currentAdmin, "--zitadel-admin-email"));
+  } else {
+    const currentIssuer = oidcIssuer(config);
+    const issuer = options.oidc || currentIssuer;
+    if (!issuer) {
+      throw new Error("--oidc is required when mode is oidc");
+    }
+    const clientId = options.oidcClient || configString(config, "terrarium_oidc_client_id");
+    const clientSecret = options.oidcSecret || configString(config, "terrarium_oidc_client_secret");
+    if (!clientId) {
+      throw new Error("--oidc-client is required when mode is oidc");
+    }
+    if (!clientSecret) {
+      throw new Error("--oidc-secret is required when mode is oidc");
+    }
+    setConfigValue(config, "terrarium_auth_domain", "");
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
+    setConfigValue(config, "terrarium_oidc_client_id", clientId);
+    setConfigValue(config, "terrarium_oidc_client_secret", clientSecret);
   }
+
+  await persistAndReconcile(config, nextMode === "local" ? "Switched IDP mode to local" : "Switched IDP mode to oidc");
+}
+
+async function setS3Cmd(options: {
+  enable?: boolean;
+  disable?: boolean;
+  s3Endpoint?: string;
+  s3Bucket?: string;
+  s3Region?: string;
+  s3Prefix?: string;
+  s3AccessKey?: string;
+  s3SecretKey?: string;
+}): Promise<void> {
+  const config = loadMutableConfig();
+  if (options.enable && options.disable) {
+    throw new Error("set s3 accepts only one of --enable or --disable");
+  }
+  const nextEnabled = options.enable ? true : options.disable ? false : configBoolean(config, "terrarium_enable_s3");
+  setConfigValue(config, "terrarium_enable_s3", nextEnabled);
+
+  if (options.s3Endpoint !== undefined) setConfigValue(config, "terrarium_s3_endpoint", options.s3Endpoint);
+  if (options.s3Bucket !== undefined) setConfigValue(config, "terrarium_s3_bucket", options.s3Bucket);
+  if (options.s3Region !== undefined) setConfigValue(config, "terrarium_s3_region", options.s3Region);
+  if (options.s3Prefix !== undefined) setConfigValue(config, "terrarium_s3_prefix", options.s3Prefix);
+  if (options.s3AccessKey !== undefined) setConfigValue(config, "terrarium_s3_access_key", options.s3AccessKey);
+  if (options.s3SecretKey !== undefined) setConfigValue(config, "terrarium_s3_secret_key", options.s3SecretKey);
+
+  if (nextEnabled) {
+    if (!configString(config, "terrarium_s3_bucket")) throw new Error("S3 requires --s3-bucket");
+    if (!configString(config, "terrarium_s3_access_key")) throw new Error("S3 requires --s3-access-key");
+    if (!configString(config, "terrarium_s3_secret_key")) throw new Error("S3 requires --s3-secret-key");
+    if (!configString(config, "terrarium_s3_prefix")) setConfigValue(config, "terrarium_s3_prefix", "terrarium");
+  }
+
+  await persistAndReconcile(config, nextEnabled ? "Updated S3 settings" : "Disabled S3 backups");
+}
+
+async function setSyncoidCmd(options: {
+  enable?: boolean;
+  disable?: boolean;
+  syncoidTarget?: string;
+  syncoidTargetDataset?: string;
+  syncoidSshKey?: string;
+}): Promise<void> {
+  const config = loadMutableConfig();
+  if (options.enable && options.disable) {
+    throw new Error("set syncoid accepts only one of --enable or --disable");
+  }
+  const nextEnabled = options.enable ? true : options.disable ? false : configBoolean(config, "terrarium_enable_syncoid");
+  setConfigValue(config, "terrarium_enable_syncoid", nextEnabled);
+
+  if (options.syncoidTarget !== undefined) setConfigValue(config, "terrarium_syncoid_target", options.syncoidTarget);
+  if (options.syncoidTargetDataset !== undefined) setConfigValue(config, "terrarium_syncoid_target_dataset", options.syncoidTargetDataset);
+  if (options.syncoidSshKey !== undefined) setConfigValue(config, "terrarium_syncoid_ssh_key", options.syncoidSshKey);
+
+  if (nextEnabled) {
+    if (!configString(config, "terrarium_syncoid_target")) throw new Error("syncoid requires --syncoid-target");
+    if (!configString(config, "terrarium_syncoid_target_dataset")) throw new Error("syncoid requires --syncoid-target-dataset");
+    if (!configString(config, "terrarium_syncoid_ssh_key")) {
+      setConfigValue(config, "terrarium_syncoid_ssh_key", "/root/.ssh/id_ed25519");
+    }
+  }
+
+  await persistAndReconcile(config, nextEnabled ? "Updated syncoid settings" : "Disabled syncoid replication");
 }
 
 const cli = cac("terrariumctl");
@@ -273,8 +455,7 @@ cli
   .option("--instance <name>", "Instance name")
   .option("--at <snapshotOrTimestamp>", "Snapshot name fragment or timestamp")
   .option("--as-new <name>", "Restore as a new instance")
-  .option("--in-place", "Restore in place")
-  .usage("list | export | restore --source local|s3 --instance NAME --at SNAPSHOT|TIMESTAMP --as-new NEWNAME|--in-place")
+  .usage("backup list | backup export | backup restore [--source local|s3] --instance NAME [--at SNAPSHOT|TIMESTAMP] [--as-new NEWNAME]")
   .action(async (action, options) => {
     if (action === "list") {
       await backupListCmd();
@@ -285,15 +466,14 @@ cli
       return;
     }
     if (action === "restore") {
-      const source = options.source as string | undefined;
+      const source = (options.source as string | undefined) || "local";
       const instance = options.instance as string | undefined;
-      const at = options.at as string | undefined;
+      const at = (options.at as string | undefined) || "";
       const asNew = options.asNew as string | undefined;
-      const inPlace = Boolean(options.inPlace);
-      if (!source || !instance || !at || (!asNew && !inPlace) || (asNew && inPlace)) {
-        throw new Error("backup restore requires --source, --instance, --at, and exactly one of --as-new/--in-place");
+      if (!instance) {
+        throw new Error("backup restore requires --instance; --source defaults to local, --at defaults to the latest restore point, and --as-new is optional");
       }
-      await backupRestoreCmd(source, instance, at, { asNew, inPlace });
+      await backupRestoreCmd(source, instance, at, { asNew });
       return;
     }
     throw new Error(`unsupported backup action: ${action}`);
@@ -305,7 +485,7 @@ cli.command("reconfigure", "Re-run the Ansible reconciliation with the installed
 
 cli
   .command("proxy <action>", "Proxy operations")
-  .usage("sync")
+  .usage("proxy sync")
   .action(async (action) => {
     if (action !== "sync") {
       throw new Error(`unsupported proxy action: ${action}`);
@@ -315,7 +495,7 @@ cli
 
 cli
   .command("idp <action>", "Identity provider operations")
-  .usage("sync")
+  .usage("idp sync")
   .action(async (action) => {
     if (action !== "sync") {
       throw new Error(`unsupported idp action: ${action}`);
@@ -324,16 +504,80 @@ cli
   });
 
 cli
-  .command("setdomain [rootDomain]", "Update the root domain and derived Terrarium subdomains")
+  .command("set <section> [value]", "Update persisted Terrarium configuration")
   .option("--manage-domain <domain>", "Override the Cockpit domain")
   .option("--lxd-domain <domain>", "Override the LXD domain")
   .option("--auth-domain <domain>", "Override the ZITADEL domain")
-  .action(async (rootDomain, options) => {
-    await setdomainCmd(rootDomain, {
-      manageDomain: options.manageDomain as string | undefined,
-      lxdDomain: options.lxdDomain as string | undefined,
-      authDomain: options.authDomain as string | undefined
-    });
+  .option("--email <email>", "Terrarium contact/admin email")
+  .option("--acme-email <email>", "ACME account email")
+  .option("--zitadel-admin-email <email>", "ZITADEL bootstrap admin email")
+  .option("--oidc <issuer>", "External OIDC issuer URL")
+  .option("--oidc-client <clientId>", "External OIDC client ID")
+  .option("--oidc-secret <clientSecret>", "External OIDC client secret")
+  .option("--s3-endpoint <url>", "S3 endpoint URL")
+  .option("--s3-bucket <name>", "S3 bucket name")
+  .option("--s3-region <name>", "S3 region")
+  .option("--s3-prefix <prefix>", "S3 object prefix")
+  .option("--s3-access-key <key>", "S3 access key")
+  .option("--s3-secret-key <secret>", "S3 secret key")
+  .option("--syncoid-target <host>", "Remote syncoid SSH target")
+  .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset")
+  .option("--syncoid-ssh-key <path>", "SSH key path for syncoid")
+  .option("--enable", "Enable the selected integration")
+  .option("--disable", "Disable the selected integration")
+  .usage("set domains [rootDomain] | set emails | set idp local|oidc | set s3 | set syncoid")
+  .action(async (section, value, options) => {
+    if (section === "domains") {
+      await setDomainsCmd((value as string | undefined) || "", {
+        manageDomain: options.manageDomain as string | undefined,
+        lxdDomain: options.lxdDomain as string | undefined,
+        authDomain: options.authDomain as string | undefined
+      });
+      return;
+    }
+    if (section === "emails") {
+      await setEmailsCmd({
+        email: options.email as string | undefined,
+        acmeEmail: options.acmeEmail as string | undefined,
+        zitadelAdminEmail: options.zitadelAdminEmail as string | undefined
+      });
+      return;
+    }
+    if (section === "idp") {
+      await setIdpCmd({
+        mode: value as string,
+        authDomain: options.authDomain as string | undefined,
+        oidc: options.oidc as string | undefined,
+        oidcClient: options.oidcClient as string | undefined,
+        oidcSecret: options.oidcSecret as string | undefined,
+        zitadelAdminEmail: options.zitadelAdminEmail as string | undefined
+      });
+      return;
+    }
+    if (section === "s3") {
+      await setS3Cmd({
+        enable: Boolean(options.enable),
+        disable: Boolean(options.disable),
+        s3Endpoint: options.s3Endpoint as string | undefined,
+        s3Bucket: options.s3Bucket as string | undefined,
+        s3Region: options.s3Region as string | undefined,
+        s3Prefix: options.s3Prefix as string | undefined,
+        s3AccessKey: options.s3AccessKey as string | undefined,
+        s3SecretKey: options.s3SecretKey as string | undefined
+      });
+      return;
+    }
+    if (section === "syncoid") {
+      await setSyncoidCmd({
+        enable: Boolean(options.enable),
+        disable: Boolean(options.disable),
+        syncoidTarget: options.syncoidTarget as string | undefined,
+        syncoidTargetDataset: options.syncoidTargetDataset as string | undefined,
+        syncoidSshKey: options.syncoidSshKey as string | undefined
+      });
+      return;
+    }
+    throw new Error(`unsupported set section: ${section}`);
   });
 
 cli.help();

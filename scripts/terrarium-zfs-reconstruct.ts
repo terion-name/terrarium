@@ -12,7 +12,7 @@ type Manifest = {
   created_at: string;
 };
 
-function selectChain(directory: string, match: string): Manifest[] {
+function selectChain(directory: string, match = ""): Manifest[] {
   const manifests: Manifest[] = [];
   for (const entry of new Bun.Glob("*.json").scanSync(directory)) {
     manifests.push(readJsonFile<Manifest>(join(directory, entry), {} as Manifest));
@@ -21,7 +21,7 @@ function selectChain(directory: string, match: string): Manifest[] {
 
   let selected: Manifest | undefined;
   for (const item of manifests) {
-    if (item.snapshot.includes(match) || item.created_at.includes(match)) {
+    if (!match || item.snapshot.includes(match) || item.created_at.includes(match)) {
       selected = item;
     }
   }

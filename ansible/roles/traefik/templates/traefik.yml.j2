@@ -12,7 +12,7 @@ providers:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: {{ terrarium_email }}
+      email: {{ terrarium_acme_email }}
       storage: /var/lib/traefik/acme.json
       httpChallenge:
         entryPoint: web
