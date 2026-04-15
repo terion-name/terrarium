@@ -8,6 +8,7 @@ import { backupExportCmd } from "./terrarium-s3-export";
 import { proxySyncCmd as syncProxyConfig } from "./terrarium-traefik-sync";
 import { idpSyncCmd as syncIdpConfig } from "./terrarium-zitadel-sync";
 import { reconstructFromS3 } from "./terrarium-zfs-reconstruct";
+import { TERRARIUM_VERSION } from "./generated/build-info";
 import { configBoolean, configString, loadConfig, runAllowFailure, runInteractive, runText } from "./lib/common";
 
 const PREFIX = "terrariumctl";
@@ -466,6 +467,7 @@ async function setSyncoidCmd(options: {
 }
 
 const cli = cac("terrariumctl");
+cli.version(TERRARIUM_VERSION);
 
 registerInstallCommand(cli);
 

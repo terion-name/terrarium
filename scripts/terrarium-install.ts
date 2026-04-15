@@ -6,6 +6,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync,
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
+import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
 
 const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
@@ -63,6 +64,12 @@ function info(message: string): void {
 
 function success(message: string): void {
   console.log(chalk.green(`${PREFIX}: ${message}`));
+}
+
+function printSplash(): void {
+  console.log(chalk.magenta(TERRARIUM_SPLASH));
+  console.log(chalk.dim(`terrariumctl install ${TERRARIUM_VERSION}`));
+  console.log("");
 }
 
 export function validateEmail(email: string, fieldName: string): string {
@@ -602,6 +609,7 @@ function readCliOption(rawOptions: Record<string, unknown>, key: string, aliases
 }
 
 async function installTerrarium(options: InstallOptions): Promise<void> {
+  printSplash();
   requireRoot();
   ensureOs();
   await ensureDeps();

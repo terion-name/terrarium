@@ -31,6 +31,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build Terrarium binary
+        env:
+          TERRARIUM_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           mkdir -p release/dist
           bun build --compile --target=bun-linux-${{ matrix.arch }} scripts/terrariumctl.ts --outfile release/dist/terrariumctl
