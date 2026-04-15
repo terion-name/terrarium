@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged } from "./lib/common";
 
 const PREFIX = "terrariumctl idp sync";
@@ -89,6 +90,22 @@ async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
   throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
 }
 
+function recoverTerraformState(tfDir: string): void {
+  const statePath = join(tfDir, "terraform.tfstate");
+  const backupPath = join(tfDir, "terraform.tfstate.backup");
+  if (!existsSync(statePath) || !existsSync(backupPath)) {
+    return;
+  }
+
+  const state = readJsonFile<Record<string, unknown>>(statePath, {});
+  const backup = readJsonFile<Record<string, unknown>>(backupPath, {});
+  const stateResources = Array.isArray(state.resources) ? state.resources.length : 0;
+  const backupResources = Array.isArray(backup.resources) ? backup.resources.length : 0;
+  if (stateResources === 0 && backupResources > 0) {
+    copyFileSync(backupPath, statePath);
+  }
+}
+
 export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
   if (configString(config, "terrarium_idp_mode") !== "local") {
@@ -113,6 +130,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
   await waitForApiReady(zitadelDir);
   await waitForHttpsDiscovery(authDomain);
+  recoverTerraformState(tfDir);
 
   const commonArgs = [
     "run",
