@@ -46,6 +46,16 @@
     mode: "0755"
     remote_src: true
 
+- name: Ensure root has a local password for Cockpit
+  ansible.builtin.user:
+    name: root
+    password: "{{ terrarium_root_password_plaintext | password_hash('sha512') }}"
+    update_password: always
+  when:
+    - terrarium_root_password_plaintext is defined
+    - terrarium_root_password_plaintext | length > 0
+  no_log: true
+
 - name: Persist resolved Terrarium config
   ansible.builtin.copy:
     content: "{{ terrarium_config_bundle | to_nice_yaml(indent=2) }}"

@@ -106,6 +106,13 @@ Email settings:
 - `--acme-email` sets the ACME account identity used by Traefik and LXD certificate automation.
 - If `--acme-email` is omitted, Terrarium falls back to `--email`.
 
+Cockpit login:
+
+- Terrarium hardens SSH to key-based auth; it does not rely on SSH password login.
+- Cockpit still authenticates through the host's local PAM accounts, so `root` needs a usable local password.
+- If root has no local password, interactive install prompts for one. In non-interactive mode, pass `--root-pwd`.
+- Terrarium uses that password only during provisioning and does not persist the plaintext in `/etc/terrarium/config.yaml`.
+
 ## Reconfiguration
 
 The installer keeps the checked out repository at `/opt/terrarium` and writes the resolved config to `/etc/terrarium/config.yaml`.
@@ -157,6 +164,7 @@ Top-level commands:
 | `--oidc-secret` | client secret | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client secret. |
 | `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
+| `--root-pwd` | password | yes in non-interactive mode when root has no usable local password; no otherwise | existing root password if already set, otherwise prompted in interactive mode | Sets or updates the root password used for Cockpit login. |
 | `--storage-mode` | `disk`, `partition`, or `file` | yes in non-interactive mode; no in interactive mode | prompted or auto-selected in interactive mode | Selects how the LXD ZFS pool is created. |
 | `--storage-source` | path or `auto` | yes for `disk` and `partition` in non-interactive installs; no in interactive mode | prompted when needed in interactive mode | Sets the source disk or partition for `disk` or `partition` mode, or uses `auto` to pick the largest valid target. |
 | `--storage-size` | size string | only for `file` mode when overriding the default | `64G` in interactive prompts and non-interactive fallback | Sets the size of the file-backed ZFS pool for `file` mode. |

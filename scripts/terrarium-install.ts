@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { confirm, input, select } from "@inquirer/prompts";
+import { confirm, input, password, select } from "@inquirer/prompts";
 import type { CAC } from "cac";
 import chalk from "chalk";
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -59,6 +59,7 @@ type InstallOptions = {
   oidcClientId: string;
   oidcClientSecret: string;
   zitadelAdminEmail: string;
+  rootPassword: string;
   storageMode: string;
   storageSource: string;
   storageSize: string;
@@ -109,6 +110,37 @@ export function validateEmail(email: string, fieldName: string): string {
     fail(`${fieldName} must not use reserved example.* domains because ACME rejects them`);
   }
   return normalized;
+}
+
+function rootPasswordState(): "usable" | "missing" {
+  const rootShadow = readFileSync("/etc/shadow", "utf8")
+    .split("\n")
+    .find((line) => line.startsWith("root:"));
+  if (!rootShadow) {
+    return "missing";
+  }
+  const passwordField = rootShadow.split(":")[1] ?? "";
+  if (!passwordField || passwordField === "*" || passwordField === "!" || passwordField === "!!" || passwordField.startsWith("!")) {
+    return "missing";
+  }
+  return "usable";
+}
+
+async function promptPasswordWithConfirmation(message: string): Promise<string> {
+  const first = await password({
+    message,
+    mask: "*",
+    validate: (value) => (value.length > 0 ? true : "Password must not be empty")
+  });
+  const second = await password({
+    message: "Confirm password",
+    mask: "*",
+    validate: (value) => (value.length > 0 ? true : "Password must not be empty")
+  });
+  if (first !== second) {
+    fail("password confirmation does not match");
+  }
+  return first;
 }
 
 export function normalizeOidcIssuer(value: string, fieldName: string): string {
@@ -434,6 +466,10 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   options.email = options.email || (await promptEmail("Terrarium contact/admin email", `admin@${options.publicIp}.nip.io`, "--email"));
   options.acmeEmail = options.acmeEmail || (await promptEmail("ACME account email", options.email, "--acme-email"));
   options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
+  if (!options.rootPassword && rootPasswordState() !== "usable") {
+    info("Root has no usable local password. Cockpit requires one for login.");
+    options.rootPassword = await promptPasswordWithConfirmation("Set a root password for Cockpit");
+  }
 
   if (!options.domain && !options.manageDomain) {
     options.manageDomain = `manage.${dashed}.traefik.me`;
@@ -599,6 +635,9 @@ function validateNonInteractive(options: InstallOptions): void {
   }
   options.email = validateEmail(options.email, "--email");
   options.acmeEmail = validateEmail(options.acmeEmail || options.email, "--acme-email");
+  if (!options.rootPassword && rootPasswordState() !== "usable") {
+    fail("--root-pwd is required in non-interactive mode when root has no usable local password");
+  }
 
   if (options.idpMode === "local") {
     options.authDomain = options.authDomain || (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
@@ -734,8 +773,14 @@ function buildConfig(options: InstallOptions): string {
   });
 }
 
-async function runPlaybook(configPath: string): Promise<void> {
-  await $`cd ${REPO_DIR}; ansible-playbook -i ansible/inventory.ini ansible/site.yml -e @${configPath}`;
+function buildSecretConfig(options: InstallOptions): string {
+  return stringify({
+    terrarium_root_password_plaintext: options.rootPassword
+  });
+}
+
+async function runPlaybook(configPath: string, secretConfigPath: string): Promise<void> {
+  await $`cd ${REPO_DIR}; ansible-playbook -i ansible/inventory.ini ansible/site.yml -e @${configPath} -e @${secretConfigPath}`;
 }
 
 function printDnsGuidance(options: InstallOptions): void {
@@ -776,6 +821,7 @@ function defaultOptions(): InstallOptions {
     oidcClientId: "",
     oidcClientSecret: "",
     zitadelAdminEmail: "",
+    rootPassword: "",
     storageMode: "",
     storageSource: "",
     storageSize: "",
@@ -824,10 +870,16 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
 
   const tempDir = mkdtempSync(join(tmpdir(), "terrarium-config-"));
   const configPath = join(tempDir, "config.yml");
-  writeFileSync(configPath, buildConfig(options), "utf8");
+  const secretConfigPath = join(tempDir, "secrets.yml");
+  writeFileSync(configPath, buildConfig(options), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(secretConfigPath, buildSecretConfig(options), { encoding: "utf8", mode: 0o600 });
 
-  printDnsGuidance(options);
-  await runPlaybook(configPath);
+  try {
+    printDnsGuidance(options);
+    await runPlaybook(configPath, secretConfigPath);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 
   success("Terrarium installation finished.");
   console.log(`${chalk.cyan("Cockpit:")} ${chalk.white(`https://${options.manageDomain}`)}`);
@@ -838,6 +890,9 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   }
   console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
   console.log(`${chalk.cyan("Resolved config:")} ${chalk.white("/etc/terrarium/config.yaml")}`);
+  if (options.rootPassword) {
+    console.log(`${chalk.cyan("Cockpit login:")} ${chalk.white("root password was set during install")}`);
+  }
 }
 
 export function registerInstallCommand(cli: CAC): void {
@@ -857,6 +912,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--oidc-secret <clientSecret>", "OIDC client secret; required when --idp=oidc")
     .option("--auth-domain <domain>", "ZITADEL auth domain")
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL")
+    .option("--root-pwd <password>", "Set or update the root password used for Cockpit login")
     .option("--storage-mode <mode>", "Storage mode: disk, partition, or file")
     .option("--storage-source <pathOrAuto>", "Disk or partition path for disk/partition mode, or auto")
     .option("--storage-size <size>", "File-backed pool size")
@@ -888,6 +944,7 @@ export function registerInstallCommand(cli: CAC): void {
       options.oidcClientSecret = readCliOption(cliOptions, "oidcSecret");
       options.authDomain = readCliOption(cliOptions, "authDomain");
       options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail");
+      options.rootPassword = readCliOption(cliOptions, "rootPwd");
       options.storageMode = readCliOption(cliOptions, "storageMode").replace("loop", "file");
       options.storageSource = readCliOption(cliOptions, "storageSource");
       options.storageSize = readCliOption(cliOptions, "storageSize");
