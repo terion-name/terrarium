@@ -26,21 +26,21 @@ The shell bootstrap is intentionally thin. The release-published `install.sh` is
 If you want to pin a specific release instead of `latest`, use the tagged release asset directly:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/0.0.0-beta1/install.sh | bash
+curl -fsSL https://github.com/terion-name/terrarium/releases/download/0.0.0-beta3/install.sh | bash
 ```
 
 Terrarium provisions the host with:
 
-- Cockpit
-- `45Drives/cockpit-zfs`
-- `45Drives/cockpit-S3ObjectBroswer`
-- LXD with the built-in web UI
-- ZFS
-- `sanoid` and optional `syncoid`
-- Traefik for public management endpoints
-- Optional self-hosted ZITADEL at `auth.<domain>`
+- [Cockpit](https://github.com/cockpit-project/cockpit)
+- [`45Drives/cockpit-zfs`](https://github.com/45Drives/cockpit-zfs)
+- [`45Drives/cockpit-S3ObjectBroswer`](https://github.com/45Drives/cockpit-S3ObjectBroswer)
+- [LXD](https://github.com/canonical/lxd) with the built-in web UI
+- [OpenZFS](https://github.com/openzfs/zfs)
+- [`sanoid` and `syncoid`](https://github.com/jimsalterjrs/sanoid)
+- [Traefik](https://github.com/traefik/traefik) for public management endpoints
+- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`
 - External OIDC issuer support when you do not want to self-host the IDP
-- `devsec.hardening` OS and SSH hardening
+- [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
 
 ## Supported Host
 
@@ -84,6 +84,40 @@ Partition mode:
 - In interactive mode, Terrarium discovers allocatable partition targets, suggests the largest one, and asks for confirmation.
 - In non-interactive mode, `--storage-source` is required for `disk` and `partition` mode. Use `--storage-source auto` to let Terrarium pick the largest valid target automatically.
 - Terrarium does not try to shrink the mounted root filesystem.
+
+## Recommended Hardware
+
+Terrarium runs on small VPSes, but the comfortable starting point depends more on container churn and snapshot retention than on the Terrarium services themselves.
+
+- Minimum practical host: `2 vCPU`, `4 GB RAM`, `30-40 GB` boot disk, and a separate `80-120 GB` ZFS disk for light personal use.
+- Recommended general-purpose host: `4 vCPU`, `8-16 GB RAM`, `40-60 GB` boot disk, and a separate `150-300 GB` ZFS disk.
+- Heavier agent or multi-environment host: `8 vCPU`, `16+ GB RAM`, `50-80 GB` boot disk, and `300+ GB` on the ZFS disk.
+
+Storage sizing guidance:
+
+- Keep the boot disk relatively small. It mainly holds Ubuntu, logs, packages, Terrarium state, and the control plane.
+- Put LXD containers and snapshots on the separate ZFS disk whenever your provider supports block storage.
+- Terrarium keeps local rewind history as ZFS snapshots on the same pool as the containers. Those snapshots are copy-on-write, so they do not duplicate all data up front, but they do retain changed blocks for as long as the snapshots live.
+- Current default local retention is `24` hourly snapshots, `14` daily snapshots, and `3` monthly snapshots.
+- Terrarium enables ZFS `compression=zstd` on the pool. Dedup is not enabled.
+- S3 exports are separate from local sizing. They are streamed out of ZFS and compressed with `zstd` before upload, so they do not need extra permanent local disk beyond Terrarium’s working state.
+- For local rewind history, size the ZFS disk around `2x-3x` your expected live container data if the containers mostly append data or change a moderate amount day to day.
+- If your workloads rewrite large files, rebuild package trees often, or keep databases/churn-heavy workspaces inside the containers, `3x-4x` live data is safer.
+- On providers without attachable block storage, Terrarium still works with `--storage-mode file`, but you should choose a noticeably larger root disk because the host OS, live container data, and snapshots all share the same filesystem.
+
+Example sizing:
+
+- If you expect about `50 GB` of live container data, a good starting point is `20-30 GB` for the boot disk plus `100-150 GB` for the ZFS disk.
+- If that `50 GB` includes heavy churn, frequent rebuilds, package installs, caches, or mutable databases, prefer `150-250 GB` on the ZFS disk.
+- If you must use `--storage-mode file`, combine both budgets on the root disk. In that same `50 GB` example, you would typically want `120-180 GB` total root storage, and more if the containers are churn-heavy.
+
+## Provider Guides
+
+- [Provider guide index](docs/providers/README.md)
+- [DigitalOcean](docs/providers/digitalocean.md)
+- [Vultr](docs/providers/vultr.md)
+- [Hetzner Cloud](docs/providers/hetzner.md)
+- [Hostinger](docs/providers/hostinger.md)
 
 ## Public Endpoints
 

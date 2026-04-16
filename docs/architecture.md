@@ -22,7 +22,7 @@ Terrarium is intentionally split into three layers:
 
 - `disk`: dedicated block device, wiped and turned into a ZFS pool.
 - `partition`: prepared partition target or a whole non-root disk that Terrarium can partition.
-- `loop`: a file-backed ZFS pool on the root filesystem.
+- `file`: a file-backed ZFS pool on the root filesystem.
 
 ## Backups
 
