@@ -80,7 +80,9 @@ Fallback:
 
 Partition mode:
 
-- `--storage-mode partition` is intended for an existing safe partition target or a non-root whole disk that Terrarium can partition.
+- `--storage-mode partition` is intended for an existing unused partition or allocatable free space on a non-root disk.
+- In interactive mode, Terrarium discovers allocatable partition targets, suggests the largest one, and asks for confirmation.
+- In non-interactive mode, `--storage-source` is required for `disk` and `partition` mode. Use `--storage-source auto` to let Terrarium pick the largest valid target automatically.
 - Terrarium does not try to shrink the mounted root filesystem.
 
 ## Public Endpoints
@@ -156,7 +158,7 @@ Top-level commands:
 | `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
 | `--storage-mode` | `disk`, `partition`, or `file` | yes in non-interactive mode; no in interactive mode | prompted or auto-selected in interactive mode | Selects how the LXD ZFS pool is created. |
-| `--storage-source` | path | only for `disk` or `partition` mode in non-interactive installs | prompted when needed | Sets the source disk or partition for `disk` or `partition` mode. |
+| `--storage-source` | path or `auto` | yes for `disk` and `partition` in non-interactive installs; no in interactive mode | prompted when needed in interactive mode | Sets the source disk or partition for `disk` or `partition` mode, or uses `auto` to pick the largest valid target. |
 | `--storage-size` | size string | only for `file` mode when overriding the default | `64G` in interactive prompts and non-interactive fallback | Sets the size of the file-backed ZFS pool for `file` mode. |
 | `--enable-s3` | none | no | disabled | Enables S3-backed archive exports. |
 | `--s3-endpoint` | URL | only when using a custom S3-compatible provider | `https://s3.amazonaws.com` in interactive prompts; otherwise provider/default SDK behavior | Sets a custom S3-compatible API endpoint. |

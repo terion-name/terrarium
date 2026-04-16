@@ -19,6 +19,30 @@ type InstallMode = "interactive" | "non-interactive";
 type IdpMode = "local" | "oidc";
 type StorageMode = "disk" | "partition" | "file";
 
+type DiskCandidate = {
+  path: string;
+  sizeBytes: number;
+  sizeLabel: string;
+};
+
+type PartitionCandidate =
+  | {
+      kind: "partition";
+      source: string;
+      sizeBytes: number;
+      sizeLabel: string;
+      description: string;
+    }
+  | {
+      kind: "free-space";
+      source: string;
+      sizeBytes: number;
+      sizeLabel: string;
+      description: string;
+      startMiB: string;
+      endMiB: string;
+    };
+
 type InstallOptions = {
   ref: string;
   mode: InstallMode;
@@ -38,6 +62,8 @@ type InstallOptions = {
   storageMode: string;
   storageSource: string;
   storageSize: string;
+  storagePartitionStart: string;
+  storagePartitionEnd: string;
   enableS3: boolean;
   s3Endpoint: string;
   s3Bucket: string;
@@ -228,21 +254,113 @@ async function detectPublicIp(current = ""): Promise<string> {
   return first;
 }
 
-async function listCandidateDisks(): Promise<Array<{ path: string; size: string }>> {
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0B";
+  }
+  const units = ["B", "K", "M", "G", "T", "P"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)}${units[unitIndex]}`;
+}
+
+async function detectRootDiskPath(): Promise<string> {
   const rootSource = await $`findmnt -n -o SOURCE /`.nothrow().quiet();
   const rootValue = rootSource.stdout.toString().trim();
   const rootDisk = rootValue ? (await $`lsblk -no PKNAME ${rootValue}`.nothrow().quiet()).stdout.toString().trim() : "";
-  const rootPath = rootDisk ? `/dev/${rootDisk}` : "";
-  const lsblk = (await $`lsblk -dpno NAME,TYPE,SIZE,MOUNTPOINT`.text()).trim();
+  return rootDisk ? `/dev/${rootDisk}` : "";
+}
 
-  return lsblk
+async function listCandidateDisks(): Promise<DiskCandidate[]> {
+  const rootPath = await detectRootDiskPath();
+  const lsblk = (await $`lsblk -dpno NAME,TYPE,SIZE,MOUNTPOINT`.text()).trim();
+  const diskRows = lsblk
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.split(/\s+/))
     .filter((parts) => parts[1] === "disk" && parts[0] !== rootPath)
-    .map((parts) => ({ path: parts[0] ?? "", size: parts[2] ?? "" }))
+    .map((parts) => ({ path: parts[0] ?? "", sizeLabel: parts[2] ?? "" }))
     .filter((item) => item.path);
+
+  const result: DiskCandidate[] = [];
+  for (const row of diskRows) {
+    const sizeBytes = Number((await $`lsblk -dbno SIZE ${row.path}`.text()).trim() || "0");
+    result.push({ path: row.path, sizeBytes, sizeLabel: row.sizeLabel || formatBytes(sizeBytes) });
+  }
+  return result;
+}
+
+async function listPartitionCandidates(disks: DiskCandidate[]): Promise<PartitionCandidate[]> {
+  const candidates: PartitionCandidate[] = [];
+
+  for (const disk of disks) {
+    const partsRaw = (await $`lsblk -rnbpo NAME,TYPE,SIZE,MOUNTPOINT ${disk.path}`.text()).trim();
+    if (partsRaw) {
+      for (const line of partsRaw.split("\n")) {
+        const [path = "", type = "", sizeRaw = "0", ...rest] = line.trim().split(/\s+/);
+        const mountpoint = rest.join(" ");
+        if (type !== "part" || !path || mountpoint) {
+          continue;
+        }
+        const sizeBytes = Number(sizeRaw) || 0;
+        candidates.push({
+          kind: "partition",
+          source: path,
+          sizeBytes,
+          sizeLabel: formatBytes(sizeBytes),
+          description: `${path} existing partition (${formatBytes(sizeBytes)})`
+        });
+      }
+    }
+
+    const parted = await $`parted -sm ${disk.path} unit MiB print free`.nothrow().quiet();
+    if (parted.exitCode !== 0) {
+      continue;
+    }
+    for (const line of parted.stdout.toString().split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.includes(":free;")) {
+        continue;
+      }
+      const fields = trimmed.split(":");
+      if (fields.length < 5) {
+        continue;
+      }
+      const startField = fields[1]?.replace("MiB", "") ?? "";
+      const endField = fields[2]?.replace("MiB", "") ?? "";
+      const sizeField = fields[3]?.replace("MiB", "") ?? "";
+      const startMiB = Number(startField);
+      const endMiB = Number(endField);
+      const sizeMiB = Number(sizeField);
+      if (!Number.isFinite(startMiB) || !Number.isFinite(endMiB) || !Number.isFinite(sizeMiB) || sizeMiB < 256) {
+        continue;
+      }
+      candidates.push({
+        kind: "free-space",
+        source: disk.path,
+        sizeBytes: Math.round(sizeMiB * 1024 * 1024),
+        sizeLabel: `${sizeMiB >= 1024 ? `${(sizeMiB / 1024).toFixed(sizeMiB / 1024 >= 10 ? 0 : 1)}G` : `${Math.round(sizeMiB)}M`}`,
+        description: `${disk.path} free space ${startField}-${endField}MiB (${formatBytes(Math.round(sizeMiB * 1024 * 1024))})`,
+        startMiB: `${startField}MiB`,
+        endMiB: `${endField}MiB`
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => right.sizeBytes - left.sizeBytes);
+}
+
+function selectLargestDisk(disks: DiskCandidate[]): DiskCandidate | null {
+  return disks.sort((left, right) => right.sizeBytes - left.sizeBytes)[0] ?? null;
+}
+
+function selectLargestPartitionCandidate(candidates: PartitionCandidate[]): PartitionCandidate | null {
+  return candidates.sort((left, right) => right.sizeBytes - left.sizeBytes)[0] ?? null;
 }
 
 async function promptText(message: string, defaultValue = ""): Promise<string> {
@@ -275,6 +393,38 @@ async function promptConfirm(message: string, defaultValue: boolean, assumeYes: 
     return true;
   }
   return await confirm({ message, default: defaultValue });
+}
+
+function applyPartitionCandidate(options: InstallOptions, candidate: PartitionCandidate): void {
+  options.storageSource = candidate.source;
+  if (candidate.kind === "free-space") {
+    options.storagePartitionStart = candidate.startMiB;
+    options.storagePartitionEnd = candidate.endMiB;
+  } else {
+    options.storagePartitionStart = "";
+    options.storagePartitionEnd = "";
+  }
+}
+
+async function resolveAutoStorageSource(options: InstallOptions, disks: DiskCandidate[], partitions: PartitionCandidate[]): Promise<void> {
+  if (options.storageSource !== "auto") {
+    return;
+  }
+  if (options.storageMode === "disk") {
+    const disk = selectLargestDisk(disks);
+    if (!disk) {
+      fail("no allocatable non-root disk found for --storage-source=auto");
+    }
+    options.storageSource = disk.path;
+    return;
+  }
+  if (options.storageMode === "partition") {
+    const candidate = selectLargestPartitionCandidate(partitions);
+    if (!candidate) {
+      fail("no allocatable partition target found for --storage-source=auto");
+    }
+    applyPartitionCandidate(options, candidate);
+  }
 }
 
 async function interactiveConfig(options: InstallOptions): Promise<void> {
@@ -338,9 +488,10 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   }
 
   const disks = await listCandidateDisks();
+  const partitionCandidates = await listPartitionCandidates(disks);
   if (disks.length > 0) {
     for (const disk of disks) {
-      info(`detected extra disk: ${disk.path} ${disk.size}`.trim());
+      info(`detected extra disk: ${disk.path} ${disk.sizeLabel}`.trim());
     }
     if (!options.storageMode) {
       options.storageMode = (await select({
@@ -360,17 +511,55 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   }
 
   switch (options.storageMode) {
-    case "disk":
-    case "partition":
+    case "disk": {
+      await resolveAutoStorageSource(options, disks, partitionCandidates);
       if (!options.storageSource) {
-        options.storageSource = await promptText("Storage source device or partition", disks[0]?.path ?? "");
+        const suggested = selectLargestDisk(disks);
+        if (!suggested) {
+          fail("disk mode requires a non-root disk, but none were detected");
+        }
+        info(`Suggested disk target: ${suggested.path} (${suggested.sizeLabel})`);
+        if (!(await promptConfirm(`Use ${suggested.path} for whole-disk ZFS storage?`, true, options.assumeYes))) {
+          options.storageSource = await promptText("Storage source disk", suggested.path);
+        } else {
+          options.storageSource = suggested.path;
+        }
       }
       if (!options.storageSource) {
-        fail(`storage source is required for ${options.storageMode}`);
+        fail("storage source is required for disk mode");
       }
       break;
+    }
+    case "partition": {
+      await resolveAutoStorageSource(options, disks, partitionCandidates);
+      if (!options.storageSource) {
+        const suggested = selectLargestPartitionCandidate(partitionCandidates);
+        if (!suggested) {
+          fail("partition mode requires allocatable free space or an unused partition, but none were found");
+        }
+        info(`Suggested partition target: ${suggested.description}`);
+        if (!(await promptConfirm(`Use ${suggested.description}?`, true, options.assumeYes))) {
+          const chosen = (await select({
+            message: "Choose allocatable partition target",
+            choices: partitionCandidates.map((candidate) => ({
+              name: candidate.description,
+              value: JSON.stringify(candidate)
+            }))
+          })) as string;
+          applyPartitionCandidate(options, JSON.parse(chosen) as PartitionCandidate);
+        } else {
+          applyPartitionCandidate(options, suggested);
+        }
+      }
+      if (!options.storageSource) {
+        fail("storage source is required for partition mode");
+      }
+      break;
+    }
     case "file":
       options.storageSize = options.storageSize || (await promptText("File-backed ZFS pool size", "64G"));
+      options.storagePartitionStart = "";
+      options.storagePartitionEnd = "";
       break;
     default:
       fail(`unsupported storage mode: ${options.storageMode}`);
@@ -433,7 +622,7 @@ function validateNonInteractive(options: InstallOptions): void {
   }
 
   if (!options.storageMode) {
-    throw new Error("storage mode must be resolved after public IP detection");
+    fail("--storage-mode is required in non-interactive mode");
   }
 
   switch (options.storageMode) {
@@ -442,9 +631,14 @@ function validateNonInteractive(options: InstallOptions): void {
       if (!options.storageSource) {
         fail(`--storage-source is required for ${options.storageMode}`);
       }
+      if (options.storageSource === "auto") {
+        fail(`--storage-source=auto must be resolved before validation for ${options.storageMode}`);
+      }
       break;
     case "file":
       options.storageSize = options.storageSize || "64G";
+      options.storagePartitionStart = "";
+      options.storagePartitionEnd = "";
       break;
     default:
       fail(`invalid --storage-mode value: ${options.storageMode}`);
@@ -477,15 +671,8 @@ function validateNonInteractive(options: InstallOptions): void {
 
 async function resolveNonInteractiveStorage(options: InstallOptions): Promise<void> {
   const disks = await listCandidateDisks();
-  if (!options.storageMode) {
-    if (disks.length > 0) {
-      options.storageMode = "disk";
-      options.storageSource = disks[0]?.path ?? "";
-    } else {
-      options.storageMode = "file";
-      options.storageSize = options.storageSize || "64G";
-    }
-  }
+  const partitionCandidates = await listPartitionCandidates(disks);
+  await resolveAutoStorageSource(options, disks, partitionCandidates);
 }
 
 async function confirmDestructiveActions(options: InstallOptions): Promise<void> {
@@ -499,7 +686,13 @@ async function confirmDestructiveActions(options: InstallOptions): Promise<void>
       if (
         options.storageSource &&
         existsSync(options.storageSource) &&
-        !(await promptConfirm(`Terrarium may repartition ${options.storageSource}. Continue?`, false, options.assumeYes))
+        !(await promptConfirm(
+          options.storagePartitionStart && options.storagePartitionEnd
+            ? `Terrarium will create a partition on ${options.storageSource} in free space ${options.storagePartitionStart}-${options.storagePartitionEnd}. Continue?`
+            : `Terrarium may repartition ${options.storageSource}. Continue?`,
+          false,
+          options.assumeYes
+        ))
       ) {
         fail("aborted");
       }
@@ -525,6 +718,8 @@ function buildConfig(options: InstallOptions): string {
     terrarium_storage_mode: options.storageMode,
     terrarium_storage_source: options.storageSource,
     terrarium_storage_size: options.storageSize,
+    terrarium_storage_partition_start: options.storagePartitionStart,
+    terrarium_storage_partition_end: options.storagePartitionEnd,
     terrarium_enable_s3: options.enableS3,
     terrarium_s3_endpoint: options.s3Endpoint,
     terrarium_s3_bucket: options.s3Bucket,
@@ -584,6 +779,8 @@ function defaultOptions(): InstallOptions {
     storageMode: "",
     storageSource: "",
     storageSize: "",
+    storagePartitionStart: "",
+    storagePartitionEnd: "",
     enableS3: false,
     s3Endpoint: "",
     s3Bucket: "",
@@ -661,7 +858,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--auth-domain <domain>", "ZITADEL auth domain")
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL")
     .option("--storage-mode <mode>", "Storage mode: disk, partition, or file")
-    .option("--storage-source <path>", "Disk or partition path for disk/partition mode")
+    .option("--storage-source <pathOrAuto>", "Disk or partition path for disk/partition mode, or auto")
     .option("--storage-size <size>", "File-backed pool size")
     .option("--enable-s3", "Enable S3 archive backups")
     .option("--s3-endpoint <url>", "S3 endpoint URL")

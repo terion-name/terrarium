@@ -10,6 +10,8 @@
     terrarium_storage_mode: file
     terrarium_storage_source: ""
     terrarium_storage_size: ""
+    terrarium_storage_partition_start: ""
+    terrarium_storage_partition_end: ""
     terrarium_public_ip: "{{ ansible_default_ipv4.address }}"
     terrarium_root_domain: ""
     terrarium_manage_domain: "{{ ('manage.' ~ terrarium_root_domain) if terrarium_root_domain else ('manage.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me') }}"
@@ -53,6 +55,8 @@
       terrarium_storage_mode: "{{ terrarium_storage_mode }}"
       terrarium_storage_source: "{{ terrarium_storage_source }}"
       terrarium_storage_size: "{{ terrarium_storage_size }}"
+      terrarium_storage_partition_start: "{{ terrarium_storage_partition_start }}"
+      terrarium_storage_partition_end: "{{ terrarium_storage_partition_end }}"
       terrarium_enable_s3: "{{ terrarium_enable_s3 }}"
       terrarium_s3_endpoint: "{{ terrarium_s3_endpoint }}"
       terrarium_s3_bucket: "{{ terrarium_s3_bucket }}"

@@ -69,6 +69,18 @@
     - terrarium_storage_mode == 'partition'
     - terrarium_zpool_check.rc != 0
     - terrarium_partition_source_type.stdout == 'disk'
+    - terrarium_storage_partition_start | length == 0
+
+- name: Create partition in discovered free space for partition mode
+  ansible.builtin.command: >-
+    parted -s {{ terrarium_storage_source }}
+    mkpart terrarium-zfs {{ terrarium_storage_partition_start }} {{ terrarium_storage_partition_end }}
+  when:
+    - terrarium_storage_mode == 'partition'
+    - terrarium_zpool_check.rc != 0
+    - terrarium_partition_source_type.stdout == 'disk'
+    - terrarium_storage_partition_start | length > 0
+    - terrarium_storage_partition_end | length > 0
 
 - name: Determine effective partition target
   ansible.builtin.set_fact:
