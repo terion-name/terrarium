@@ -198,17 +198,24 @@ async function ensureProjectRole(authDomain: string, pat: string, projectId: str
   if (updateResult.exitCode === 0) {
     return;
   }
-  const stderr = `${updateResult.stdout}\n${updateResult.stderr}`.toLowerCase();
-  if (!stderr.includes("not found")) {
-    throw new Error(updateResult.stderr.trim() || updateResult.stdout.trim() || "failed to update Terrarium project role");
-  }
-  await zitadelApi(
-    authDomain,
-    pat,
-    "POST",
-    `/management/v1/projects/${projectId}/roles`,
-    { roleKey: adminGroup, displayName: "Terrarium Management Admin", group: "Terrarium" }
+  const createResult = await runAllowFailure(
+    [
+      "curl",
+      "-fsS",
+      "-X",
+      "POST",
+      "-H",
+      `Authorization: Bearer ${pat}`,
+      "-H",
+      "Content-Type: application/json",
+      `https://${authDomain}/management/v1/projects/${projectId}/roles`,
+      "-d",
+      JSON.stringify({ roleKey: adminGroup, displayName: "Terrarium Management Admin", group: "Terrarium" })
+    ]
   );
+  if (createResult.exitCode !== 0) {
+    throw new Error(createResult.stderr.trim() || createResult.stdout.trim() || "failed to ensure Terrarium project role");
+  }
 }
 
 async function lookupUserId(authDomain: string, pat: string, loginName: string): Promise<string> {
