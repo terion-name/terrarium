@@ -20,3 +20,13 @@ output "lxd_client_id" {
   value     = zitadel_application_oidc.lxd.client_id
   sensitive = true
 }
+
+output "routes_client_id" {
+  value     = zitadel_application_oidc.routes.client_id
+  sensitive = true
+}
+
+output "routes_client_secret" {
+  value     = zitadel_application_oidc.routes.client_secret
+  sensitive = true
+}

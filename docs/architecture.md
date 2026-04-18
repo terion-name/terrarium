@@ -55,9 +55,17 @@ Terrarium is split into four layers:
 - Supported label formats are:
   - `https://domain[:container_port][/path]`
   - `http://domain[:container_port][/path]`
+  - `https://domain[:container_port][/path]@auth`
+  - `https://domain[:container_port][/path]@auth:group1,group2`
+  - `http://domain[:container_port][/path]@auth`
+  - `http://domain[:container_port][/path]@auth:group1,group2`
   - `tcp://hostport:containerport`
   - `udp://hostport:containerport`
 - The sync job renders Traefik dynamic config, extends static Traefik entrypoints when raw TCP/UDP ports are needed, and reconciles Terrarium-managed UFW rules for those dynamic ports.
+- For auth-protected published routes, the sync job also reconciles a host-side oauth2-proxy route-auth stack and publishes a shared callback under `https://manage.<domain>/oauth2/app/callback`.
+- `@auth` means “any authenticated user”.
+- `@auth:group1,group2` means “any authenticated user in at least one listed group”.
+- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so that the shared callback and cookie domain remain valid.
 
 ## Storage
 
@@ -131,6 +139,7 @@ Important runtime paths in the current implementation:
 - Secrets directory: `/etc/terrarium/secrets`
 - General state: `/var/lib/terrarium`
 - oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy`
+- oauth2-proxy published-route runtime: `/var/lib/terrarium/oauth2-proxy-routes`
 - S3 catalog: `/var/lib/terrarium/catalog`
 - Last exported snapshots: `/var/lib/terrarium/lastsnapshots`
 - Restore workspace: `/var/lib/terrarium/restore`

@@ -1,11 +1,17 @@
 import { URL } from "node:url";
-import { configString, loadConfig, readJsonFile, runAllowFailure, runJson, runShell, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
+import { mkdirSync, readFileSync } from "node:fs";
+import { configString, loadConfig, readJsonFile, runAllowFailure, runJson, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
 
 const PREFIX = "terrariumctl proxy sync";
 const DEFAULT_CONFIG_PATH = "/etc/terrarium/config.yaml";
 const STATIC_CONFIG_PATH = "/etc/traefik/traefik.yml";
 const DYNAMIC_CONFIG_PATH = "/etc/traefik/dynamic/terrarium-lxc.yml";
 const UFW_STATE_PATH = "/var/lib/terrarium/traefik-ufw-state.json";
+const OAUTH2_PROXY_COOKIE_SECRET_PATH = "/etc/terrarium/secrets/oauth2_proxy_cookie_secret";
+const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
+const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
+const ROUTE_AUTH_BASE_PORT = 4181;
+const ROUTE_AUTH_GROUP_BASE_PORT = 4200;
 
 type LxcAddress = {
   family?: string;
@@ -34,16 +40,65 @@ type DesiredPort = {
   port: number;
 };
 
+type AuthSpec = {
+  enabled: boolean;
+  groups: string[];
+};
+
+type HttpProxyItem = {
+  kind: "http";
+  scheme: "http" | "https";
+  host: string;
+  path: string;
+  targetPort: number;
+  auth: AuthSpec;
+};
+
+type TransportProxyItem = { kind: "tcp" | "udp"; hostPort: number; containerPort: number };
+
+type RouteAuthProfile = {
+  key: string;
+  groups: string[];
+  port: number;
+  callbackPath: string;
+  middlewareName: string;
+  serviceName: string;
+  containerName: string;
+};
+
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "route";
 }
 
 function splitProxyItems(rawValue: string): string[] {
-  return rawValue
-    .replaceAll("\n", ",")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const normalized = rawValue.replaceAll("\n", ",");
+  const items: string[] = [];
+  let current = "";
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    if (char !== ",") {
+      current += char;
+      continue;
+    }
+
+    const remainder = normalized.slice(index + 1).trimStart();
+    if (/^(https?:\/\/|tcp:\/\/|udp:\/\/)/.test(remainder)) {
+      if (current.trim()) {
+        items.push(current.trim());
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) {
+    items.push(current.trim());
+  }
+
+  return items;
 }
 
 function findIpv4(instance: LxcInstance): string | null {
@@ -57,11 +112,39 @@ function findIpv4(instance: LxcInstance): string | null {
   return null;
 }
 
-function parseProxyItem(item: string):
-  | { kind: "http"; scheme: "http" | "https"; host: string; path: string; targetPort: number }
-  | { kind: "tcp" | "udp"; hostPort: number; containerPort: number } {
-  if (item.startsWith("http://") || item.startsWith("https://")) {
-    const parsed = new URL(item);
+function parseAuthSuffix(item: string): { route: string; auth: AuthSpec } {
+  const authIndex = item.lastIndexOf("@auth");
+  if (authIndex === -1) {
+    return { route: item, auth: { enabled: false, groups: [] } };
+  }
+
+  const suffix = item.slice(authIndex);
+  if (!/^@auth(?::[A-Za-z0-9._,-]+)?$/.test(suffix)) {
+    throw new Error(`unsupported auth suffix: ${suffix}`);
+  }
+
+  const groups = suffix.includes(":")
+    ? suffix
+        .slice(suffix.indexOf(":") + 1)
+        .split(",")
+        .map((group) => group.trim())
+        .filter(Boolean)
+    : [];
+
+  return {
+    route: item.slice(0, authIndex),
+    auth: {
+      enabled: true,
+      groups: [...new Set(groups)].sort()
+    }
+  };
+}
+
+function parseProxyItem(item: string): HttpProxyItem | TransportProxyItem {
+  const { route, auth } = parseAuthSuffix(item);
+
+  if (route.startsWith("http://") || route.startsWith("https://")) {
+    const parsed = new URL(route);
     if (parsed.search || parsed.hash) {
       throw new Error(`query strings and fragments are not supported: ${item}`);
     }
@@ -70,11 +153,16 @@ function parseProxyItem(item: string):
       scheme: parsed.protocol.replace(":", "") as "http" | "https",
       host: parsed.hostname,
       path: parsed.pathname || "/",
-      targetPort: parsed.port ? Number(parsed.port) : 80
+      targetPort: parsed.port ? Number(parsed.port) : 80,
+      auth
     };
   }
 
-  const match = /^(tcp|udp):\/\/([0-9]{1,5}):([0-9]{1,5})$/.exec(item);
+  if (auth.enabled) {
+    throw new Error("auth protection is supported only for http:// and https:// routes");
+  }
+
+  const match = /^(tcp|udp):\/\/([0-9]{1,5}):([0-9]{1,5})$/.exec(route);
   if (!match) {
     throw new Error(`unsupported proxy value: ${item}`);
   }
@@ -176,6 +264,188 @@ async function syncUfw(desiredPorts: DesiredPort[]): Promise<string[]> {
   return errors;
 }
 
+function routeHostAllowedForSharedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
+  if (!rootDomain) {
+    return host === manageDomain;
+  }
+  return host === rootDomain || host.endsWith(`.${rootDomain}`);
+}
+
+function buildRouteAuthProfiles(containers: LxcInstance[], config: Record<string, unknown>): { profiles: RouteAuthProfile[]; errors: string[] } {
+  const rootDomain = configString(config, "terrarium_root_domain");
+  const manageDomain = configString(config, "terrarium_manage_domain");
+  const profileGroups = new Map<string, string[]>();
+  const errors: string[] = [];
+
+  for (const container of containers) {
+    const name = container.name ?? "unknown";
+    const label = container.config?.["user.proxy"]?.trim() ?? "";
+    if (!label) {
+      continue;
+    }
+
+    for (const rawItem of splitProxyItems(label)) {
+      let parsed: HttpProxyItem | TransportProxyItem;
+      try {
+        parsed = parseProxyItem(rawItem);
+      } catch (error) {
+        errors.push(`${name}: ${String(error).replace(/^Error: /, "")}`);
+        continue;
+      }
+
+      if (parsed.kind !== "http" || !parsed.auth.enabled) {
+        continue;
+      }
+
+      if (!routeHostAllowedForSharedAuth(parsed.host, rootDomain, manageDomain)) {
+        errors.push(`${name}: auth-protected route host ${parsed.host} must be ${manageDomain} or a subdomain of ${rootDomain}`);
+        continue;
+      }
+
+      const key = parsed.auth.groups.join(",");
+      profileGroups.set(key, parsed.auth.groups);
+    }
+  }
+
+  const profiles: RouteAuthProfile[] = profileGroups.size > 0
+    ? [
+        {
+          key: "",
+          groups: [],
+          port: ROUTE_AUTH_BASE_PORT,
+          callbackPath: "/oauth2/app/callback",
+          middlewareName: "lxc-auth-default",
+          serviceName: "oauth2-proxy-route-app",
+          containerName: "app"
+        }
+      ]
+    : [];
+
+  for (const [index, [key, groups]] of [...profileGroups.entries()].filter(([key]) => key).sort(([a], [b]) => a.localeCompare(b)).entries()) {
+    const suffix = slugify(key);
+    profiles.push({
+      key,
+      groups,
+      port: ROUTE_AUTH_GROUP_BASE_PORT + index,
+      callbackPath: "/oauth2/app/callback",
+      middlewareName: `lxc-auth-${suffix}`,
+      serviceName: `oauth2-proxy-route-${suffix}`,
+      containerName: `groups-${suffix}`
+    });
+  }
+
+  return { profiles, errors };
+}
+
+function buildRouteAuthCompose(
+  config: Record<string, unknown>,
+  profiles: RouteAuthProfile[],
+  clientId: string,
+  clientSecret: string,
+  cookieSecret: string
+): string {
+  const issuer = configString(config, "terrarium_oidc_issuer");
+  const manageDomain = configString(config, "terrarium_manage_domain");
+  const rootDomain = configString(config, "terrarium_root_domain") || manageDomain;
+
+  const services = Object.fromEntries(
+    profiles.map((profile) => {
+      const cfgLines = [
+        'provider = "oidc"',
+        'provider_display_name = "Terrarium"',
+        `http_address = "127.0.0.1:${profile.port}"`,
+        `redirect_url = "https://${manageDomain}${profile.callbackPath}"`,
+        `oidc_issuer_url = "${issuer}"`,
+        'oidc_groups_claim = "groups"',
+        `client_id = "${clientId}"`,
+        `client_secret = "${clientSecret}"`,
+        `cookie_secret = "${cookieSecret}"`,
+        "cookie_secure = true",
+        `cookie_domains = [ "${rootDomain}" ]`,
+        `whitelist_domains = [ "${rootDomain}", "${manageDomain}" ]`,
+        'email_domains = [ "*" ]',
+        'upstreams = [ "static://202" ]',
+        'scope = "openid profile email"',
+        "reverse_proxy = true",
+        'code_challenge_method = "S256"',
+        "skip_provider_button = true",
+        "set_xauthrequest = true",
+        "pass_authorization_header = true",
+        "pass_user_headers = true",
+        "pass_access_token = false",
+        "skip_jwt_bearer_tokens = true",
+        "ssl_insecure_skip_verify = false"
+      ];
+      if (profile.groups.length > 0) {
+        cfgLines.push(`allowed_groups = [ ${profile.groups.map((group) => `"${group}"`).join(", ")} ]`);
+      }
+
+      return [
+        profile.containerName,
+        {
+          image: "quay.io/oauth2-proxy/oauth2-proxy:v7.13.0",
+          user: "0:0",
+          network_mode: "host",
+          restart: "unless-stopped",
+          command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"],
+          volumes: [`${ROUTE_AUTH_DIR}/${profile.containerName}.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro`],
+          environment: {
+            TERRARIUM_ROUTE_AUTH_CONFIG: cfgLines.join("\n")
+          }
+        }
+      ];
+    })
+  );
+
+  for (const profile of profiles) {
+    writeIfChanged(`${ROUTE_AUTH_DIR}/${profile.containerName}.cfg`, `${(services[profile.containerName] as { environment: { TERRARIUM_ROUTE_AUTH_CONFIG: string } }).environment.TERRARIUM_ROUTE_AUTH_CONFIG}\n`);
+    delete (services[profile.containerName] as { environment?: unknown }).environment;
+  }
+
+  return yamlStringify({ services });
+}
+
+async function syncRouteAuthStack(config: Record<string, unknown>, profiles: RouteAuthProfile[]): Promise<string[]> {
+  const errors: string[] = [];
+  mkdirSync(ROUTE_AUTH_DIR, { recursive: true });
+
+  if (profiles.length === 0) {
+    writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, yamlStringify({ services: {} }));
+    await runAllowFailure(["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "down", "--remove-orphans"]);
+    return errors;
+  }
+
+  const cookieSecret = readFileSync(OAUTH2_PROXY_COOKIE_SECRET_PATH, "utf8").trim();
+  const idpMode = configString(config, "terrarium_idp_mode");
+  const outputs = idpMode === "local" ? readJsonFile<Record<string, { value?: string }>>("/etc/terrarium/zitadel-apps.json", {}) : {};
+  const clientId =
+    (idpMode === "local" ? outputs.routes_client_id?.value : undefined) || configString(config, "terrarium_oidc_client_id");
+  const clientSecret =
+    (idpMode === "local" ? outputs.routes_client_secret?.value : undefined) || configString(config, "terrarium_oidc_client_secret");
+
+  if (!configString(config, "terrarium_oidc_issuer")) {
+    errors.push("route auth requires terrarium_oidc_issuer");
+    return errors;
+  }
+  if (!clientId || !clientSecret) {
+    errors.push("route auth requires an OIDC client with redirect URI https://manage.<domain>/oauth2/app/callback");
+    return errors;
+  }
+  if (![16, 24, 32].includes(cookieSecret.length)) {
+    errors.push("route auth cookie secret is invalid");
+    return errors;
+  }
+
+  const composeYaml = buildRouteAuthCompose(config, profiles, clientId, clientSecret, cookieSecret);
+  writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, composeYaml);
+  const result = await runAllowFailure(["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "up", "-d", "--remove-orphans"]);
+  if (result.exitCode !== 0) {
+    errors.push(result.stderr.trim() || result.stdout.trim() || "failed to reconcile route auth stack");
+  }
+
+  return errors;
+}
+
 function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Record<string, { address: string }>): string {
   return yamlStringify({
     entryPoints: {
@@ -204,10 +474,11 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
   });
 }
 
-function buildDynamicConfig(containers: LxcInstance[]): {
+function buildDynamicConfig(containers: LxcInstance[], config: Record<string, unknown>): {
   dynamicYaml: string;
   extraEntrypoints: Record<string, { address: string }>;
   ufwPorts: DesiredPort[];
+  authProfiles: RouteAuthProfile[];
   errors: string[];
 } {
   const dynamic: Record<string, unknown> = {
@@ -234,6 +505,7 @@ function buildDynamicConfig(containers: LxcInstance[]): {
 
   const httpRouters = (dynamic.http as Record<string, unknown>).routers as Record<string, unknown>;
   const httpServices = (dynamic.http as Record<string, unknown>).services as Record<string, unknown>;
+  const httpMiddlewares = (dynamic.http as Record<string, unknown>).middlewares as Record<string, unknown>;
   const tcpRouters = (dynamic.tcp as Record<string, unknown>).routers as Record<string, unknown>;
   const tcpServices = (dynamic.tcp as Record<string, unknown>).services as Record<string, unknown>;
   const udpRouters = (dynamic.udp as Record<string, unknown>).routers as Record<string, unknown>;
@@ -243,6 +515,40 @@ function buildDynamicConfig(containers: LxcInstance[]): {
   const httpClaims = new Set<string>();
   const portClaims = new Set<string>();
   const errors: string[] = [];
+  const { profiles: authProfiles, errors: authProfileErrors } = buildRouteAuthProfiles(containers, config);
+  errors.push(...authProfileErrors);
+  const authProfileByKey = new Map(authProfiles.map((profile) => [profile.key, profile]));
+
+  if (authProfiles.length > 0) {
+    httpRouters["lxc-oauth2-app"] = {
+      entryPoints: ["websecure"],
+      rule: `Host(\`${configString(config, "terrarium_manage_domain")}\`) && PathPrefix(\`/oauth2/app/\`)`,
+      service: "oauth2-proxy-route-app",
+      priority: 600,
+      tls: { certResolver: "letsencrypt" }
+    };
+    httpServices["oauth2-proxy-route-app"] = {
+      loadBalancer: {
+        servers: [{ url: `http://127.0.0.1:${ROUTE_AUTH_BASE_PORT}` }]
+      }
+    };
+    httpMiddlewares["lxc-auth-default"] = {
+      forwardAuth: {
+        address: `http://127.0.0.1:${ROUTE_AUTH_BASE_PORT}/`,
+        trustForwardHeader: true,
+        authResponseHeaders: ["X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Groups"]
+      }
+    };
+    for (const profile of authProfiles.filter((profile) => profile.groups.length > 0)) {
+      httpMiddlewares[profile.middlewareName] = {
+        forwardAuth: {
+          address: `http://127.0.0.1:${profile.port}/`,
+          trustForwardHeader: true,
+          authResponseHeaders: ["X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Groups"]
+        }
+      };
+    }
+  }
 
   for (const container of containers) {
     const name = container.name ?? "unknown";
@@ -298,13 +604,27 @@ function buildDynamicConfig(containers: LxcInstance[]): {
             entryPoints: ["websecure"],
             rule,
             service: serviceName,
-            tls: { certResolver: "letsencrypt" }
+            tls: { certResolver: "letsencrypt" },
+            ...(item.auth.enabled
+              ? {
+                  middlewares: [
+                    authProfileByKey.get(item.auth.groups.join(","))?.middlewareName ?? "lxc-auth-default"
+                  ]
+                }
+              : {})
           };
         } else {
           httpRouters[`${serviceName}-http`] = {
             entryPoints: ["web"],
             rule,
-            service: serviceName
+            service: serviceName,
+            ...(item.auth.enabled
+              ? {
+                  middlewares: [
+                    authProfileByKey.get(item.auth.groups.join(","))?.middlewareName ?? "lxc-auth-default"
+                  ]
+                }
+              : {})
           };
         }
         continue;
@@ -367,6 +687,7 @@ function buildDynamicConfig(containers: LxcInstance[]): {
     dynamicYaml: yamlStringify(dynamic),
     extraEntrypoints,
     ufwPorts,
+    authProfiles,
     errors
   };
 }
@@ -374,18 +695,19 @@ function buildDynamicConfig(containers: LxcInstance[]): {
 export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
   const containers = await enrichInstanceState(await runJson<LxcInstance[]>(["lxc", "list", "-f", "json"], PREFIX));
-  const { dynamicYaml, extraEntrypoints, ufwPorts, errors } = buildDynamicConfig(containers);
+  const { dynamicYaml, extraEntrypoints, ufwPorts, authProfiles, errors } = buildDynamicConfig(containers, config);
   const staticYaml = buildStaticConfig(config, extraEntrypoints);
 
   const staticChanged = writeIfChanged(STATIC_CONFIG_PATH, staticYaml);
   writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml);
   const ufwErrors = await syncUfw(ufwPorts);
+  const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
 
   if (staticChanged) {
     await runText(["systemctl", "restart", "traefik"], PREFIX);
   }
 
-  for (const error of [...errors, ...ufwErrors]) {
+  for (const error of [...errors, ...ufwErrors, ...routeAuthErrors]) {
     console.error(`${PREFIX}: ${error}`);
   }
 }

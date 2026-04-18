@@ -57,12 +57,19 @@ Terrarium already automates this pattern for the management surface:
 - self-hosted ZITADEL auto-provisions the needed OIDC application, admin role, and group claim plumbing
 - external OIDC works too, as long as your provider emits a `groups` claim and your external client is configured with the Terrarium callback URLs
 
-What Terrarium does **not** automate yet:
+Terrarium now also automates published-route auth for HTTP(S) `user.proxy` labels:
 
-- attaching OIDC protection to `user.proxy` routes for published apps
-- per-route opt-in auth labels for container-exposed services
+- `https://code.example.com:3000@auth`
+- `https://hermes.example.com:8642@auth:agents,admins`
 
-So this guide is partly current behavior and partly the design direction for app-level route protection.
+Meaning:
+
+- `@auth` requires any authenticated user
+- `@auth:group1,group2` requires membership in at least one listed group
+
+Current limitation:
+
+- published-route auth currently works only for hosts on the Terrarium root domain or its subdomains, because the shared callback lives at `https://manage.<domain>/oauth2/app/callback`
 
 ## ZITADEL: local vs cloud
 
@@ -107,6 +114,7 @@ Example hostnames:
 
 - issuer: `https://auth.example.com` for self-hosted, or `https://<tenant>.<region>.zitadel.cloud` for cloud
 - `oauth2-proxy` callback on the management domain: `https://manage.example.com/oauth2/callback`
+- published-route auth callback on the management domain: `https://manage.example.com/oauth2/app/callback`
 
 In ZITADEL:
 
@@ -121,13 +129,19 @@ In ZITADEL:
 https://manage.example.com/oauth2/callback
 ```
 
-7. Optionally add a post-logout URI such as:
+7. Add this redirect URI too if you want to protect published app routes:
+
+```text
+https://manage.example.com/oauth2/app/callback
+```
+
+8. Optionally add a post-logout URI such as:
 
 ```text
 https://manage.example.com/
 ```
 
-8. Create the app and save the generated client ID and secret.
+9. Create the app and save the generated client ID and secret.
 
 This exact app shape is what ZITADEL documents for `oauth2-proxy`.
 
@@ -199,36 +213,18 @@ That means:
 - `oauth2-proxy` only answers the auth check
 - you do not need a full second reverse proxy layer in front of each app
 
-## Route protection model Terrarium should add
+## Route protection model Terrarium uses now
 
-The clean Terrarium feature should work like this:
+Terrarium keeps auth with the route itself, not in a second disconnected config file.
 
-- one shared host `oauth2-proxy`
-- one shared auth middleware in Traefik
-- per-route opt-in protection on top of `user.proxy`
+Current syntax:
 
-The easiest user-facing model would be:
-
-1. keep protection state with the route, not in a second disconnected config file
-2. add helper commands so people do not have to hand-edit labels
-
-Recommended future UX:
-
-```text
-lxc config set devbox user.proxy "https://code.example.com:8080|auth=oidc"
-lxc config set hermes user.proxy "https://hermes.example.com:8642|auth=oidc|groups=admins"
+```bash
+lxc config set devbox user.proxy "https://code.example.com:8080@auth"
+lxc config set hermes user.proxy "https://hermes.example.com:8642@auth:admins"
 ```
 
-And helper commands:
-
-```text
-terrariumctl route protect devbox https://code.example.com:8080
-terrariumctl route unprotect devbox https://code.example.com:8080
-```
-
-The route label should remain the source of truth. The CLI should just edit it for the user.
-
-That is better than storing route auth separately on the host, because otherwise exposure and protection drift apart.
+That label remains the source of truth. `terrariumctl proxy sync` reads it, renders Traefik middlewares, and reconciles the host-side oauth2-proxy route-auth stack automatically.
 
 ## Group and role restrictions
 
@@ -236,10 +232,10 @@ If you want "signed in" to be enough, the shared OIDC client is all you need.
 
 If you want route-level authorization like "only admins may open this route", `oauth2-proxy` supports group restrictions, but ZITADEL documents that you need to add an Action to complement the token with the group or role claim you want to check.
 
-So the future Terrarium model should support both:
+Terrarium now supports both:
 
-- `auth=oidc`
-- `auth=oidc|groups=admins,devops`
+- `@auth`
+- `@auth:admins,devops`
 
 ## Practical recommendation
 
@@ -253,20 +249,14 @@ For management auth today:
   - `https://lxd.<domain>/oidc/callback`
   and emits a `groups` claim that contains your configured admin group
 
-For app routes in the future:
+For published app routes:
 
-- keep sensitive tools private unless they really need to be public
+- keep especially sensitive tools private unless they really need to be public
 - rely on strong built-in auth where available
-- use the shared `oauth2-proxy` + Traefik `ForwardAuth` model as the design target for Terrarium-wide SSO
+- use `@auth` when “signed in is enough”
+- use `@auth:group1,group2` when a route should be limited to specific IdP groups
 
-For Terrarium itself:
-
-- implement one shared host `oauth2-proxy`
-- teach `user.proxy` routes how to declare auth
-- add `terrariumctl route protect` and `unprotect` as convenience commands
-- keep ZITADEL integration centered around one shared callback host such as `oauth.<root-domain>`
-
-That gives users one sign-in flow, avoids per-app auth hacks, and keeps "protect this route" as a simple product action instead of an infrastructure project.
+The next useful Terrarium improvement would be helper commands that edit `user.proxy` labels for the user instead of requiring manual string edits.
 
 ## Upstream docs used for this guide
 

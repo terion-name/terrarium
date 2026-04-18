@@ -327,6 +327,8 @@ Examples:
 
 ```bash
 lxc config set my-app user.proxy "https://app.example.com:3000,http://app-insecure.example.com:3000"
+lxc config set ide user.proxy "https://code.example.com:3000@auth"
+lxc config set hermes user.proxy "https://hermes.example.com:8642@auth:agents,admins"
 lxc config set game user.proxy "tcp://25565:25565,udp://19132:19132"
 ```
 
@@ -334,9 +336,13 @@ Rules:
 
 - `https://domain[:container_port][/path]` creates HTTP-to-HTTPS redirect plus a TLS router to a port in LXC container. If path is provided it will add prefix to upstream route.
 - `http://domain[:container_port][/path]` creates an HTTP router only.
+- Append `@auth` to an HTTP(S) route to require OIDC login through Terrarium's shared published-app auth gate.
+- Append `@auth:group,anothergroup` to require OIDC login and membership in at least one listed group.
+- Route-level auth currently supports only HTTP(S) routes on the Terrarium root domain or its subdomains, because the shared callback lives at `https://manage.<domain>/oauth2/app/callback`.
 - `tcp://hostport:containerport` exposes a raw TCP port through Traefik.
 - `udp://hostport:containerport` exposes a raw UDP port through Traefik.
 - Dynamic TCP/UDP host ports are also opened and closed in UFW automatically by the sync job.
+- Auth-protected published routes are backed by host-side `oauth2-proxy` instances managed automatically by `terrariumctl proxy sync`.
 - If the container does not have a global IPv4 address yet, the route is skipped until it does.
 
 ## Development

@@ -328,11 +328,15 @@ async function importExistingResources(commonArgs: string[], authDomain: string,
   const byName = new Map((apps.result ?? []).map((entry) => [entry.name, entry.id]));
   const lxdId = byName.get("terrarium-lxd");
   const cockpitId = byName.get("terrarium-cockpit");
+  const routesId = byName.get("terrarium-routes");
   if (lxdId) {
     await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.lxd", `${lxdId}:${project.id}`]);
   }
   if (cockpitId) {
     await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.cockpit", `${cockpitId}:${project.id}`]);
+  }
+  if (routesId) {
+    await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.routes", `${routesId}:${project.id}`]);
   }
 }
 
