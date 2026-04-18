@@ -1,6 +1,7 @@
 services:
   oauth2-proxy:
     image: {{ terrarium_oauth2_proxy_image }}
+    user: "0:0"
     restart: unless-stopped
     command:
       - --config=/etc/oauth2-proxy/oauth2-proxy.cfg
