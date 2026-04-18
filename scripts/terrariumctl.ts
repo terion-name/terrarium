@@ -71,7 +71,7 @@ function localIdpEnabled(config: Record<string, unknown>): boolean {
 }
 
 function adminGroup(config: Record<string, unknown>): string {
-  return configString(config, "terrarium_admin_group");
+  return configString(config, "terrarium_admin_group", localIdpEnabled(config) ? "terrarium-admins" : "");
 }
 
 function defaultServiceDomain(rootDomain: string, publicIp: string, prefix: string): string {

@@ -136,7 +136,7 @@ export function configValue(config: Record<string, unknown>, key: string): unkno
 export function configString(config: Record<string, unknown>, key: string, fallback = ""): string {
   const value = configValue(config, key);
   if (typeof value === "string") {
-    return value;
+    return value.trim().length > 0 ? value : fallback;
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
