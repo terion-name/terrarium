@@ -120,7 +120,12 @@ type ZitadelApp = { id: string; name: string };
 type ZitadelAction = { id: string; name: string; script?: string };
 type ZitadelFlowTrigger = { triggerType?: { id?: string }; actions?: ZitadelAction[] };
 type ZitadelFlow = { flow?: { triggerActions?: ZitadelFlowTrigger[] } };
-type ZitadelUser = { user?: { id: string } };
+type ZitadelUser = {
+  userId?: string;
+  preferredLoginName?: string;
+  loginNames?: string[];
+  human?: { email?: { email?: string } };
+};
 type ZitadelUserGrant = { id: string; userId: string; projectId: string; roleKeys?: string[] };
 
 const TERRARIUM_GROUPS_ACTION_NAME = "terrariumGroups";
@@ -207,18 +212,22 @@ async function ensureProjectRole(authDomain: string, pat: string, projectId: str
 }
 
 async function lookupUserId(authDomain: string, pat: string, loginName: string): Promise<string> {
-  const user = await zitadelApi<ZitadelUser>(
-    authDomain,
-    pat,
-    "GET",
-    "/management/v1/global/users/_by_login_name",
-    undefined,
-    { loginName }
-  );
-  if (!user.user?.id) {
-    throw new Error(`failed to find ZITADEL user for login name ${loginName}`);
+  const users = await zitadelApi<{ result?: ZitadelUser[] }>(authDomain, pat, "POST", "/v2/users", {});
+  const allUsers = users.result ?? [];
+  const matchingUser =
+    allUsers.find((user) => user.preferredLoginName === loginName) ??
+    allUsers.find((user) => (user.loginNames ?? []).includes(loginName)) ??
+    allUsers.find((user) => user.human?.email?.email === loginName);
+  if (matchingUser?.userId) {
+    return matchingUser.userId;
   }
-  return user.user.id;
+
+  const humanUsers = allUsers.filter((user) => typeof user.userId === "string" && typeof user.human?.email?.email === "string");
+  if (humanUsers.length === 1 && humanUsers[0]?.userId) {
+    return humanUsers[0].userId;
+  }
+
+  throw new Error(`failed to find ZITADEL user for login name ${loginName}`);
 }
 
 async function ensureUserGrant(authDomain: string, pat: string, userId: string, projectId: string, adminGroup: string): Promise<void> {
