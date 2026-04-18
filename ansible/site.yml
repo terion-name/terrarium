@@ -83,6 +83,9 @@
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_admin_group | default('') | length == 0
+    - name: Refresh persisted config bundle with resolved admin group
+      ansible.builtin.set_fact:
+        terrarium_config_bundle: "{{ terrarium_config_bundle | combine({'terrarium_admin_group': terrarium_admin_group}) }}"
   roles:
     - role: base
     - role: zfs

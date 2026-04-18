@@ -281,6 +281,9 @@ async function ensureFlowTrigger(authDomain: string, pat: string, flowType: stri
   const trigger = (flow.flow?.triggerActions ?? []).find((entry) => entry.triggerType?.id === triggerType);
   const currentIds = (trigger?.actions ?? []).map((entry) => entry.id).filter(Boolean);
   const nextIds = Array.from(new Set([...currentIds, actionId]));
+  if (nextIds.length === currentIds.length) {
+    return;
+  }
   await zitadelApi(authDomain, pat, "POST", `/management/v1/flows/${flowType}/trigger/${triggerType}`, { actionIds: nextIds });
 }
 
