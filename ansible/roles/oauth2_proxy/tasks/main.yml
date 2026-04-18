@@ -33,9 +33,35 @@
         mode: "0755"
 
     - name: Generate oauth2-proxy cookie secret
-      ansible.builtin.shell: "umask 077 && openssl rand -base64 32 > {{ terrarium_oauth2_proxy_cookie_secret_path }}"
+      ansible.builtin.shell: |
+        umask 077
+        python3 - <<'PY' > {{ terrarium_oauth2_proxy_cookie_secret_path }}
+        import secrets
+        import string
+
+        alphabet = string.ascii_letters + string.digits
+        print("".join(secrets.choice(alphabet) for _ in range(32)))
+        PY
       args:
         creates: "{{ terrarium_oauth2_proxy_cookie_secret_path }}"
+
+    - name: Read existing oauth2-proxy cookie secret for validation
+      ansible.builtin.command: cat {{ terrarium_oauth2_proxy_cookie_secret_path }}
+      register: terrarium_oauth2_proxy_cookie_secret_existing
+      changed_when: false
+
+    - name: Regenerate invalid oauth2-proxy cookie secret
+      ansible.builtin.shell: |
+        umask 077
+        python3 - <<'PY' > {{ terrarium_oauth2_proxy_cookie_secret_path }}
+        import secrets
+        import string
+
+        alphabet = string.ascii_letters + string.digits
+        print("".join(secrets.choice(alphabet) for _ in range(32)))
+        PY
+      when:
+        - terrarium_oauth2_proxy_cookie_secret_existing.stdout | trim | length not in [16, 24, 32]
 
     - name: Read oauth2-proxy cookie secret
       ansible.builtin.command: cat {{ terrarium_oauth2_proxy_cookie_secret_path }}
