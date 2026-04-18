@@ -1,0 +1,8 @@
+- name: reload terrarium oauth2 proxy systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart terrarium oauth2 proxy
+  ansible.builtin.systemd:
+    name: terrarium-oauth2-proxy.service
+    state: restarted

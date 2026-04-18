@@ -21,6 +21,7 @@
     terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain) if terrarium_idp_mode == 'local' else '' }}"
     terrarium_oidc_client_id: ""
     terrarium_oidc_client_secret: ""
+    terrarium_admin_group: "{{ 'terrarium-admins' if terrarium_idp_mode == 'local' else '' }}"
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
     terrarium_email: ""
     terrarium_acme_email: "{{ terrarium_email }}"
@@ -50,6 +51,7 @@
       terrarium_oidc_issuer: "{{ terrarium_oidc_issuer }}"
       terrarium_oidc_client_id: "{{ terrarium_oidc_client_id }}"
       terrarium_oidc_client_secret: "{{ terrarium_oidc_client_secret }}"
+      terrarium_admin_group: "{{ terrarium_admin_group }}"
       terrarium_zitadel_admin_email: "{{ terrarium_zitadel_admin_email }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
       terrarium_storage_mode: "{{ terrarium_storage_mode }}"
@@ -78,10 +80,11 @@
   roles:
     - role: base
     - role: zfs
-    - role: lxd
     - role: cockpit
     - role: cockpit_plugins
     - role: traefik
     - role: idp_zitadel
+    - role: oauth2_proxy
+    - role: lxd
     - role: backups
     - role: hardening

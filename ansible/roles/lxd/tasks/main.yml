@@ -72,11 +72,44 @@
   when: terrarium_oidc_issuer | length > 0
   changed_when: false
 
-- name: Configure OIDC client ID when provided
-  ansible.builtin.command: "/snap/bin/lxc config set oidc.client.id {{ terrarium_oidc_client_id }}"
+- name: Configure LXD OIDC groups claim when provided
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.groups.claim {{ terrarium_lxd_oidc_groups_claim }}"
   when:
-    - terrarium_idp_mode == 'oidc'
-    - terrarium_oidc_client_id | length > 0
+    - terrarium_oidc_issuer | length > 0
+    - terrarium_lxd_oidc_groups_claim | length > 0
+  changed_when: false
+
+- name: Read ZITADEL outputs for LXD local client configuration
+  ansible.builtin.slurp:
+    src: "{{ terrarium_zitadel_outputs_path }}"
+  register: terrarium_lxd_zitadel_outputs_raw
+  when:
+    - terrarium_idp_mode == 'local'
+    - terrarium_zitadel_outputs_path is defined
+
+- name: Parse ZITADEL outputs for LXD local client configuration
+  ansible.builtin.set_fact:
+    terrarium_lxd_zitadel_outputs: "{{ terrarium_lxd_zitadel_outputs_raw.content | b64decode | from_json }}"
+  when:
+    - terrarium_idp_mode == 'local'
+    - terrarium_lxd_zitadel_outputs_raw is defined
+    - terrarium_lxd_zitadel_outputs_raw.content is defined
+
+- name: Resolve LXD OIDC client ID
+  ansible.builtin.set_fact:
+    terrarium_lxd_oidc_client_id_effective: >-
+      {{
+        (
+          terrarium_lxd_zitadel_outputs.lxd_client_id.value
+          if terrarium_idp_mode == 'local'
+          else terrarium_oidc_client_id
+        ) | default('', true)
+      }}
+
+- name: Configure OIDC client ID when provided
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.client.id {{ terrarium_lxd_oidc_client_id_effective }}"
+  when:
+    - terrarium_lxd_oidc_client_id_effective | length > 0
   changed_when: false
 
 - name: Configure OIDC client secret when provided
@@ -91,6 +124,81 @@
   when: terrarium_idp_mode == 'local'
   changed_when: false
   failed_when: false
+
+- name: Check whether LXD management auth group exists
+  ansible.builtin.command: /snap/bin/lxc auth group show {{ terrarium_lxd_auth_group }}
+  register: terrarium_lxd_auth_group_raw
+  failed_when: false
+  changed_when: false
+
+- name: Create LXD management auth group
+  ansible.builtin.command: /snap/bin/lxc auth group create {{ terrarium_lxd_auth_group }}
+  when: terrarium_lxd_auth_group_raw.rc != 0
+
+- name: Ensure LXD management auth group has server admin entitlement
+  ansible.builtin.command: /snap/bin/lxc auth group permission add {{ terrarium_lxd_auth_group }} server admin
+  register: terrarium_lxd_admin_permission_add
+  failed_when:
+    - terrarium_lxd_admin_permission_add.rc != 0
+    - "'already' not in (terrarium_lxd_admin_permission_add.stderr | lower)"
+    - "'already' not in (terrarium_lxd_admin_permission_add.stdout | lower)"
+  changed_when: terrarium_lxd_admin_permission_add.rc == 0
+  when: terrarium_admin_group | length > 0
+
+- name: Read previous LXD IdP group mapping
+  ansible.builtin.slurp:
+    src: "{{ terrarium_lxd_idp_group_state_path }}"
+  register: terrarium_lxd_previous_idp_group_raw
+  failed_when: false
+  changed_when: false
+  when: terrarium_admin_group | length > 0
+
+- name: Parse previous LXD IdP group mapping
+  ansible.builtin.set_fact:
+    terrarium_lxd_previous_idp_group: "{{ terrarium_lxd_previous_idp_group_raw.content | default('') | b64decode | trim }}"
+  when:
+    - terrarium_admin_group | length > 0
+    - terrarium_lxd_previous_idp_group_raw is defined
+
+- name: Remove stale LXD IdP group mapping
+  ansible.builtin.command: /snap/bin/lxc auth identity-provider-group delete {{ terrarium_lxd_previous_idp_group }}
+  failed_when: false
+  changed_when: terrarium_lxd_previous_idp_group | length > 0 and terrarium_lxd_previous_idp_group != terrarium_admin_group
+  when:
+    - terrarium_admin_group | length > 0
+    - terrarium_lxd_previous_idp_group is defined
+    - terrarium_lxd_previous_idp_group | length > 0
+    - terrarium_lxd_previous_idp_group != terrarium_admin_group
+
+- name: Check whether current LXD IdP group mapping exists
+  ansible.builtin.command: /snap/bin/lxc auth identity-provider-group show {{ terrarium_admin_group }}
+  register: terrarium_lxd_idp_group_raw
+  failed_when: false
+  changed_when: false
+  when: terrarium_admin_group | length > 0
+
+- name: Create current LXD IdP group mapping
+  ansible.builtin.command: /snap/bin/lxc auth identity-provider-group create {{ terrarium_admin_group }}
+  when:
+    - terrarium_admin_group | length > 0
+    - terrarium_lxd_idp_group_raw.rc != 0
+
+- name: Map current IdP group to LXD management group
+  ansible.builtin.command: /snap/bin/lxc auth identity-provider-group group add {{ terrarium_admin_group }} {{ terrarium_lxd_auth_group }}
+  register: terrarium_lxd_idp_group_add
+  failed_when:
+    - terrarium_lxd_idp_group_add.rc != 0
+    - "'already' not in (terrarium_lxd_idp_group_add.stderr | lower)"
+    - "'already' not in (terrarium_lxd_idp_group_add.stdout | lower)"
+  changed_when: terrarium_lxd_idp_group_add.rc == 0
+  when: terrarium_admin_group | length > 0
+
+- name: Persist current LXD IdP group mapping
+  ansible.builtin.copy:
+    content: "{{ terrarium_admin_group }}\n"
+    dest: "{{ terrarium_lxd_idp_group_state_path }}"
+    mode: "0600"
+  when: terrarium_admin_group | length > 0
 
 - name: Check whether terrarium profile exists
   ansible.builtin.command: /snap/bin/lxc profile show terrarium

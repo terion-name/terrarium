@@ -63,7 +63,15 @@ function idpMode(config: Record<string, unknown>): string {
 }
 
 function idpEnabled(config: Record<string, unknown>): boolean {
+  return ["local", "oidc"].includes(idpMode(config));
+}
+
+function localIdpEnabled(config: Record<string, unknown>): boolean {
   return idpMode(config) === "local";
+}
+
+function adminGroup(config: Record<string, unknown>): string {
+  return configString(config, "terrarium_admin_group");
 }
 
 function defaultServiceDomain(rootDomain: string, publicIp: string, prefix: string): string {
@@ -89,7 +97,7 @@ async function persistAndReconcile(config: Record<string, unknown>, summary: str
   writeFileSync(CONFIG_PATH, stringify(config), "utf8");
   await reconfigureCmd();
   await syncProxyConfig();
-  if (idpEnabled(config)) {
+  if (localIdpEnabled(config)) {
     await syncIdpConfig();
   }
   console.log(success(summary));
@@ -115,11 +123,13 @@ async function statusCmd(): Promise<void> {
   const oidc = oidcIssuer(config);
   const mode = idpMode(config);
   const idp = idpEnabled(config);
+  const adminRole = adminGroup(config);
 
   const traefik = await runAllowFailure(["systemctl", "is-active", "traefik"]);
   const cockpit = await runAllowFailure(["systemctl", "is-active", "cockpit.socket"]);
   const lxdState = await runAllowFailure(["systemctl", "is-active", "snap.lxd.daemon"]);
-  const zitadel = idp ? await runAllowFailure(["systemctl", "is-active", "terrarium-zitadel.service"]) : null;
+  const zitadel = mode === "local" ? await runAllowFailure(["systemctl", "is-active", "terrarium-zitadel.service"]) : null;
+  const oauth2Proxy = idp ? await runAllowFailure(["systemctl", "is-active", "terrarium-oauth2-proxy.service"]) : null;
   const s3Timer = await runAllowFailure(["systemctl", "is-active", "terrarium-s3-backup.timer"]);
   const syncoidTimer = await runAllowFailure(["systemctl", "is-active", "terrarium-syncoid.timer"]);
   const traefikSyncTimer = await runAllowFailure(["systemctl", "is-active", "terrarium-traefik-sync.timer"]);
@@ -133,13 +143,19 @@ async function statusCmd(): Promise<void> {
   if (oidc) {
     console.log(`  ${label("OIDC issuer:")} ${value(oidc)}`);
   }
-  if (idp) {
+  if (adminRole) {
+    console.log(`  ${label("Admin group:")} ${value(adminRole)}`);
+  }
+  if (mode === "local") {
     console.log(`  ${label("ZITADEL:")} ${value(`https://${auth}`)}`);
     console.log(`  ${label("ZITADEL bootstrap password:")} ${value("/etc/terrarium/secrets/zitadel_admin_password")}`);
   }
   console.log(`  ${label("traefik:")} ${value(traefik.stdout.trim())}`);
   console.log(`  ${label("cockpit.socket:")} ${value(cockpit.stdout.trim())}`);
   console.log(`  ${label("lxd:")} ${value(lxdState.stdout.trim())}`);
+  if (oauth2Proxy) {
+    console.log(`  ${label("terrarium-oauth2-proxy.service:")} ${value(oauth2Proxy.stdout.trim())}`);
+  }
   if (zitadel) {
     console.log(`  ${label("terrarium-zitadel.service:")} ${value(zitadel.stdout.trim())}`);
   }
@@ -322,7 +338,7 @@ async function setDomainsCmd(
   setConfigValue(config, "terrarium_root_domain", rootDomain);
   setConfigValue(config, "terrarium_manage_domain", options.manageDomain || defaultServiceDomain(rootDomain, publicIp, "manage"));
   setConfigValue(config, "terrarium_lxd_domain", options.lxdDomain || defaultServiceDomain(rootDomain, publicIp, "lxd"));
-  if (idpEnabled(config)) {
+  if (localIdpEnabled(config)) {
     const authDomain = options.authDomain || defaultServiceDomain(rootDomain, publicIp, "auth");
     setConfigValue(config, "terrarium_auth_domain", authDomain);
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
@@ -357,6 +373,7 @@ async function setEmailsCmd(options: { email?: string; acmeEmail?: string; zitad
 
 async function setIdpCmd(options: {
   mode: string;
+  adminGroup?: string;
   authDomain?: string;
   oidc?: string;
   oidcClient?: string;
@@ -373,7 +390,9 @@ async function setIdpCmd(options: {
 
   setConfigValue(config, "terrarium_idp_mode", nextMode);
   if (nextMode === "local") {
+    const nextAdminGroup = options.adminGroup || configString(config, "terrarium_admin_group") || "terrarium-admins";
     const authDomain = options.authDomain || configString(config, "terrarium_auth_domain") || defaultServiceDomain(rootDomain, publicIp, "auth");
+    setConfigValue(config, "terrarium_admin_group", nextAdminGroup);
     setConfigValue(config, "terrarium_auth_domain", authDomain);
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", "");
@@ -383,8 +402,12 @@ async function setIdpCmd(options: {
   } else {
     const currentIssuer = oidcIssuer(config);
     const issuer = options.oidc || currentIssuer;
+    const nextAdminGroup = options.adminGroup || configString(config, "terrarium_admin_group");
     if (!issuer) {
       throw new Error("--oidc is required when mode is oidc");
+    }
+    if (!nextAdminGroup) {
+      throw new Error("--admin-group is required when mode is oidc");
     }
     const clientId = options.oidcClient || configString(config, "terrarium_oidc_client_id");
     const clientSecret = options.oidcSecret || configString(config, "terrarium_oidc_client_secret");
@@ -395,6 +418,7 @@ async function setIdpCmd(options: {
       throw new Error("--oidc-secret is required when mode is oidc");
     }
     setConfigValue(config, "terrarium_auth_domain", "");
+    setConfigValue(config, "terrarium_admin_group", nextAdminGroup);
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", clientId);
     setConfigValue(config, "terrarium_oidc_client_secret", clientSecret);
@@ -537,6 +561,7 @@ cli
   .option("--email <email>", "Terrarium contact/admin email")
   .option("--acme-email <email>", "ACME account email")
   .option("--zitadel-admin-email <email>", "ZITADEL bootstrap admin email")
+  .option("--admin-group <group>", "Management admin group")
   .option("--oidc <issuer>", "External OIDC issuer URL")
   .option("--oidc-client <clientId>", "External OIDC client ID")
   .option("--oidc-secret <clientSecret>", "External OIDC client secret")
@@ -573,6 +598,7 @@ cli
     if (section === "idp") {
       await setIdpCmd({
         mode: value as string,
+        adminGroup: cliOption(cliOptions, "adminGroup"),
         authDomain: cliOption(cliOptions, "authDomain"),
         oidc: cliOption(cliOptions, "oidc"),
         oidcClient: cliOption(cliOptions, "oidcClient"),

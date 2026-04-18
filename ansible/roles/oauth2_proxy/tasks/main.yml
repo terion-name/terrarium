@@ -1,0 +1,149 @@
+- name: Configure Terrarium oauth2-proxy
+  when: terrarium_oauth2_proxy_enabled | bool
+  block:
+    - name: Install oauth2-proxy runtime packages
+      ansible.builtin.apt:
+        name:
+          - docker.io
+        state: present
+
+    - name: Install Docker Compose v2 package for oauth2-proxy
+      ansible.builtin.apt:
+        name: docker-compose-v2
+        state: present
+      register: terrarium_oauth2_proxy_compose_v2_install
+      ignore_errors: true
+
+    - name: Install Docker Compose plugin fallback for oauth2-proxy
+      ansible.builtin.apt:
+        name: docker-compose-plugin
+        state: present
+      when: terrarium_oauth2_proxy_compose_v2_install is failed
+
+    - name: Enable Docker for oauth2-proxy
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create oauth2-proxy directories
+      ansible.builtin.file:
+        path: "{{ terrarium_oauth2_proxy_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Generate oauth2-proxy cookie secret
+      ansible.builtin.shell: "umask 077 && openssl rand -base64 32 > {{ terrarium_oauth2_proxy_cookie_secret_path }}"
+      args:
+        creates: "{{ terrarium_oauth2_proxy_cookie_secret_path }}"
+
+    - name: Read oauth2-proxy cookie secret
+      ansible.builtin.command: cat {{ terrarium_oauth2_proxy_cookie_secret_path }}
+      register: terrarium_oauth2_proxy_cookie_secret_raw
+      changed_when: false
+
+    - name: Read ZITADEL application outputs for oauth2-proxy
+      ansible.builtin.slurp:
+        src: "{{ terrarium_zitadel_outputs_path }}"
+      register: terrarium_oauth2_proxy_zitadel_outputs_raw
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_zitadel_outputs_path is defined
+
+    - name: Parse ZITADEL application outputs for oauth2-proxy
+      ansible.builtin.set_fact:
+        terrarium_oauth2_proxy_zitadel_outputs: "{{ terrarium_oauth2_proxy_zitadel_outputs_raw.content | b64decode | from_json }}"
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_oauth2_proxy_zitadel_outputs_raw is defined
+        - terrarium_oauth2_proxy_zitadel_outputs_raw.content is defined
+
+    - name: Resolve oauth2-proxy OIDC client settings
+      ansible.builtin.set_fact:
+        terrarium_oauth2_proxy_client_id_effective: >-
+          {{
+            (
+              terrarium_oauth2_proxy_zitadel_outputs.cockpit_client_id.value
+              if terrarium_idp_mode == 'local'
+              else terrarium_oidc_client_id
+            ) | default('', true)
+          }}
+        terrarium_oauth2_proxy_client_secret_effective: >-
+          {{
+            (
+              terrarium_oauth2_proxy_zitadel_outputs.cockpit_client_secret.value
+              if terrarium_idp_mode == 'local'
+              else terrarium_oidc_client_secret
+            ) | default('', true)
+          }}
+        terrarium_oauth2_proxy_oidc_issuer_effective: >-
+          {{
+            (
+              'https://' ~ terrarium_auth_domain
+              if terrarium_idp_mode == 'local'
+              else terrarium_oidc_issuer
+            ) | default('', true)
+          }}
+
+    - name: Assert oauth2-proxy client credentials are present
+      ansible.builtin.assert:
+        that:
+          - terrarium_oauth2_proxy_client_id_effective | length > 0
+          - terrarium_oauth2_proxy_client_secret_effective | length > 0
+          - terrarium_oauth2_proxy_oidc_issuer_effective | length > 0
+          - terrarium_admin_group | length > 0
+        fail_msg: oauth2-proxy requires an OIDC issuer, client credentials, and terrarium_admin_group
+
+    - name: Render oauth2-proxy config
+      ansible.builtin.template:
+        src: oauth2-proxy.cfg.j2
+        dest: "{{ terrarium_oauth2_proxy_dir }}/oauth2-proxy.cfg"
+        mode: "0600"
+      vars:
+        terrarium_oauth2_proxy_client_id: "{{ terrarium_oauth2_proxy_client_id_effective }}"
+        terrarium_oauth2_proxy_client_secret: "{{ terrarium_oauth2_proxy_client_secret_effective }}"
+        terrarium_oauth2_proxy_oidc_issuer: "{{ terrarium_oauth2_proxy_oidc_issuer_effective }}"
+        terrarium_oauth2_proxy_cookie_secret: "{{ terrarium_oauth2_proxy_cookie_secret_raw.stdout }}"
+      no_log: true
+      notify: restart terrarium oauth2 proxy
+
+    - name: Render oauth2-proxy compose stack
+      ansible.builtin.template:
+        src: docker-compose.yml.j2
+        dest: "{{ terrarium_oauth2_proxy_dir }}/docker-compose.yml"
+        mode: "0600"
+      notify: restart terrarium oauth2 proxy
+
+    - name: Render oauth2-proxy systemd unit
+      ansible.builtin.template:
+        src: terrarium-oauth2-proxy.service.j2
+        dest: /etc/systemd/system/terrarium-oauth2-proxy.service
+        mode: "0644"
+      notify:
+        - reload terrarium oauth2 proxy systemd
+        - restart terrarium oauth2 proxy
+
+    - name: Flush oauth2-proxy handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable oauth2-proxy compose service
+      ansible.builtin.systemd:
+        name: terrarium-oauth2-proxy.service
+        state: started
+        enabled: true
+
+- name: Disable oauth2-proxy when Terrarium auth is disabled
+  when: not (terrarium_oauth2_proxy_enabled | bool)
+  block:
+    - name: Stop and disable oauth2-proxy compose service
+      ansible.builtin.systemd:
+        name: terrarium-oauth2-proxy.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove oauth2-proxy systemd unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/terrarium-oauth2-proxy.service
+        state: absent
+      notify: reload terrarium oauth2 proxy systemd

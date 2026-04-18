@@ -54,6 +54,7 @@ type InstallOptions = {
   manageDomain: string;
   lxdDomain: string;
   idpMode: IdpMode | "";
+  adminGroup: string;
   authDomain: string;
   oidcIssuer: string;
   oidcClientId: string;
@@ -497,6 +498,7 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   }
 
   if (options.idpMode === "local") {
+    options.adminGroup = options.adminGroup || "terrarium-admins";
     options.authDomain =
       options.authDomain ||
       (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
@@ -508,6 +510,10 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
       "--zitadel-admin-email"
     );
   } else {
+    options.adminGroup = options.adminGroup || (await promptText("Management admin group", ""));
+    if (!options.adminGroup) {
+      fail("--admin-group is required for external OIDC mode");
+    }
     options.authDomain = "";
     options.oidcIssuer = normalizeOidcIssuer(
       options.oidcIssuer || (await promptText("External OIDC issuer URL", "")),
@@ -640,6 +646,7 @@ function validateNonInteractive(options: InstallOptions): void {
   }
 
   if (options.idpMode === "local") {
+    options.adminGroup = options.adminGroup || "terrarium-admins";
     options.authDomain = options.authDomain || (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
     options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc");
     options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
@@ -647,6 +654,9 @@ function validateNonInteractive(options: InstallOptions): void {
     options.oidcClientId = "";
     options.oidcClientSecret = "";
   } else {
+    if (!options.adminGroup) {
+      fail("--admin-group is required when --idp=oidc");
+    }
     options.authDomain = "";
     if (!options.oidcIssuer) {
       fail("--oidc is required when --idp=oidc");
@@ -749,6 +759,7 @@ function buildConfig(options: InstallOptions): string {
     terrarium_manage_domain: options.manageDomain,
     terrarium_lxd_domain: options.lxdDomain,
     terrarium_idp_mode: options.idpMode,
+    terrarium_admin_group: options.adminGroup,
     terrarium_auth_domain: options.authDomain,
     terrarium_oidc_issuer: options.oidcIssuer,
     terrarium_oidc_client_id: options.oidcClientId,
@@ -816,6 +827,7 @@ function defaultOptions(): InstallOptions {
     manageDomain: "",
     lxdDomain: "",
     idpMode: "",
+    adminGroup: "",
     authDomain: "",
     oidcIssuer: "",
     oidcClientId: "",
@@ -889,6 +901,7 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
     console.log(`${chalk.cyan("ZITADEL bootstrap password:")} ${chalk.white("/etc/terrarium/secrets/zitadel_admin_password")}`);
   }
   console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
+  console.log(`${chalk.cyan("Management admin group:")} ${chalk.white(options.adminGroup)}`);
   console.log(`${chalk.cyan("Resolved config:")} ${chalk.white("/etc/terrarium/config.yaml")}`);
   if (options.rootPassword) {
     console.log(`${chalk.cyan("Cockpit login:")} ${chalk.white("root password was set during install")}`);
@@ -907,6 +920,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--manage-domain <domain>", "Cockpit domain")
     .option("--lxd-domain <domain>", "LXD domain")
     .option("--idp <mode>", "Identity provider mode: local or oidc")
+    .option("--admin-group <group>", "Management admin group; required when --idp=oidc")
     .option("--oidc <issuer>", "OIDC issuer URL; required when --idp=oidc")
     .option("--oidc-client <clientId>", "OIDC client ID; required when --idp=oidc")
     .option("--oidc-secret <clientSecret>", "OIDC client secret; required when --idp=oidc")
@@ -939,6 +953,7 @@ export function registerInstallCommand(cli: CAC): void {
       options.manageDomain = readCliOption(cliOptions, "manageDomain");
       options.lxdDomain = readCliOption(cliOptions, "lxdDomain");
       options.idpMode = readCliOption(cliOptions, "idp").trim().toLowerCase() as IdpMode | "";
+      options.adminGroup = readCliOption(cliOptions, "adminGroup");
       options.oidcIssuer = readCliOption(cliOptions, "oidc");
       options.oidcClientId = readCliOption(cliOptions, "oidcClient");
       options.oidcClientSecret = readCliOption(cliOptions, "oidcSecret");

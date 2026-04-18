@@ -38,6 +38,7 @@ Terrarium provisions the host with:
 - [OpenZFS](https://github.com/openzfs/zfs)
 - [`sanoid` and `syncoid`](https://github.com/jimsalterjrs/sanoid)
 - [Traefik](https://github.com/traefik/traefik) for public management endpoints
+- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`
 - External OIDC issuer support when you do not want to self-host the IDP
 - [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
@@ -119,6 +120,15 @@ Example sizing:
 - [Hetzner Cloud](docs/providers/hetzner.md)
 - [Hostinger](docs/providers/hostinger.md)
 
+## Guides
+
+- [Guide index](docs/guides/README.md)
+- [OpenClaw](docs/guides/openclaw.md)
+- [Hermes](docs/guides/hermes.md)
+- [VSCodium Web IDE](docs/guides/vscode.md)
+- [Isolated Docker Compose deployments](docs/guides/compose.md)
+- [Protecting published services with OIDC](docs/guides/auth-protection.md)
+
 ## Public Endpoints
 
 By default, Terrarium exposes:
@@ -143,7 +153,9 @@ Email settings:
 Cockpit login:
 
 - Terrarium hardens SSH to key-based auth; it does not rely on SSH password login.
-- Cockpit still authenticates through the host's local PAM accounts, so `root` needs a usable local password.
+- `manage.<domain>` is gated by host-level `oauth2-proxy` through Traefik `ForwardAuth`.
+- Only users in `terrarium_admin_group` pass the OIDC gate for Cockpit and LXD management access.
+- Cockpit still authenticates through the host's local PAM accounts after the OIDC gate, so `root` needs a usable local password.
 - If root has no local password, interactive install prompts for one. In non-interactive mode, pass `--root-pwd`.
 - Terrarium uses that password only during provisioning and does not persist the plaintext in `/etc/terrarium/config.yaml`.
 
@@ -156,7 +168,8 @@ Changing settings through `terrariumctl set ...` always rewrites `/etc/terrarium
 What gets updated on change:
 
 - Traefik config changes trigger a Traefik restart.
-- LXD domain, ACME, and OIDC settings are applied directly through `lxc config set`; they do not require a full LXD restart.
+- `oauth2-proxy` is rendered and restarted when IDP, admin-group, or management-domain settings change.
+- LXD domain, ACME, OIDC issuer/client settings, and IdP group mappings are applied directly through `lxc config set` and `lxc auth`; they do not require a full LXD restart.
 - Self-hosted ZITADEL is enabled, disabled, or restarted when its compose or Terraform-rendered config changes.
 - Terrarium then re-runs `terrariumctl proxy sync`, and when IDP mode is `local`, also re-runs `terrariumctl idp sync`.
 
@@ -167,16 +180,16 @@ Top-level commands:
 | Command | Arguments | Defaults | Meaning |
 | --- | --- | --- | --- |
 | `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host. |
-| `terrariumctl status` | none | n/a | Shows Terrarium service status and the main service endpoints detected from config. |
+| `terrariumctl status` | none | n/a | Shows Terrarium service status, management endpoints, IDP mode, admin group, and the oauth2-proxy state. |
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
 | `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
 | `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the persisted config. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
-| `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL clients and related OIDC settings. No-op unless ZITADEL mode is enabled. |
+| `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
 | `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, and re-runs reconciliation. |
 | `terrariumctl set emails` | optional flags | existing values when omitted | Updates Terrarium contact, ACME, and ZITADEL admin emails. |
-| `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, and updates related settings. |
+| `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, and reconfigures oauth2-proxy plus LXD management auth together. |
 | `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings and can enable or disable S3 exports. |
 | `terrariumctl set syncoid` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates syncoid replication settings and can enable or disable syncoid. |
 
@@ -193,9 +206,10 @@ Top-level commands:
 | `--manage-domain` | domain | no | `manage.<domain>` when `--domain` is set, otherwise `manage.<dashed-public-ip>.traefik.me` | Overrides the Cockpit domain. |
 | `--lxd-domain` | domain | no | `lxd.<domain>` when `--domain` is set, otherwise `lxd.<dashed-public-ip>.traefik.me` | Overrides the LXD domain. |
 | `--idp` | `local` or `oidc` | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Selects whether Terrarium uses self-hosted ZITADEL (`local`) or an external OIDC issuer (`oidc`). |
+| `--admin-group` | group name | yes when `--idp=oidc`; no otherwise | `terrarium-admins` when `--idp=local`, otherwise prompted in interactive mode | Sets the management admin group that is allowed into Cockpit and LXD. |
 | `--oidc` | issuer URL | yes when `--idp=oidc`; no otherwise | derived from `https://<auth-domain>` when `--idp=local` | Sets the OIDC issuer URL. |
-| `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID. |
-| `--oidc-secret` | client secret | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client secret. |
+| `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy and LXD. |
+| `--oidc-secret` | client secret | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy and LXD. |
 | `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
 | `--root-pwd` | password | yes in non-interactive mode when root has no usable local password; no otherwise | existing root password if already set, otherwise prompted in interactive mode | Sets or updates the root password used for Cockpit login. |
@@ -256,17 +270,25 @@ Restore behavior:
 | --- | --- | --- | --- | --- |
 | positional mode | `local` or `oidc` | yes | none | Switches the Terrarium IDP mode. |
 | `--auth-domain` | domain | no | derived from the current root domain or IP when mode is `local` | Overrides the self-hosted ZITADEL auth domain. |
+| `--admin-group` | group name | required when mode is `oidc`; optional otherwise | existing configured value, or `terrarium-admins` when mode is `local` | Sets the management admin group for Cockpit and LXD authorization. |
 | `--oidc` | issuer URL | required when mode is `oidc` and no issuer is already configured | existing configured issuer, or derived from `auth-domain` when mode is `local` | Sets the OIDC issuer URL. |
-| `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID. |
-| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured | existing configured value | Sets the external OIDC client secret. |
+| `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID shared by Cockpit's oauth2-proxy and LXD. |
+| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured | existing configured value | Sets the external OIDC client secret shared by Cockpit's oauth2-proxy and LXD. |
 | `--zitadel-admin-email` | email address | no | existing configured value or `--email` | Updates the ZITADEL bootstrap admin email when mode is `local`. |
 
 External OIDC note:
 
 - Terrarium auto-provisions OIDC clients only for self-hosted ZITADEL.
-- When you use external OIDC, Terrarium persists the issuer URL, client ID, and client secret, and configures the base LXD OIDC settings from them.
-- There is still no oauth2-proxy integration for Cockpit in this repo, so those external OIDC credentials are not yet consumed by a Cockpit auth proxy.
-- `terrariumctl set idp oidc --oidc ... --oidc-client ... --oidc-secret ...` therefore reconfigures LXD and disables self-hosted ZITADEL, but it does not add OIDC login to Cockpit.
+- When you use external OIDC, Terrarium persists the issuer URL, client ID, client secret, and admin group, and configures both Cockpit's oauth2-proxy and LXD from them.
+- The external client must allow both `https://<manage-domain>/oauth2/callback` and `https://<lxd-domain>/oidc/callback`.
+- The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
+- `terrariumctl set idp oidc --oidc ... --oidc-client ... --oidc-secret ... --admin-group ...` therefore reconfigures both the Cockpit OIDC gate and LXD management authorization.
+
+Local ZITADEL note:
+
+- Terrarium auto-provisions a management role named after `terrarium_admin_group`, defaulting to `terrarium-admins`.
+- The bootstrap admin is granted that role automatically.
+- Terrarium also installs a small ZITADEL Action that flattens Terrarium role assignments into a `groups` claim for oauth2-proxy and LXD.
 
 `terrariumctl set s3` options:
 

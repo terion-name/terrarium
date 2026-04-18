@@ -1,0 +1,5 @@
+terrarium_oauth2_proxy_enabled: "{{ terrarium_idp_mode in ['local', 'oidc'] }}"
+terrarium_oauth2_proxy_dir: "{{ terrarium_state_dir }}/oauth2-proxy"
+terrarium_oauth2_proxy_image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
+terrarium_oauth2_proxy_port: 4180
+terrarium_oauth2_proxy_cookie_secret_path: /etc/terrarium/secrets/oauth2_proxy_cookie_secret

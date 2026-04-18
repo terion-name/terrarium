@@ -2,6 +2,10 @@ output "issuer" {
   value = "https://{{ terrarium_auth_domain }}/"
 }
 
+output "project_id" {
+  value = zitadel_project.terrarium.id
+}
+
 output "cockpit_client_id" {
   value     = zitadel_application_oidc.cockpit.client_id
   sensitive = true

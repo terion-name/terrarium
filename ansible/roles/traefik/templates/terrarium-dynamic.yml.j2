@@ -1,5 +1,13 @@
 http:
   middlewares:
+    cockpit-forward-auth:
+      forwardAuth:
+        address: http://127.0.0.1:{{ terrarium_oauth2_proxy_port | default(4180) }}/
+        trustForwardHeader: true
+        authResponseHeaders:
+          - X-Auth-Request-User
+          - X-Auth-Request-Email
+          - X-Auth-Request-Groups
 {% if terrarium_idp_mode == 'local' %}
     zitadel-root-rewrite:
       replacePath:
@@ -11,10 +19,20 @@ http:
         forceSlash: false
 {% endif %}
   routers:
+    cockpit-oauth2:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_manage_domain }}`) && PathPrefix(`/oauth2/`)
+      service: oauth2-proxy
+      priority: 500
+      tls:
+        certResolver: letsencrypt
     cockpit:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_manage_domain }}`)
+      middlewares:
+        - cockpit-forward-auth
       service: cockpit
       tls:
         certResolver: letsencrypt
@@ -57,6 +75,10 @@ http:
         certResolver: letsencrypt
 {% endif %}
   services:
+    oauth2-proxy:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:{{ terrarium_oauth2_proxy_port | default(4180) }}
     cockpit:
       loadBalancer:
         servers:
