@@ -21,7 +21,7 @@
     terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain) if terrarium_idp_mode == 'local' else '' }}"
     terrarium_oidc_client_id: ""
     terrarium_oidc_client_secret: ""
-    terrarium_admin_group: "{{ 'terrarium-admins' if terrarium_idp_mode == 'local' else '' }}"
+    terrarium_admin_group: ""
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
     terrarium_email: ""
     terrarium_acme_email: "{{ terrarium_email }}"
@@ -77,6 +77,12 @@
           - ansible_distribution == "Ubuntu"
           - ansible_distribution_version == '24.04'
         fail_msg: Terrarium v1 supports Ubuntu 24.04 only.
+    - name: Default local management admin group
+      ansible.builtin.set_fact:
+        terrarium_admin_group: terrarium-admins
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_admin_group | default('') | length == 0
   roles:
     - role: base
     - role: zfs
