@@ -3,6 +3,10 @@
   --vp-c-brand-2: #165a4d;
   --vp-c-brand-3: #2c9d86;
   --vp-c-brand-soft: rgba(31, 122, 102, 0.16);
+  --vp-c-bg: #fbfaf6;
+  --vp-c-bg-alt: #f4efe3;
+  --vp-c-bg-soft: #f0f5f0;
+  --vp-c-bg-elv: rgba(255, 255, 255, 0.86);
   --terrarium-ink: #12342d;
   --terrarium-moss: #5f7c72;
   --terrarium-sand: #f5f1e6;
@@ -15,6 +19,14 @@
   --vp-c-brand-2: #7dd2c1;
   --vp-c-brand-3: #2e8f7b;
   --vp-c-brand-soft: rgba(83, 193, 170, 0.2);
+  --vp-c-bg: #0b1110;
+  --vp-c-bg-alt: #0f1715;
+  --vp-c-bg-soft: #111a18;
+  --vp-c-bg-elv: rgba(16, 24, 22, 0.94);
+  --vp-c-bg-elv-up: rgba(18, 28, 25, 0.98);
+  --vp-c-default-soft: rgba(132, 166, 155, 0.12);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #8fe2d0 0%, #53c1aa 45%, #f0d392 100%);
   --terrarium-ink: #eef8f4;
   --terrarium-moss: #b6cdc6;
   --terrarium-sand: #15221f;
@@ -22,7 +34,14 @@
   --terrarium-border: rgba(171, 214, 200, 0.14);
 }
 
+.Layout,
+body {
+  background: var(--vp-c-bg);
+}
+
 .VPHome {
+  margin-bottom: 0 !important;
+  padding-bottom: 88px;
   background:
     radial-gradient(circle at top left, rgba(161, 200, 181, 0.26), transparent 32rem),
     radial-gradient(circle at top right, rgba(223, 184, 108, 0.18), transparent 28rem),
@@ -31,13 +50,20 @@
 
 [data-theme="dark"] .VPHome {
   background:
-    radial-gradient(circle at top left, rgba(83, 193, 170, 0.12), transparent 30rem),
-    radial-gradient(circle at top right, rgba(214, 164, 84, 0.1), transparent 26rem),
-    linear-gradient(180deg, #0f1514 0%, #121917 36%, #0d1110 100%);
+    radial-gradient(circle at top left, rgba(83, 193, 170, 0.16), transparent 32rem),
+    radial-gradient(circle at top right, rgba(214, 164, 84, 0.12), transparent 28rem),
+    linear-gradient(180deg, #09100f 0%, #0d1413 34%, #0b1110 100%);
+}
+
+.VPContent.is-home,
+.VPHome .VPHomeContent {
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
 }
 
 .VPHome .VPHero {
-  padding-top: 72px;
+  padding-top: 96px;
+  padding-bottom: 40px;
 }
 
 .VPHome .VPHero .heading {
@@ -56,11 +82,23 @@
   filter: none !important;
 }
 
+.VPHome .VPHero .image-container {
+  width: min(100%, 640px);
+}
+
+.VPHome .VPHero .image-bg {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+
 .VPHome .VPHero .image {
   max-width: min(640px, 46vw);
 }
 
 .VPHome .VPHero .image img {
+  width: 100%;
   border-radius: 0;
   box-shadow: none;
 }
@@ -70,9 +108,9 @@
   letter-spacing: -0.03em;
 }
 
-.VPHome .tagline {
-  max-width: 40rem;
-  font-size: 1.02rem;
+.VPHome .VPHero .tagline {
+  max-width: 37rem;
+  font-size: clamp(0.92rem, 1.15vw, 1rem);
   line-height: 1.55;
   color: var(--terrarium-moss);
 }
@@ -200,6 +238,7 @@
   }
 
   .VPHome .VPHero {
-    padding-top: 52px;
+    padding-top: 72px;
+    padding-bottom: 24px;
   }
 }
