@@ -33,7 +33,7 @@ Authentication model:
 
 Official screenshot:
 
-![Cockpit overview](/screenshots/cockpit-overview.webp)
+![Cockpit overview](./screenshots/cockpit-overview.webp)
 
 Source: [Cockpit project homepage](https://cockpit-project.org/)
 
@@ -57,7 +57,7 @@ Authentication model:
 
 Official screenshot:
 
-![LXD UI instances view](/screenshots/lxd-ui-instances.png)
+![LXD UI instances view](./screenshots/lxd-ui-instances.png)
 
 Source: [Canonical MicroCloud tutorial](https://documentation.ubuntu.com/microcloud/latest/tutorial/multi-member/)
 
@@ -82,7 +82,7 @@ Authentication model:
 
 Official screenshot:
 
-![Traefik dashboard](/screenshots/traefik-dashboard.png)
+![Traefik dashboard](./screenshots/traefik-dashboard.png)
 
 Source: [Traefik getting started guide](https://doc.traefik.io/traefik/getting-started/docker/)
 

@@ -16,8 +16,8 @@ One important default behind all of these guides: workloads inside LXC container
 
 Start here:
 
-- [OpenClaw](/guides/openclaw)
-- [Hermes](/guides/hermes)
-- [VSCodium Web IDE](/guides/vscode)
-- [Isolated Docker Compose deployments](/guides/compose)
-- [Protecting published services with OIDC](/guides/auth-protection)
+- [OpenClaw](./openclaw)
+- [Hermes](./hermes)
+- [VSCodium Web IDE](./vscode)
+- [Isolated Docker Compose deployments](./compose)
+- [Protecting published services with OIDC](./auth-protection)

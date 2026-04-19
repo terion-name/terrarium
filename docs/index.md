@@ -6,7 +6,7 @@ hero:
   text: Transform any VPS into a secure host with isolated environments for your agents, development, and workloads. Time machine included.
   tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, manage it from built-in web UIs, publish only what you mean, and rewind mistakes in small ZFS-backed steps. Lock anything behind single sign-on and user management
   image:
-    src: /banner.webp
+    src: ./banner.webp
     alt: Terrarium
   actions:
     - theme: brand

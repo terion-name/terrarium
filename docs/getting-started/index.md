@@ -2,12 +2,12 @@
 
 This section covers the pieces you usually want before the first install:
 
-- [Installation](/getting-started/installation)
-- [Storage and Sizing](/getting-started/storage)
-- [Domains and Authentication](/getting-started/domains-and-auth)
-- [Management GUIs](/getting-started/management-guis)
-- [Shared Data Between Containers](/getting-started/shared-data-between-containers)
-- [External Shared Storage](/getting-started/external-shared-storage)
+- [Installation](./installation)
+- [Storage and Sizing](./storage)
+- [Domains and Authentication](./domains-and-auth)
+- [Management GUIs](./management-guis)
+- [Shared Data Between Containers](./shared-data-between-containers)
+- [External Shared Storage](./external-shared-storage)
 
 Recommended order:
 
@@ -16,4 +16,4 @@ Recommended order:
 3. choose your identity provider mode
 4. run the installer
 
-For provider-specific VPS creation steps, continue to [Provider Guides](/providers/).
+For provider-specific VPS creation steps, continue to [Provider Guides](../providers/).
