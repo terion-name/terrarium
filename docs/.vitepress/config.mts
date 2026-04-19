@@ -10,6 +10,7 @@ export default defineConfig({
   lastUpdated: true,
   themeConfig: {
     nav: [
+      { text: "About", link: "/about/" },
       { text: "Getting Started", link: "/getting-started/" },
       { text: "Guides", link: "/guides/" },
       { text: "Operations", link: "/operations/" },
