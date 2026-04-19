@@ -1,11 +1,9 @@
 import { defineConfig } from "vitepress";
 
-const base = process.env.GITHUB_ACTIONS ? "/terrarium/" : "/";
-
 export default defineConfig({
   title: "Terrarium",
   description: "Secure, rewindable VPS environments for agents, dev tools, and isolated apps.",
-  base,
+  base: "./",
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {

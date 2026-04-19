@@ -11,10 +11,10 @@ Recommended providers for the cleanest Terrarium setup:
 
 | Provider | Separate block storage | CLI creation docs | Best Terrarium mode |
 | --- | --- | --- | --- |
-| [DigitalOcean](/providers/digitalocean) | Yes | Yes (`doctl`) | `disk` |
-| [Vultr](/providers/vultr) | Yes | Yes (`vultr-cli`) | `disk` |
-| [Hetzner Cloud](/providers/hetzner) | Yes | Yes (`hcloud`) | `disk` |
-| [Hostinger](/providers/hostinger) | No documented attachable block volume | Limited CLI docs; use hPanel for creation | `file` |
+| [DigitalOcean](./digitalocean) | Yes | Yes (`doctl`) | `disk` |
+| [Vultr](./vultr) | Yes | Yes (`vultr-cli`) | `disk` |
+| [Hetzner Cloud](./hetzner) | Yes | Yes (`hcloud`) | `disk` |
+| [Hostinger](./hostinger) | No documented attachable block volume | Limited CLI docs; use hPanel for creation | `file` |
 
 General recommendation:
 

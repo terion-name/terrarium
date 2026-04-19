@@ -46,22 +46,22 @@ That makes Terrarium especially useful for advanced users who want power and fle
 
 If you are new here:
 
-1. Start with [Getting Started](/getting-started/).
-2. Read [Storage and Sizing](/getting-started/storage) before creating a VPS.
-3. If you are still choosing a provider, use the [Provider Guides](/providers/).
+1. Start with [Getting Started](./getting-started/).
+2. Read [Storage and Sizing](./getting-started/storage) before creating a VPS.
+3. If you are still choosing a provider, use the [Provider Guides](./providers/).
 
 If you want to understand how the system behaves:
 
-1. Read the [Security Model](/security).
-2. Read the [Architecture](/architecture).
-3. Check [Management GUIs](/getting-started/management-guis) if you want the visual control plane.
+1. Read the [Security Model](./security).
+2. Read the [Architecture](./architecture).
+3. Check [Management GUIs](./getting-started/management-guis) if you want the visual control plane.
 
 If you already know what you want to run:
 
-1. Go to [Guides](/guides/).
-2. Pick a workload like [OpenClaw](/guides/openclaw), [Hermes](/guides/hermes), [VSCodium Web](/guides/vscode), or [Compose deployments](/guides/compose).
+1. Go to [Guides](./guides/).
+2. Pick a workload like [OpenClaw](./guides/openclaw), [Hermes](./guides/hermes), [VSCodium Web](./guides/vscode), or [Compose deployments](./guides/compose).
 
 If you are thinking about operations and recovery:
 
-1. Read [Backups and Restore](/operations/backups-and-restore).
-2. Keep the [terrariumctl Reference](/reference/terrariumctl) nearby.
+1. Read [Backups and Restore](./operations/backups-and-restore).
+2. Keep the [terrariumctl Reference](./reference/terrariumctl) nearby.
