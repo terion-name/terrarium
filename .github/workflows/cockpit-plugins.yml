@@ -1,0 +1,111 @@
+name: cockpit-plugins
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cockpit-plugins.yml"
+      - "scripts/build-cockpit-plugins-bundle.sh"
+      - "ansible/roles/cockpit_plugins/defaults/main.yml"
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      publish_ref:
+        description: Release/tag name to publish plugin bundles under
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.arch == 'arm64'
+
+      - name: Resolve pinned plugin refs
+        id: refs
+        run: |
+          ruby <<'RUBY' >> "${GITHUB_OUTPUT}"
+          require "yaml"
+          defaults = YAML.load_file("ansible/roles/cockpit_plugins/defaults/main.yml")
+          puts "zfs_repo=#{defaults.fetch("terrarium_cockpit_zfs_repo")}"
+          puts "zfs_ref=#{defaults.fetch("terrarium_cockpit_zfs_ref")}"
+          puts "s3_repo=#{defaults.fetch("terrarium_cockpit_s3_repo")}"
+          puts "s3_ref=#{defaults.fetch("terrarium_cockpit_s3_ref")}"
+          RUBY
+
+      - name: Build Cockpit plugin bundle
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+          ZFS_REPO: ${{ steps.refs.outputs.zfs_repo }}
+          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
+          S3_REPO: ${{ steps.refs.outputs.s3_repo }}
+          S3_REF: ${{ steps.refs.outputs.s3_ref }}
+        run: |
+          mkdir -p release-assets
+          chmod +x scripts/build-cockpit-plugins-bundle.sh
+          docker run --rm \
+            --platform "linux/${TARGET_ARCH}" \
+            -v "${PWD}:/workspace" \
+            -w /workspace \
+            ubuntu:24.04 \
+            bash -lc "./scripts/build-cockpit-plugins-bundle.sh \
+              --output /workspace/release-assets/terrarium-cockpit-plugins-linux-${TARGET_ARCH}.tar.gz \
+              --zfs-repo ${ZFS_REPO@Q} \
+              --zfs-ref ${ZFS_REF@Q} \
+              --s3-repo ${S3_REPO@Q} \
+              --s3-ref ${S3_REF@Q}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-plugins-${{ matrix.arch }}
+          path: release-assets/terrarium-cockpit-plugins-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Resolve publish ref
+        id: ref
+        env:
+          INPUT_PUBLISH_REF: ${{ github.event.inputs.publish_ref }}
+        run: |
+          if [ -n "${INPUT_PUBLISH_REF}" ]; then
+            echo "value=${INPUT_PUBLISH_REF}" >> "${GITHUB_OUTPUT}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "value=cockpit-plugins-main" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/cockpit-plugins-amd64/terrarium-cockpit-plugins-linux-amd64.tar.gz release-assets/
+          cp artifacts/cockpit-plugins-arm64/terrarium-cockpit-plugins-linux-arm64.tar.gz release-assets/
+
+      - name: Publish plugin bundles
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ref.outputs.value }}
+          files: |
+            release-assets/terrarium-cockpit-plugins-linux-amd64.tar.gz
+            release-assets/terrarium-cockpit-plugins-linux-arm64.tar.gz
+          prerelease: ${{ steps.ref.outputs.value == 'cockpit-plugins-main' || contains(steps.ref.outputs.value, '-') }}
