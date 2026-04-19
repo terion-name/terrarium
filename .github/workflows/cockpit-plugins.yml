@@ -11,11 +11,6 @@ on:
     tags:
       - "*"
   workflow_dispatch:
-    inputs:
-      publish_ref:
-        description: Release/tag name to publish plugin bundles under
-        required: false
-
 permissions:
   contents: write
 
@@ -125,18 +120,17 @@ jobs:
           puts "s3_ref=#{defaults.fetch("terrarium_cockpit_s3_ref")}"
           RUBY
 
-      - name: Resolve publish ref
-        id: ref
+      - name: Resolve plugin release refs
+        id: release_refs
         env:
-          INPUT_PUBLISH_REF: ${{ github.event.inputs.publish_ref }}
+          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
+          S3_REF: ${{ steps.refs.outputs.s3_ref }}
         run: |
-          if [ -n "${INPUT_PUBLISH_REF}" ]; then
-            echo "value=${INPUT_PUBLISH_REF}" >> "${GITHUB_OUTPUT}"
-          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "value=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "value=cockpit-plugins-main" >> "${GITHUB_OUTPUT}"
-          fi
+          sanitize() {
+            printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-'
+          }
+          echo "zfs_release=cockpit-plugin-zfs-$(sanitize "${ZFS_REF}")" >> "${GITHUB_OUTPUT}"
+          echo "s3_release=cockpit-plugin-s3-$(sanitize "${S3_REF}")" >> "${GITHUB_OUTPUT}"
 
       - name: Prepare release assets
         env:
@@ -148,20 +142,38 @@ jobs:
           }
           ZFS_REF_SAFE="$(sanitize "${ZFS_REF}")"
           S3_REF_SAFE="$(sanitize "${S3_REF}")"
-          mkdir -p release-assets
+          mkdir -p release-assets/zfs release-assets/s3
           for BASENAME in \
             "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-amd64.tar.gz" \
-            "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-arm64.tar.gz" \
+            "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-arm64.tar.gz"
+          do
+            cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/zfs/${BASENAME}"
+          done
+          for BASENAME in \
             "cockpit-plugin-s3-${S3_REF_SAFE}-linux-amd64.tar.gz" \
             "cockpit-plugin-s3-${S3_REF_SAFE}-linux-arm64.tar.gz"
           do
-            cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/${BASENAME}"
+            cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/s3/${BASENAME}"
           done
 
-      - name: Publish plugin bundles
+      - name: Publish cockpit-zfs bundles
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ref.outputs.value }}
+          tag_name: ${{ steps.release_refs.outputs.zfs_release }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.release_refs.outputs.zfs_release }}
           files: |
-            release-assets/*.tar.gz
-          prerelease: ${{ steps.ref.outputs.value == 'cockpit-plugins-main' || contains(steps.ref.outputs.value, '-') }}
+            release-assets/zfs/*.tar.gz
+          prerelease: false
+          overwrite_files: true
+
+      - name: Publish cockpit-s3 bundles
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_refs.outputs.s3_release }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.release_refs.outputs.s3_release }}
+          files: |
+            release-assets/s3/*.tar.gz
+          prerelease: false
+          overwrite_files: true

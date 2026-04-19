@@ -13,35 +13,12 @@
         }.get(ansible_architecture, '')
       }}
 
-- name: Resolve exact Terrarium git tag
-  ansible.builtin.command: git -C {{ terrarium_repo_dir }} describe --tags --exact-match
-  register: terrarium_cockpit_plugin_repo_tag
-  failed_when: false
-  changed_when: false
-
-- name: Resolve Terrarium git branch
-  ansible.builtin.command: git -C {{ terrarium_repo_dir }} branch --show-current
-  register: terrarium_cockpit_plugin_repo_branch
-  failed_when: false
-  changed_when: false
-
-- name: Choose Cockpit plugin bundle release ref
-  ansible.builtin.set_fact:
-    terrarium_cockpit_plugin_bundle_ref: >-
-      {{
-        terrarium_cockpit_plugin_repo_tag.stdout
-        if terrarium_cockpit_plugin_repo_tag.rc == 0 and terrarium_cockpit_plugin_repo_tag.stdout | length > 0
-        else (
-          terrarium_cockpit_plugin_bundle_main_ref
-          if terrarium_cockpit_plugin_repo_branch.rc == 0 and terrarium_cockpit_plugin_repo_branch.stdout == 'main'
-          else ''
-        )
-      }}
-
 - name: Compute sanitized Cockpit plugin refs
   ansible.builtin.set_fact:
     terrarium_cockpit_zfs_ref_safe: "{{ terrarium_cockpit_zfs_ref | regex_replace('[^A-Za-z0-9._-]+', '-') }}"
     terrarium_cockpit_s3_ref_safe: "{{ terrarium_cockpit_s3_ref | regex_replace('[^A-Za-z0-9._-]+', '-') }}"
+    terrarium_cockpit_zfs_bundle_release: "cockpit-plugin-zfs-{{ terrarium_cockpit_zfs_ref | regex_replace('[^A-Za-z0-9._-]+', '-') }}"
+    terrarium_cockpit_s3_bundle_release: "cockpit-plugin-s3-{{ terrarium_cockpit_s3_ref | regex_replace('[^A-Za-z0-9._-]+', '-') }}"
 
 - name: Compute versioned Cockpit plugin bundle filenames
   ansible.builtin.set_fact:
@@ -62,27 +39,25 @@
 
 - name: Download prebuilt cockpit-zfs bundle
   ansible.builtin.get_url:
-    url: "https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_plugin_bundle_ref }}/{{ terrarium_cockpit_zfs_bundle_filename }}"
-    dest: "/tmp/{{ terrarium_cockpit_plugin_bundle_ref }}-{{ terrarium_cockpit_zfs_bundle_filename }}"
+    url: "https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_zfs_bundle_release }}/{{ terrarium_cockpit_zfs_bundle_filename }}"
+    dest: "/tmp/{{ terrarium_cockpit_zfs_bundle_release }}-{{ terrarium_cockpit_zfs_bundle_filename }}"
     mode: "0644"
   register: terrarium_cockpit_zfs_bundle_download
   failed_when: false
   when:
     - terrarium_cockpit_plugin_bundle_enabled
     - terrarium_cockpit_plugin_bundle_arch | length > 0
-    - terrarium_cockpit_plugin_bundle_ref | length > 0
 
 - name: Download prebuilt cockpit-s3 bundle
   ansible.builtin.get_url:
-    url: "https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_plugin_bundle_ref }}/{{ terrarium_cockpit_s3_bundle_filename }}"
-    dest: "/tmp/{{ terrarium_cockpit_plugin_bundle_ref }}-{{ terrarium_cockpit_s3_bundle_filename }}"
+    url: "https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_s3_bundle_release }}/{{ terrarium_cockpit_s3_bundle_filename }}"
+    dest: "/tmp/{{ terrarium_cockpit_s3_bundle_release }}-{{ terrarium_cockpit_s3_bundle_filename }}"
     mode: "0644"
   register: terrarium_cockpit_s3_bundle_download
   failed_when: false
   when:
     - terrarium_cockpit_plugin_bundle_enabled
     - terrarium_cockpit_plugin_bundle_arch | length > 0
-    - terrarium_cockpit_plugin_bundle_ref | length > 0
 
 - name: Determine whether prebuilt cockpit-zfs bundle is usable
   ansible.builtin.set_fact:
