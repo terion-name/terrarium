@@ -123,15 +123,35 @@ lxc storage volume attach terrarium shared-config worker-b shared-config /srv/sh
 
 ## UI Path
 
-You can also do this from the LXD UI:
+If you prefer to do this visually, the shipped LXD UI handles most of this flow well.
 
-1. Open `Storage` -> `Volumes`
-2. Create a new filesystem volume
-3. Open each instance
-4. Attach the same volume as a disk device
-5. Choose the target mount path inside the container
+### Create the shared volume in LXD UI
 
-If you prefer not to memorize the CLI, this is one of the easier things to do in the UI.
+1. Open `Storage`.
+2. Select the Terrarium storage pool.
+3. Open `Volumes`.
+4. Create a new `Custom` filesystem volume.
+5. Give it a clear name such as `openai-auth` or `agent-memory`.
+
+### Attach it to each container in LXD UI
+
+1. Open `Instances`.
+2. Select a container such as `openclaw`.
+3. Open `Devices`.
+4. Add a new `Disk` device.
+5. Choose the custom volume you created.
+6. Set the target path inside the container, for example `/root/.config/openai`.
+7. Repeat for every other container that should share the same data.
+
+### Finish the login inside one container
+
+The last part still happens inside the container itself:
+
+1. Open `Console` for one of the containers in LXD UI.
+2. Run the tool's normal login flow there.
+3. Check another container and confirm the same files are visible at the same path.
+
+This is one of the nicer Terrarium workflows for non-console-heavy users: the storage object and the device wiring can both be done from the LXD UI, and you only drop into the container console for the actual app login.
 
 ## When Not To Use This
 

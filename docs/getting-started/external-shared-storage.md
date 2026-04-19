@@ -109,6 +109,47 @@ terrariumctl mount list
 ls -la /srv/shared/storage-box
 ```
 
+## UI Path
+
+This workflow is partly UI-driven and partly host-level.
+
+### Create the host mount
+
+Today, the actual SMB/CIFS mount is still easiest through Terrarium's host CLI:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
+```
+
+That step integrates remote storage into the host itself, so Terrarium currently wraps it in `terrariumctl` instead of a GUI form.
+
+### Inspect it in Cockpit
+
+After the mount exists, you can use the management GUI instead of staying in the shell:
+
+1. Open Cockpit at `manage.<your-domain>`.
+2. Use the terminal there to inspect `/srv/shared/storage-box`.
+3. Confirm the expected directories are present before you attach them to containers.
+
+### Attach it to containers in LXD UI
+
+Once the share is mounted on the host, the container-facing part can be done visually:
+
+1. Open the LXD UI.
+2. Open `Instances`.
+3. Choose a container such as `openclaw`.
+4. Open `Devices`.
+5. Add a new `Disk` device.
+6. Set the source to the mounted host path, for example `/srv/shared/storage-box/knowledge-base`.
+7. Set the path inside the container, for example `/srv/knowledge-base`.
+8. Repeat for any other containers that should see the same data.
+
+### Verify it from the UI
+
+1. Open the container's `Console` in LXD UI.
+2. Check the mounted path inside the container.
+3. Confirm the application can read and write the files there.
+
 ## Step 3: Pass It Into Containers
 
 Now that the Storage Box is mounted on the host, expose it inside the containers that should use it.
