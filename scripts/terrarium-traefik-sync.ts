@@ -1,6 +1,6 @@
 import { URL } from "node:url";
 import { mkdirSync, readFileSync } from "node:fs";
-import { configString, loadConfig, readJsonFile, runAllowFailure, runJson, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
+import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
 
 const PREFIX = "terrariumctl proxy sync";
 const DEFAULT_CONFIG_PATH = "/etc/terrarium/config.yaml";
@@ -65,6 +65,34 @@ type RouteAuthProfile = {
   serviceName: string;
   containerName: string;
 };
+
+/**
+ * Extracts a JSON document from command output that may contain leading chatter.
+ *
+ * Fresh Ubuntu hosts can emit bootstrap messages such as `Installing LXD...`
+ * before the actual JSON payload appears. Traefik sync should tolerate that
+ * during first install instead of aborting the whole converge.
+ */
+function parseJsonFromOutput<T>(raw: string): T | null {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  for (const marker of ["[", "{"]) {
+    const index = trimmed.indexOf(marker);
+    if (index === -1) {
+      continue;
+    }
+    try {
+      return JSON.parse(trimmed.slice(index)) as T;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
 
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "route";
@@ -262,6 +290,30 @@ async function syncUfw(desiredPorts: DesiredPort[]): Promise<string[]> {
   );
 
   return errors;
+}
+
+/**
+ * Loads LXC instances for proxy generation.
+ *
+ * During initial host provisioning the Traefik role runs before the LXD role,
+ * so `lxc list -f json` may still print bootstrap text or fail entirely. In
+ * that case we fall back to an empty instance list and let later sync runs pick
+ * up container routes once LXD is actually ready.
+ */
+async function loadInstancesForProxySync(): Promise<LxcInstance[]> {
+  const result = await runAllowFailure(["lxc", "list", "-f", "json"]);
+  if (result.exitCode !== 0) {
+    console.warn(`${PREFIX}: LXD is not ready yet; skipping container route discovery`);
+    return [];
+  }
+
+  const parsed = parseJsonFromOutput<LxcInstance[]>(result.stdout);
+  if (!parsed) {
+    console.warn(`${PREFIX}: LXD output was not valid JSON yet; skipping container route discovery`);
+    return [];
+  }
+
+  return parsed;
 }
 
 function routeHostAllowedForSharedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
@@ -695,7 +747,7 @@ function buildDynamicConfig(containers: LxcInstance[], config: Record<string, un
 
 export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
-  const containers = await enrichInstanceState(await runJson<LxcInstance[]>(["lxc", "list", "-f", "json"], PREFIX));
+  const containers = await enrichInstanceState(await loadInstancesForProxySync());
   const { dynamicYaml, extraEntrypoints, ufwPorts, authProfiles, errors } = buildDynamicConfig(containers, config);
   const staticYaml = buildStaticConfig(config, extraEntrypoints);
 
