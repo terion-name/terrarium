@@ -1,7 +1,88 @@
+- name: Install Cockpit plugin runtime dependencies
+  ansible.builtin.apt:
+    name: "{{ terrarium_cockpit_plugin_runtime_deps }}"
+    state: present
+
+- name: Map Cockpit plugin bundle architecture
+  ansible.builtin.set_fact:
+    terrarium_cockpit_plugin_bundle_arch: >-
+      {{
+        {
+          'x86_64': 'amd64',
+          'aarch64': 'arm64'
+        }.get(ansible_architecture, '')
+      }}
+
+- name: Resolve exact Terrarium git tag
+  ansible.builtin.command: git -C {{ terrarium_repo_dir }} describe --tags --exact-match
+  register: terrarium_cockpit_plugin_repo_tag
+  failed_when: false
+  changed_when: false
+
+- name: Resolve Terrarium git branch
+  ansible.builtin.command: git -C {{ terrarium_repo_dir }} branch --show-current
+  register: terrarium_cockpit_plugin_repo_branch
+  failed_when: false
+  changed_when: false
+
+- name: Choose Cockpit plugin bundle release ref
+  ansible.builtin.set_fact:
+    terrarium_cockpit_plugin_bundle_ref: >-
+      {{
+        terrarium_cockpit_plugin_repo_tag.stdout
+        if terrarium_cockpit_plugin_repo_tag.rc == 0 and terrarium_cockpit_plugin_repo_tag.stdout | length > 0
+        else (
+          terrarium_cockpit_plugin_bundle_main_ref
+          if terrarium_cockpit_plugin_repo_branch.rc == 0 and terrarium_cockpit_plugin_repo_branch.stdout == 'main'
+          else ''
+        )
+      }}
+
+- name: Check cockpit-zfs install
+  ansible.builtin.stat:
+    path: /usr/share/cockpit/zfs/index.html
+  register: terrarium_cockpit_zfs_installed
+
+- name: Check cockpit-s3-browser install
+  ansible.builtin.stat:
+    path: /usr/share/cockpit/cockpit-s3-browser/index.html
+  register: terrarium_cockpit_s3_installed
+
+- name: Download prebuilt Cockpit plugin bundle
+  ansible.builtin.get_url:
+    url: "https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_plugin_bundle_ref }}/terrarium-cockpit-plugins-linux-{{ terrarium_cockpit_plugin_bundle_arch }}.tar.gz"
+    dest: "/tmp/terrarium-cockpit-plugins-{{ terrarium_cockpit_plugin_bundle_ref }}-{{ terrarium_cockpit_plugin_bundle_arch }}.tar.gz"
+    mode: "0644"
+  register: terrarium_cockpit_plugin_bundle_download
+  failed_when: false
+  when:
+    - terrarium_cockpit_plugin_bundle_enabled
+    - terrarium_cockpit_plugin_bundle_arch | length > 0
+    - terrarium_cockpit_plugin_bundle_ref | length > 0
+
+- name: Determine whether prebuilt Cockpit plugin bundle is usable
+  ansible.builtin.set_fact:
+    terrarium_cockpit_plugin_bundle_usable: >-
+      {{
+        terrarium_cockpit_plugin_bundle_download is defined
+        and terrarium_cockpit_plugin_bundle_download is succeeded
+        and terrarium_cockpit_plugin_bundle_download.dest is defined
+      }}
+
+- name: Install prebuilt Cockpit plugin bundle
+  ansible.builtin.unarchive:
+    src: "{{ terrarium_cockpit_plugin_bundle_download.dest }}"
+    dest: /
+    remote_src: true
+  when:
+    - terrarium_cockpit_plugin_bundle_usable | default(false)
+    - terrarium_cockpit_plugin_bundle_download.changed or not terrarium_cockpit_zfs_installed.stat.exists or not terrarium_cockpit_s3_installed.stat.exists
+
 - name: Install cockpit plugin build dependencies
   ansible.builtin.apt:
-    name: "{{ terrarium_cockpit_plugin_deps }}"
+    name: "{{ terrarium_cockpit_plugin_build_deps }}"
     state: present
+  when: not (terrarium_cockpit_plugin_bundle_usable | default(false))
 
 - name: Enable corepack for yarn-managed builds
   ansible.builtin.shell: |
@@ -11,12 +92,14 @@
   args:
     executable: /bin/bash
   changed_when: false
+  when: not (terrarium_cockpit_plugin_bundle_usable | default(false))
 
 - name: Ensure plugin source directory exists
   ansible.builtin.file:
     path: /usr/local/src
     state: directory
     mode: "0755"
+  when: not (terrarium_cockpit_plugin_bundle_usable | default(false))
 
 - name: Checkout cockpit-zfs source
   ansible.builtin.git:
@@ -25,11 +108,7 @@
     version: "{{ terrarium_cockpit_zfs_ref }}"
     force: true
   register: terrarium_cockpit_zfs_checkout
-
-- name: Check cockpit-zfs install
-  ansible.builtin.stat:
-    path: /usr/share/cockpit/zfs/index.html
-  register: terrarium_cockpit_zfs_installed
+  when: not (terrarium_cockpit_plugin_bundle_usable | default(false))
 
 - name: Build and install cockpit-zfs
   ansible.builtin.shell: |
@@ -40,6 +119,7 @@
     chdir: /usr/local/src/cockpit-zfs
     executable: /bin/bash
   when:
+    - not (terrarium_cockpit_plugin_bundle_usable | default(false))
     - terrarium_cockpit_zfs_checkout.changed or not terrarium_cockpit_zfs_installed.stat.exists
 
 - name: Checkout cockpit-S3ObjectBroswer source
@@ -49,11 +129,7 @@
     version: "{{ terrarium_cockpit_s3_ref }}"
     force: true
   register: terrarium_cockpit_s3_checkout
-
-- name: Check cockpit-s3-browser install
-  ansible.builtin.stat:
-    path: /usr/share/cockpit/cockpit-s3-browser/index.html
-  register: terrarium_cockpit_s3_installed
+  when: not (terrarium_cockpit_plugin_bundle_usable | default(false))
 
 - name: Build and install cockpit-S3ObjectBroswer
   ansible.builtin.shell: |
@@ -64,6 +140,7 @@
     chdir: /usr/local/src/cockpit-S3ObjectBroswer
     executable: /bin/bash
   when:
+    - not (terrarium_cockpit_plugin_bundle_usable | default(false))
     - terrarium_cockpit_s3_checkout.changed or not terrarium_cockpit_s3_installed.stat.exists
 
 - name: Restart cockpit socket after plugin install
