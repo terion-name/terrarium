@@ -3,6 +3,7 @@ terrarium_base_packages:
   - apt-transport-https
   - bash-completion
   - ca-certificates
+  - cifs-utils
   - curl
   - git
   - gnupg

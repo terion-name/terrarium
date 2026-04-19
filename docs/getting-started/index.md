@@ -6,6 +6,8 @@ This section covers the pieces you usually want before the first install:
 - [Storage and Sizing](/getting-started/storage)
 - [Domains and Authentication](/getting-started/domains-and-auth)
 - [Management GUIs](/getting-started/management-guis)
+- [Shared Data Between Containers](/getting-started/shared-data-between-containers)
+- [External Shared Storage](/getting-started/external-shared-storage)
 
 Recommended order:
 

@@ -20,7 +20,7 @@ export default defineConfig({
       {
         text: "Overview",
         items: [
-          { text: "Docs Home", link: "/" },
+          { text: "About", link: "/about" },
           { text: "Security Model", link: "/security" },
           { text: "Architecture", link: "/architecture" }
         ]
@@ -32,7 +32,9 @@ export default defineConfig({
           { text: "Installation", link: "/getting-started/installation" },
           { text: "Storage and Sizing", link: "/getting-started/storage" },
           { text: "Domains and Authentication", link: "/getting-started/domains-and-auth" },
-          { text: "Management GUIs", link: "/getting-started/management-guis" }
+          { text: "Management GUIs", link: "/getting-started/management-guis" },
+          { text: "Shared Data Between Containers", link: "/getting-started/shared-data-between-containers" },
+          { text: "External Shared Storage", link: "/getting-started/external-shared-storage" }
         ]
       },
       {

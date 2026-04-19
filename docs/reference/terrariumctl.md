@@ -13,6 +13,9 @@
 | `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
 | `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the persisted config. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
+| `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--seal` | password prompt, `uid=0`, `gid=0`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
+| `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
+| `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
 | `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
 | `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, and re-runs reconciliation. |
 | `terrariumctl set emails` | optional flags | existing values when omitted | Updates Terrarium contact, ACME, and ZITADEL admin emails. |
@@ -69,6 +72,65 @@ Restore behavior:
 
 - `terrariumctl backup restore --instance NAME` restores from the latest local snapshot in place by default after confirmation.
 - `terrariumctl backup restore --source local|s3 --instance NAME [--at ...] --as-new NEWNAME` restores the chosen point and then launches interactive `lxd recover`.
+
+## mount add
+
+| Flag | Argument | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| positional `protocol` | `smb` or `cifs` | yes | none | Chooses the SMB/CIFS mount handler. Both values map to a managed CIFS mount. |
+| positional `hostPath` | absolute host path | yes | none | The mount point to create on the Terrarium host. |
+| positional `address` | share address | yes | none | The SMB share address, usually `//server/share`. |
+| positional `username` | username | yes | none | The SMB/CIFS username written to the managed credentials file. |
+| `-p`, `--password` | password | no | prompt if omitted | The SMB/CIFS password. Omit it to let Terrarium prompt securely instead of putting it in shell history. |
+| `--uid` | uid | no | `0` | UID presented for files on the mounted share. |
+| `--gid` | gid | no | `0` | GID presented for files on the mounted share. |
+| `--file-mode` | octal mode | no | `0660` | File permissions presented on the mounted share. |
+| `--dir-mode` | octal mode | no | `0770` | Directory permissions presented on the mounted share. |
+| `--seal` | `true` or `false` | no | `true` | Enables or disables the SMB encryption option explicitly. |
+
+Example:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
+```
+
+Behavior:
+
+- Terrarium creates the mount point if it does not exist.
+- Terrarium writes credentials under `/etc/terrarium/mounts/`.
+- Terrarium adds or updates a Terrarium-managed block in `/etc/fstab`.
+- If the path is already mounted, Terrarium remounts it cleanly.
+
+## mount remove
+
+| Flag | Argument | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| positional `hostPath` | absolute host path | yes | none | The Terrarium-managed mount point to remove from the host. |
+
+Example:
+
+```bash
+terrariumctl mount remove /srv/shared/storage-box
+```
+
+Behavior:
+
+- Terrarium unmounts the path if it is currently mounted.
+- Terrarium removes the managed block from `/etc/fstab`.
+- Terrarium deletes the managed credentials file for that mount.
+
+## mount list
+
+Example:
+
+```bash
+terrariumctl mount list
+```
+
+Behavior:
+
+- Shows all Terrarium-managed mounts discovered in `/etc/fstab`.
+- Reports the share address, host path, protocol, and whether the path is mounted right now.
 
 ## set domains
 

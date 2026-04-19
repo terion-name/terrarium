@@ -5,6 +5,9 @@ This section covers the pieces you usually want before the first install:
 - [Installation](installation.md)
 - [Storage and Sizing](storage.md)
 - [Domains and Authentication](domains-and-auth.md)
+- [Management GUIs](management-guis.md)
+- [Shared Data Between Containers](shared-data-between-containers.md)
+- [External Shared Storage](external-shared-storage.md)
 
 Recommended order:
 

@@ -1,7 +1,7 @@
-import { confirm, input } from "@inquirer/prompts";
+import { confirm, input, password } from "@inquirer/prompts";
 import { cac } from "cac";
 import chalk from "chalk";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
 import { normalizeOidcIssuer, registerInstallCommand, validateEmail } from "./terrarium-install";
 import { backupExportCmd } from "./terrarium-s3-export";
@@ -13,6 +13,18 @@ import { configBoolean, configString, loadConfig, runAllowFailure, runInteractiv
 
 const PREFIX = "terrariumctl";
 const CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
+const FSTAB_PATH = "/etc/fstab";
+const MOUNTS_DIR = "/etc/terrarium/mounts";
+const MOUNT_MARKER_PREFIX = "TERRARIUM MOUNT ";
+
+type ManagedMount = {
+  marker: string;
+  address: string;
+  hostPath: string;
+  protocol: string;
+  options: string[];
+  credentialsPath: string;
+};
 
 function normalizedArgv(rawArgv: string[]): string[] {
   if (rawArgv.length < 2) {
@@ -91,6 +103,247 @@ function cliOption(options: Record<string, unknown>, key: string, aliases: strin
     }
   }
   return undefined;
+}
+
+function parseBooleanOption(value: string | undefined, optionName: string, defaultValue: boolean): boolean {
+  if (value === undefined || value === "") {
+    return defaultValue;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`${optionName} must be true or false`);
+}
+
+function normalizeMountProtocol(protocol: string): "cifs" {
+  const normalized = protocol.trim().toLowerCase();
+  if (normalized === "cifs" || normalized === "smb") {
+    return "cifs";
+  }
+  throw new Error("mount protocol must be smb or cifs");
+}
+
+function normalizeShareAddress(address: string): string {
+  const trimmed = address.trim();
+  if (!trimmed) {
+    throw new Error("share address is required");
+  }
+  if (trimmed.startsWith("//")) {
+    return trimmed;
+  }
+  return `//${trimmed.replace(/^\/+/, "")}`;
+}
+
+function requireAbsoluteHostPath(hostPath: string): string {
+  const trimmed = hostPath.trim();
+  if (!trimmed.startsWith("/")) {
+    throw new Error("host path must be absolute");
+  }
+  return trimmed;
+}
+
+function slugifyMountName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "mount";
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceManagedBlock(current: string, marker: string, block: string): string {
+  const pattern = new RegExp(`# BEGIN ${escapeRegex(marker)}\\n[\\s\\S]*?# END ${escapeRegex(marker)}\\n?`, "g");
+  const cleaned = current.replace(pattern, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return `${cleaned ? `${cleaned}\n\n` : ""}${block}\n`;
+}
+
+function stripManagedBlock(current: string, marker: string): string {
+  const pattern = new RegExp(`# BEGIN ${escapeRegex(marker)}\\n[\\s\\S]*?# END ${escapeRegex(marker)}\\n?`, "g");
+  return current.replace(pattern, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+function parseManagedMounts(current: string): ManagedMount[] {
+  const mounts: ManagedMount[] = [];
+  const pattern = new RegExp(`# BEGIN (${escapeRegex(MOUNT_MARKER_PREFIX)}[^\\n]+)\\n([^\\n]+)\\n# END \\1`, "g");
+
+  for (const match of current.matchAll(pattern)) {
+    const marker = match[1]?.trim() ?? "";
+    const entry = match[2]?.trim() ?? "";
+    if (!marker || !entry) {
+      continue;
+    }
+
+    const [address = "", hostPath = "", protocol = "", rawOptions = ""] = entry.split(/\s+/, 4);
+    if (!address || !hostPath || !protocol) {
+      continue;
+    }
+
+    const options = rawOptions.split(",").filter(Boolean);
+    const credentialsPath = options.find((option) => option.startsWith("credentials="))?.slice("credentials=".length) ?? "";
+
+    mounts.push({
+      marker,
+      address,
+      hostPath,
+      protocol,
+      options,
+      credentialsPath
+    });
+  }
+
+  return mounts;
+}
+
+async function mountShareCmd(
+  protocolArg: string,
+  hostPathArg: string,
+  addressArg: string,
+  usernameArg: string,
+  passwordArg?: string,
+  options: { uid?: string; gid?: string; fileMode?: string; dirMode?: string; seal?: boolean } = {}
+): Promise<void> {
+  const protocol = normalizeMountProtocol(protocolArg);
+  const hostPath = requireAbsoluteHostPath(hostPathArg);
+  const address = normalizeShareAddress(addressArg);
+  const username = usernameArg.trim();
+  if (!username) {
+    throw new Error("username is required");
+  }
+
+  const secret =
+    passwordArg ||
+    (await password({
+      message: `Password for ${username} (${address})`,
+      mask: true,
+      validate: (value) => (value.trim().length > 0 ? true : "Password is required")
+    }));
+
+  mkdirSync(MOUNTS_DIR, { recursive: true, mode: 0o700 });
+  mkdirSync(hostPath, { recursive: true, mode: 0o755 });
+
+  const slug = slugifyMountName(`${hostPath}-${address}`);
+  const credentialsPath = `${MOUNTS_DIR}/${slug}.credentials`;
+  const marker = `TERRARIUM MOUNT ${slug}`;
+  const optionsList = [
+    "iocharset=utf8",
+    "rw",
+    ...(options.seal === false ? [] : ["seal"]),
+    `credentials=${credentialsPath}`,
+    `uid=${options.uid || "0"}`,
+    `gid=${options.gid || "0"}`,
+    `file_mode=${options.fileMode || "0660"}`,
+    `dir_mode=${options.dirMode || "0770"}`
+  ];
+  const entry = `${address} ${hostPath} ${protocol} ${optionsList.join(",")} 0 0`;
+  const block = `# BEGIN ${marker}\n${entry}\n# END ${marker}`;
+
+  writeFileSync(credentialsPath, `username=${username}\npassword=${secret}\n`, "utf8");
+  chmodSync(credentialsPath, 0o600);
+
+  const fstabCurrent = existsSync(FSTAB_PATH) ? readFileSync(FSTAB_PATH, "utf8") : "";
+  writeFileSync(FSTAB_PATH, replaceManagedBlock(fstabCurrent, marker, block), "utf8");
+
+  const mounted = await runAllowFailure(["mountpoint", "-q", hostPath]);
+  if (mounted.exitCode === 0) {
+    await runText(["umount", hostPath], PREFIX);
+  }
+
+  await runText(["mount", hostPath], PREFIX);
+
+  console.log(success(`Mounted ${address} at ${hostPath}`));
+  console.log(`  ${label("Protocol:")} ${value(protocol)}`);
+  console.log(`  ${label("Credentials:")} ${value(credentialsPath)}`);
+  console.log(`  ${label("fstab:")} ${value(`managed block ${marker}`)}`);
+}
+
+async function mountListCmd(): Promise<void> {
+  const fstabCurrent = existsSync(FSTAB_PATH) ? readFileSync(FSTAB_PATH, "utf8") : "";
+  const mounts = parseManagedMounts(fstabCurrent);
+
+  if (mounts.length === 0) {
+    console.log("No Terrarium-managed mounts found.");
+    return;
+  }
+
+  console.log(heading("Terrarium-managed mounts"));
+  for (const mount of mounts) {
+    const mounted = await runAllowFailure(["mountpoint", "-q", mount.hostPath]);
+    console.log(`\n${label("Path:")} ${value(mount.hostPath)}`);
+    console.log(`  ${label("Address:")} ${value(mount.address)}`);
+    console.log(`  ${label("Protocol:")} ${value(mount.protocol)}`);
+    console.log(`  ${label("Mounted:")} ${value(mounted.exitCode === 0 ? "yes" : "no")}`);
+    console.log(`  ${label("Credentials:")} ${value(mount.credentialsPath || "n/a")}`);
+  }
+}
+
+async function mountRemoveCmd(hostPathArg: string): Promise<void> {
+  const hostPath = requireAbsoluteHostPath(hostPathArg);
+  const fstabCurrent = existsSync(FSTAB_PATH) ? readFileSync(FSTAB_PATH, "utf8") : "";
+  const mounts = parseManagedMounts(fstabCurrent);
+  const mount = mounts.find((candidate) => candidate.hostPath === hostPath);
+
+  if (!mount) {
+    throw new Error(`no Terrarium-managed mount found for ${hostPath}`);
+  }
+
+  await confirmDestructive(`Remove managed mount ${mount.address} at ${hostPath}?`);
+
+  const mounted = await runAllowFailure(["mountpoint", "-q", hostPath]);
+  if (mounted.exitCode === 0) {
+    await runText(["umount", hostPath], PREFIX);
+  }
+
+  writeFileSync(FSTAB_PATH, `${stripManagedBlock(fstabCurrent, mount.marker)}\n`, "utf8");
+
+  if (mount.credentialsPath && existsSync(mount.credentialsPath)) {
+    unlinkSync(mount.credentialsPath);
+  }
+
+  console.log(success(`Removed managed mount at ${hostPath}`));
+}
+
+async function mountCmd(action: string, args: string[], options: Record<string, unknown>): Promise<void> {
+  const normalizedAction = action.trim().toLowerCase();
+
+  if (normalizedAction === "add") {
+    const [protocol, hostPath, address, username] = args;
+    if (!protocol || !hostPath || !address || !username) {
+      throw new Error("mount add requires: <protocol> <hostPath> <address> <username>");
+    }
+    await mountShareCmd(protocol, hostPath, address, username, cliOption(options, "password"), {
+      uid: cliOption(options, "uid"),
+      gid: cliOption(options, "gid"),
+      fileMode: cliOption(options, "fileMode", ["file-mode"]),
+      dirMode: cliOption(options, "dirMode", ["dir-mode"]),
+      seal: parseBooleanOption(cliOption(options, "seal"), "--seal", true)
+    });
+    return;
+  }
+
+  if (normalizedAction === "remove") {
+    const [hostPath] = args;
+    if (!hostPath) {
+      throw new Error("mount remove requires: <hostPath>");
+    }
+    await mountRemoveCmd(hostPath);
+    return;
+  }
+
+  if (normalizedAction === "list") {
+    await mountListCmd();
+    return;
+  }
+
+  throw new Error(`unsupported mount action: ${action}`);
 }
 
 async function persistAndReconcile(config: Record<string, unknown>, summary: string): Promise<void> {
@@ -546,6 +799,21 @@ cli
       throw new Error(`unsupported proxy action: ${action}`);
     }
     await syncProxyConfig();
+  });
+
+cli
+  .command("mount <action> [...args]", "Manage host SMB/CIFS mounts")
+  .option("-p, --password <password>", "SMB/CIFS password for non-interactive automation")
+  .option("--uid <uid>", "UID to present for mounted files", { default: "0" })
+  .option("--gid <gid>", "GID to present for mounted files", { default: "0" })
+  .option("--file-mode <mode>", "File mode for mounted files", { default: "0660" })
+  .option("--dir-mode <mode>", "Directory mode for mounted directories", { default: "0770" })
+  .option("--seal <value>", "Enable SMB encryption: true or false", { default: "true" })
+  .usage(
+    "mount add smb|cifs /host/path //server/share username [-p PASSWORD] [--seal true|false]\n  terrariumctl mount remove /host/path\n  terrariumctl mount list"
+  )
+  .action(async (action, args, options) => {
+    await mountCmd(action, (args as string[]) ?? [], options as Record<string, unknown>);
   });
 
 cli
