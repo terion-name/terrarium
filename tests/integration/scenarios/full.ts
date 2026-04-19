@@ -1,5 +1,5 @@
 import { IntegrationContext } from "../context";
-import { arbitraryPublicHost, captureFailureArtifacts, createHttpFixtureContainer, defaultPublicDomains, installTerrarium, preparePartitionTarget, provisionHost } from "./common";
+import { captureFailureArtifacts, createHttpFixtureContainer, installTerrarium, preparePartitionTarget, provisionHost } from "./common";
 import { runSmokeSuite } from "./smoke";
 
 function shellArg(value: string): string {
@@ -17,12 +17,16 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
   const partitionSsh = context.ssh(partitionHost);
 
   try {
-    fileHost.domains = defaultPublicDomains(fileHost.server.ipv4);
-    partitionHost.domains = defaultPublicDomains(partitionHost.server.ipv4);
     const externalFixture = await context.zitadelCloud.provisionFixture(`${context.config.slug}-full`, fileHost.domains, "terrarium-admins");
     context.registerCleanup(async () => {
       await context.zitadelCloud.cleanupFixture(externalFixture);
     });
+
+    await context.duckdns.update(fileHost.server.ipv4);
+    await context.duckdns.waitForHosts(
+      [fileHost.domains.manage, fileHost.domains.proxy, fileHost.domains.lxd, fileHost.domains.auth],
+      fileHost.server.ipv4
+    );
 
     await installTerrarium(context, fileHost, {
       idpMode: "oidc",
@@ -31,17 +35,27 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       oidcIssuer: context.config.zitadelCloudIssuer,
       oidcClientId: externalFixture.clientId,
       oidcClientSecret: externalFixture.clientSecret,
-      adminGroup: externalFixture.adminGroup,
-      useDerivedDomains: true
+      adminGroup: externalFixture.adminGroup
     });
+
+    await context.duckdns.update(partitionHost.server.ipv4);
+    await context.duckdns.waitForHosts(
+      [partitionHost.domains.manage, partitionHost.domains.proxy, partitionHost.domains.lxd, partitionHost.domains.auth],
+      partitionHost.server.ipv4
+    );
 
     await preparePartitionTarget(partitionSsh, partitionHost.volume?.linuxDevice || "/dev/sdb");
     await installTerrarium(context, partitionHost, {
       idpMode: "local",
       storageMode: "partition",
-      storageSource: "auto",
-      useDerivedDomains: true
+      storageSource: "auto"
     });
+
+    await context.duckdns.update(fileHost.server.ipv4);
+    await context.duckdns.waitForHosts(
+      [fileHost.domains.manage, fileHost.domains.proxy, fileHost.domains.lxd, fileHost.domains.auth],
+      fileHost.server.ipv4
+    );
 
     await fileSsh.exec(
       `terrariumctl mount add cifs /srv/shared/${context.config.slug} ${shellArg(context.config.cifsAddress)} ${shellArg(
@@ -60,7 +74,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     await createHttpFixtureContainer(
       fileSsh,
       `compose-${context.config.slug}`,
-      [`https://${arbitraryPublicHost(fileHost.server.ipv4, `compose-${context.config.slug}`)}@auth:agents,admins`],
+      [`https://compose-${context.config.slug}.${context.duckdns.rootDomain()}@auth:agents,admins`],
       "compose-ok"
     );
 

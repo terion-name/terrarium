@@ -11,7 +11,7 @@ import {
   setConfigValue,
   success
 } from "./context";
-import { configBoolean, configString } from "../lib/common";
+import { configBoolean, configString, normalizeS3Endpoint } from "../lib/common";
 import { writeFileSync } from "node:fs";
 import { verifyOidcConfig, verifyS3Config } from "./verify";
 
@@ -216,7 +216,7 @@ export async function setS3Cmd(options: SetS3Options, actions: ReconcileActions)
   const nextEnabled = options.enable ? true : options.disable ? false : configBoolean(config, "terrarium_enable_s3");
   setConfigValue(config, "terrarium_enable_s3", nextEnabled);
 
-  if (options.s3Endpoint !== undefined) setConfigValue(config, "terrarium_s3_endpoint", options.s3Endpoint);
+  if (options.s3Endpoint !== undefined) setConfigValue(config, "terrarium_s3_endpoint", normalizeS3Endpoint(options.s3Endpoint));
   if (options.s3Bucket !== undefined) setConfigValue(config, "terrarium_s3_bucket", options.s3Bucket);
   if (options.s3Region !== undefined) setConfigValue(config, "terrarium_s3_region", options.s3Region);
   if (options.s3Prefix !== undefined) setConfigValue(config, "terrarium_s3_prefix", options.s3Prefix);

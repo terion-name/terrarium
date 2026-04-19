@@ -1,6 +1,6 @@
 import { confirm } from "@inquirer/prompts";
 import { heading, label, requireConfig, success, value } from "./context";
-import { configBoolean, configString, runAllowFailure, runInteractive, runText } from "../lib/common";
+import { configBoolean, configString, normalizeS3Endpoint, runAllowFailure, runInteractive, runText } from "../lib/common";
 import { backupExportCmd } from "../terrarium-s3-export";
 import { reconstructFromS3 } from "../terrarium-zfs-reconstruct";
 import { PREFIX } from "./context";
@@ -16,7 +16,7 @@ export async function backupListCmd(): Promise<void> {
   const pool = configString(config, "terrarium_lxd_pool_name", "terrarium");
   const bucket = configString(config, "terrarium_s3_bucket");
   const prefix = configString(config, "terrarium_s3_prefix", "terrarium");
-  const endpoint = configString(config, "terrarium_s3_endpoint");
+  const endpoint = normalizeS3Endpoint(configString(config, "terrarium_s3_endpoint"));
   const awsEnv: Record<string, string> = {};
   const accessKey = configString(config, "terrarium_s3_access_key");
   const secretKey = configString(config, "terrarium_s3_secret_key");

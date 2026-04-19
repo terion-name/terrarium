@@ -1,6 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { configBoolean, configString, loadConfig, runAllowFailure, runJson, runShell, runText, shellEscape, writeJsonFile } from "./lib/common";
+import {
+  configBoolean,
+  configString,
+  loadConfig,
+  normalizeS3Endpoint,
+  runAllowFailure,
+  runJson,
+  runShell,
+  runText,
+  shellEscape,
+  writeJsonFile
+} from "./lib/common";
 
 const PREFIX = "terrariumctl backup export";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
@@ -45,7 +56,7 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
     return;
   }
 
-  const endpoint = configString(config, "terrarium_s3_endpoint");
+  const endpoint = normalizeS3Endpoint(configString(config, "terrarium_s3_endpoint"));
   const prefix = configString(config, "terrarium_s3_prefix", "terrarium");
   const pool = configString(config, "terrarium_lxd_pool_name", "terrarium");
   const awsEnv = s3Env(config);

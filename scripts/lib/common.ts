@@ -186,6 +186,15 @@ export function configBoolean(config: Record<string, unknown>, key: string): boo
   return false;
 }
 
+/** Normalizes S3-compatible endpoints so bare hostnames default to HTTPS. */
+export function normalizeS3Endpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 /** Creates a new temporary directory using the OS temp root and a caller prefix. */
 export function makeTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));

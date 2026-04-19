@@ -215,7 +215,7 @@ async function enrichInstanceState(containers: LxcInstance[]): Promise<LxcInstan
       continue;
     }
 
-    const response = await runAllowFailure(["lxc", "query", `/1.0/instances/${container.name}/state`]);
+    const response = await runAllowFailure(["timeout", "15s", "lxc", "query", `/1.0/instances/${container.name}/state`]);
     if (response.exitCode !== 0) {
       enriched.push(container);
       continue;
@@ -301,7 +301,7 @@ async function syncUfw(desiredPorts: DesiredPort[]): Promise<string[]> {
  * up container routes once LXD is actually ready.
  */
 async function loadInstancesForProxySync(): Promise<LxcInstance[]> {
-  const result = await runAllowFailure(["lxc", "list", "-f", "json"]);
+  const result = await runAllowFailure(["timeout", "15s", "lxc", "list", "-f", "json"]);
   if (result.exitCode !== 0) {
     console.warn(`${PREFIX}: LXD is not ready yet; skipping container route discovery`);
     return [];
