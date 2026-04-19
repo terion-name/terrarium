@@ -7,13 +7,13 @@ That matters for two reasons:
 - VSCodium uses the open extension ecosystem by default instead of Microsoft's marketplace restrictions.
 - `codium serve-web` gives you a first-party web mode that fits Terrarium's reverse-proxy model cleanly.
 
-If your goal is "a browser editor on my own domain, inside a rewindable LXC, with open marketplace behavior", this is the guide you want.
+If your goal is "a browser editor on my own domain, inside a time-machine-enabled LXC, with open marketplace behavior", this is the guide you want.
 
 ## Why Terrarium fits this use case
 
 - Security: the editor, extensions, terminals, runtimes, and project files live inside the container.
 - Isolation: each project or team can have its own fully separate devbox.
-- Rewindability: if an extension, SDK, or shell experiment breaks the environment, you can restore the container.
+- Time machine: if an extension, SDK, or shell experiment breaks the environment, you can step the container back to a known-good state.
 - Networking: `codium serve-web` is a normal web service, so Terrarium can publish it through Traefik with `user.proxy`.
 
 ## Create the container
@@ -171,7 +171,7 @@ terrariumctl proxy sync
 3. Snapshot before large dependency or extension changes.
 4. Expose the IDE only after `codium-web.service` is healthy and the connection token is recorded somewhere safe.
 
-This is one of the nicest Terrarium patterns in practice: each devbox feels like a real machine, but the blast radius stays contained and rewindable.
+This is one of the nicest Terrarium patterns in practice: each devbox feels like a real machine, but the blast radius stays contained and the time machine is there when an experiment goes wrong.
 
 ## Upstream docs used for this guide
 

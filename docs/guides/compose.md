@@ -32,9 +32,9 @@ Each Compose stack gets its own filesystem, packages, images, volumes, and daemo
 
 You do not need to make the whole host a shared Docker machine. One stack can use its own Docker setup inside its own LXC, while the host remains clean and other stacks stay separate.
 
-### Rewindability
+### Built-in time machine
 
-When a deployment goes sideways, a bad image update lands, or config drift piles up, you can rewind the container instead of rebuilding the entire host.
+When a deployment goes sideways, a bad image update lands, or config drift piles up, you can step the container backward instead of rebuilding the entire host.
 
 ### Reproducibility
 
@@ -67,4 +67,4 @@ You do not need a separate reverse-proxy stack inside every container unless the
 5. Add a `user.proxy` label for the route you want to expose.
 6. Snapshot the container once the deployment reaches a stable state.
 
-This keeps the project self-contained, safer to operate, and much easier to roll back when changes do not go as planned.
+This keeps the project self-contained, safer to operate, and much easier to step backward when changes do not go as planned.

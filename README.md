@@ -6,9 +6,9 @@
     </picture>
 </p>
 
-Terrarium turns a plain Ubuntu 24.04 VPS into something much more useful: a secure, rewindable home for isolated environments. It is designed for the way people actually work with agents and development tools today, where giving software real freedom is powerful, but giving it unlimited freedom on your host is a bad idea.
+Terrarium turns a plain Ubuntu 24.04 VPS into something much more useful: a secure home for isolated environments, with a built-in time machine. It is designed for the way people actually work with agents and development tools today, where giving software real freedom is powerful, but giving it unlimited freedom on your host is a bad idea.
 
-If you want to run agent systems like OpenClaw, Hermes, or other tools that need full shell access, custom packages, background services, and room to experiment, Terrarium gives them their own LXD containers on ZFS. That means they can operate inside real environments instead of cramped Docker setups, while the host stays hardened and recoverable. When an agent makes a mess, installs the wrong thing, or mutates a system beyond recognition, you can rewind the container state in small steps instead of rebuilding everything from scratch.
+If you want to run agent systems like OpenClaw, Hermes, or other tools that need full shell access, custom packages, background services, and room to experiment, Terrarium gives them their own LXD containers on ZFS. That means they can operate inside real environments instead of cramped Docker setups, while the host stays hardened and recoverable. When an agent makes a mess, installs the wrong thing, or mutates a system beyond recognition, you can step backward through small ZFS snapshots instead of rebuilding everything from scratch. And if the whole VPS disappears, S3 exports give you an off-host disaster-recovery path.
 
 Terrarium is just as useful for human workflows. You can spin up development environments, temporary sandboxes, internal tools, or web-based apps like browser-accessible editors and agent UIs, then expose them through Traefik with automatic proxying and TLS. Each environment stays isolated, configurable, and easy to back up, so you get the flexibility of a full VPS without turning the whole server into a shared blast radius.
 
@@ -104,11 +104,11 @@ Storage sizing guidance:
 
 - Keep the boot disk relatively small. It mainly holds Ubuntu, logs, packages, Terrarium state, and the control plane.
 - Put LXD containers and snapshots on the separate ZFS disk whenever your provider supports block storage.
-- Terrarium keeps local rewind history as ZFS snapshots on the same pool as the containers. Those snapshots are copy-on-write, so they do not duplicate all data up front, but they do retain changed blocks for as long as the snapshots live.
+- Terrarium keeps its local time-machine history as ZFS snapshots on the same pool as the containers. Those snapshots are copy-on-write, so they do not duplicate all data up front, but they do retain changed blocks for as long as the snapshots live.
 - Current default local retention is `24` hourly snapshots, `14` daily snapshots, and `3` monthly snapshots.
 - Terrarium enables ZFS `compression=zstd` on the pool. Dedup is not enabled.
 - S3 exports are separate from local sizing. They are streamed out of ZFS and compressed with `zstd` before upload, so they do not need extra permanent local disk beyond Terrarium’s working state.
-- For local rewind history, size the ZFS disk around `2x-3x` your expected live container data if the containers mostly append data or change a moderate amount day to day.
+- For the local time-machine history, size the ZFS disk around `2x-3x` your expected live container data if the containers mostly append data or change a moderate amount day to day.
 - If your workloads rewrite large files, rebuild package trees often, or keep databases/churn-heavy workspaces inside the containers, `3x-4x` live data is safer.
 - On providers without attachable block storage, Terrarium still works with `--storage-mode file`, but you should choose a noticeably larger root disk because the host OS, live container data, and snapshots all share the same filesystem.
 

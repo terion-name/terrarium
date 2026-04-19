@@ -1,6 +1,6 @@
 # Hermes on Terrarium
 
-Hermes is a very natural Terrarium workload: it wants a real Linux environment, shell access, mutable state, and enough room to install tools over time. Terrarium gives Hermes that freedom inside its own LXC, while the host stays hardened and easy to roll back around it.
+Hermes is a very natural Terrarium workload: it wants a real Linux environment, shell access, mutable state, and enough room to install tools over time. Terrarium gives Hermes that freedom inside its own LXC, while the host stays hardened and gives you a built-in time machine if the environment drifts or breaks.
 
 This is a strong fit when you want an agent to have real power, but you do not want that power landing directly on the VPS host.
 
@@ -8,7 +8,7 @@ This is a strong fit when you want an agent to have real power, but you do not w
 
 - Security: Hermes runs inside its own container instead of directly on the host.
 - Isolation: its packages, caches, logs, and sessions stay in one place.
-- Rewindability: if the environment drifts or the agent breaks its own dependencies, you can restore the container to a recent snapshot.
+- Time machine: if the environment drifts or the agent breaks its own dependencies, you can step the container back to a recent snapshot.
 - Networking: Hermes exposes an HTTP API cleanly, so it fits Terrarium's built-in Traefik automation very well.
 
 ## Create the container

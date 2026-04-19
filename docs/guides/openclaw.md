@@ -8,7 +8,7 @@ Terrarium gives OpenClaw a full Ubuntu LXC with its own packages, workspace, and
 
 - Security: the OpenClaw runtime is isolated from the host.
 - Isolation: one agent environment does not interfere with another.
-- Rewindability: if the workspace drifts or the agent damages the environment, you can restore the container to a recent snapshot.
+- Time machine: if the workspace drifts or the agent damages the environment, you can step the container back to a recent snapshot.
 - Realism: OpenClaw gets the kind of mutable Linux environment it expects.
 
 ## Important networking note

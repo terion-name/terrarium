@@ -2,13 +2,18 @@
 
 Terrarium has three backup paths:
 
-1. local rewind with ZFS snapshots
+1. local time machine with ZFS snapshots
 2. optional off-host recursive ZFS replication through syncoid
 3. optional S3-style archive export using compressed ZFS streams
 
-## Local Rewind
+The mental model is:
 
-Local rewind is managed by `sanoid` on the ZFS pool that backs LXD containers.
+- local snapshots are the fast time machine for day-to-day mistakes
+- S3 exports are the disaster-recovery copy for losing the host entirely
+
+## Local Time Machine
+
+Local time-machine history is managed by `sanoid` on the ZFS pool that backs LXD containers.
 
 Current default retention:
 
@@ -63,6 +68,8 @@ Why this is interactive:
 ## S3 Exports
 
 When S3 is enabled, Terrarium can export the current ZFS backup chain to S3-compatible object storage.
+
+This is the disaster-recovery layer. It is not just another local snapshot copy on the same disk.
 
 Useful command:
 

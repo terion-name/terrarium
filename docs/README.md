@@ -1,14 +1,16 @@
 # Terrarium Docs
 
-Terrarium turns a plain Ubuntu 24.04 VPS into a secure, rewindable home for isolated environments.
+Terrarium turns a plain Ubuntu 24.04 VPS into a secure home for isolated environments, with a built-in time machine.
 
 It is built for the way people actually use agents and development tools now: giving software enough freedom to be useful, without giving it the whole host. Agent systems like OpenClaw, Hermes, browser-based editors, internal dashboards, and temporary development environments can run inside real LXD containers on ZFS, while the host stays hardened and recoverable.
 
 That gives you three things at once:
 
 - isolation, so one workload does not become everyone else's problem
-- rewindability, so a broken environment can be rolled back instead of rebuilt
+- a built-in time machine, so a broken environment can be stepped backward instead of rebuilt
 - easy publishing, so containerized web apps can be exposed through Traefik with TLS and optional OIDC protection
+
+And if you enable S3 exports, that time machine is not limited to the local disk. You also get an off-host disaster-recovery path for the day the whole VPS disappears.
 
 If you are new to Terrarium, start here:
 

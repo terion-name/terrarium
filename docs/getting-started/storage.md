@@ -1,6 +1,6 @@
 # Storage and Sizing
 
-Terrarium works best when the host has a small boot disk and a separate disk for LXD container data plus ZFS snapshots.
+Terrarium works best when the host has a small boot disk and a separate disk for LXD container data plus the local ZFS time machine.
 
 ## Recommended Storage Strategy
 
@@ -19,9 +19,9 @@ Fallback:
 
 `partition` mode exists for cases where you already have an unused partition or safe free space on a non-root disk, but it is not the primary Terrarium path.
 
-## How Local Rewind History Uses Space
+## How The Local Time Machine Uses Space
 
-Terrarium keeps local rewind history as ZFS snapshots on the same pool as the containers.
+Terrarium keeps its local time-machine history as ZFS snapshots on the same pool as the containers.
 
 That means:
 
@@ -40,7 +40,7 @@ Pool defaults:
 - `compression=zstd`
 - dedup disabled
 
-S3 exports are separate. They are streamed from ZFS and compressed with `zstd` before upload, so they do not need extra permanent local storage beyond Terrarium's working state.
+S3 exports are separate from the local time machine. They are streamed from ZFS and compressed with `zstd` before upload, so they do not need extra permanent local storage beyond Terrarium's working state.
 
 ## Hardware Guidance
 

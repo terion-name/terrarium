@@ -2,7 +2,7 @@
 
 > [!WARNING]
 > We do not recommend Hostinger for the primary Terrarium use case.
-> Terrarium works best with a separate block volume for the ZFS pool, snapshots, and rewind history. Hostinger's VPS docs do not document attachable block-volume support, so you are usually forced into `--storage-mode file` on the root disk. That works, but it is a compromise rather than the preferred setup.
+> Terrarium works best with a separate block volume for the ZFS pool, snapshots, and the local time-machine history. Hostinger's VPS docs do not document attachable block-volume support, so you are usually forced into `--storage-mode file` on the root disk. That works, but it is a compromise rather than the preferred setup.
 
 Official references:
 

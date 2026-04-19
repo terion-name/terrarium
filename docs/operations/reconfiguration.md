@@ -1,6 +1,6 @@
 # Reconfiguration
 
-Terrarium is meant to be changed in place. You do not reinstall the host every time you want to update a domain, change the IDP, or enable S3.
+Terrarium is meant to be changed in place. You do not reinstall the host every time you want to update a domain, change the IDP, or enable S3 disaster recovery.
 
 ## Where Terrarium Stores State
 

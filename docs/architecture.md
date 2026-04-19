@@ -1,6 +1,6 @@
 # Terrarium Architecture
 
-Terrarium turns a single Ubuntu 24.04 host into a hardened control plane for isolated LXD container environments, with ZFS-backed rewind and optional off-host backup/export.
+Terrarium turns a single Ubuntu 24.04 host into a hardened control plane for isolated LXD container environments, with a ZFS-backed time machine and optional off-host disaster recovery.
 
 ## Layers
 
@@ -106,7 +106,7 @@ Pool behavior:
 
 Terrarium has three backup paths:
 
-1. Local rewind
+1. Local time machine
    Managed by `sanoid` on the ZFS pool that backs LXD containers.
 2. Optional off-host ZFS replication
    Managed by `syncoid`, recursively replicating `pool/containers` to another ZFS host.
@@ -118,6 +118,11 @@ Current local snapshot retention:
 - `hourly = 24`
 - `daily = 14`
 - `monthly = 3`
+
+This gives Terrarium two layers of recovery:
+
+- the local time machine for fast, small-step recovery on the same host
+- S3 export for disaster recovery when the host or disk is gone
 
 S3 export behavior:
 

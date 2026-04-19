@@ -7,7 +7,7 @@ The short version:
 - containers are private by default
 - the host is hardened
 - public exposure is explicit
-- rollback is built in
+- a built-in time machine is part of the default storage model
 
 ## Private By Default Networking
 
@@ -69,11 +69,13 @@ Terrarium also hardens the host itself:
 
 Cockpit and LXD are not just left open on default ports. They are routed and controlled through the Terrarium management layer.
 
-## Rewindability As A Security Feature
+## The Time Machine As A Security Feature
 
 Security is not only about blocking attackers. It is also about recovering from mistakes.
 
-Terrarium keeps local rewind history with ZFS snapshots, so if a workload breaks itself, gets misconfigured, or an agent makes a bad change, you can often roll the environment back instead of rebuilding it.
+Terrarium keeps a local time machine with ZFS snapshots, so if a workload breaks itself, gets misconfigured, or an agent makes a bad change, you can often step the environment backward instead of rebuilding it.
+
+If you enable S3 exports, that story extends beyond the host itself. Local snapshots are for fast recovery on the same VPS; S3 exports are for disaster recovery when the machine or disk is gone.
 
 That is especially useful for:
 
