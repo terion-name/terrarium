@@ -63,7 +63,7 @@ jobs:
       - name: Install integration dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y openssh-client tar awscli
+          sudo apt-get install -y openssh-client tar
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
       - name: Run smoke suite
