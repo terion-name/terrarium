@@ -31,9 +31,12 @@ That means:
 
 Current default local retention:
 
+- `4` 15-minute snapshots
 - `24` hourly snapshots
 - `14` daily snapshots
 - `3` monthly snapshots
+
+So the smallest automatic local time-machine step is 15 minutes.
 
 Pool defaults:
 

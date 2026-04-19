@@ -17,6 +17,7 @@ Local time-machine history is managed by `sanoid` on the ZFS pool that backs LXD
 
 Current default retention:
 
+- `4` 15-minute snapshots
 - `24` hourly snapshots
 - `14` daily snapshots
 - `3` monthly snapshots

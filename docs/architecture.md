@@ -115,6 +115,7 @@ Terrarium has three backup paths:
 
 Current local snapshot retention:
 
+- `frequently = 4`
 - `hourly = 24`
 - `daily = 14`
 - `monthly = 3`

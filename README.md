@@ -105,7 +105,7 @@ Storage sizing guidance:
 - Keep the boot disk relatively small. It mainly holds Ubuntu, logs, packages, Terrarium state, and the control plane.
 - Put LXD containers and snapshots on the separate ZFS disk whenever your provider supports block storage.
 - Terrarium keeps its local time-machine history as ZFS snapshots on the same pool as the containers. Those snapshots are copy-on-write, so they do not duplicate all data up front, but they do retain changed blocks for as long as the snapshots live.
-- Current default local retention is `24` hourly snapshots, `14` daily snapshots, and `3` monthly snapshots.
+- Current default local retention is `4` 15-minute snapshots, `24` hourly snapshots, `14` daily snapshots, and `3` monthly snapshots.
 - Terrarium enables ZFS `compression=zstd` on the pool. Dedup is not enabled.
 - S3 exports are separate from local sizing. They are streamed out of ZFS and compressed with `zstd` before upload, so they do not need extra permanent local disk beyond Terrarium’s working state.
 - For the local time-machine history, size the ZFS disk around `2x-3x` your expected live container data if the containers mostly append data or change a moderate amount day to day.
