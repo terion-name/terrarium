@@ -83,7 +83,8 @@ html.dark .VPHome {
 } */
 
 .VPHome .VPHero .text {
-  font-size: clamp(2rem,3vw,3rem);
+  /* font-size: clamp(2rem,3vw,3rem); */
+  font-size: 2rem;
   line-height: 1.02;
 }
 
@@ -100,14 +101,14 @@ html.dark .VPHome {
 
 .VPHome .VPHero .image-bg {
   inset: 0;
-  width: 100%!important;
-  height: auto;
-  max-width: fit-content;
 
 }
 
 .VPHome .VPHero .image {
   padding-top: 2em;
+  width: 100%!important;
+  height: auto;
+  max-width: fit-content;
   /* max-width: min(640px, 46vw); */
 }
 

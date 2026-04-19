@@ -2,8 +2,6 @@
 
 Terrarium gives the host a few public management endpoints and can either self-host the identity provider or use an external one.
 
-Before thinking about domains, it helps to understand one important Terrarium default: containers are private behind LXD NAT unless you explicitly publish something. A service listening inside a container does not become public on its own.
-
 ## Default Public Endpoints
 
 By default, Terrarium exposes:

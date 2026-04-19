@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Terrarium
   text: Transform any VPS into a secure host with isolated environments for your agents, development, and workloads. Time machine included.
-  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, manage it from built-in web UIs, publish only what you mean, and rewind mistakes in small ZFS-backed steps.
+  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, manage it from built-in web UIs, publish only what you mean, and rewind mistakes in small ZFS-backed steps. Lock anything behind single sign-on and user management
   image:
     src: /banner.webp
     alt: Terrarium
@@ -55,7 +55,7 @@ features:
   </section>
 </div>
 
-## Why Terrarium feels safer
+## Why Terrarium is safer
 
 The most important part is not flashy, but it changes how comfortable the whole system feels.
 
@@ -87,6 +87,8 @@ That is why Terrarium works so well for non-experts. You can run a lot inside a 
     <span>Keep multi-service apps together inside one time-machine-enabled LXC instead of tangling them into the host Docker setup.</span>
   </a>
 </div>
+
+---
 
 <div class="terrarium-home-grid terrarium-home-grid-equal terrarium-home-grid-sections">
   <section class="terrarium-panel">
