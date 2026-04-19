@@ -25,9 +25,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - amd64
-          - arm64
+        include:
+          - plugin: zfs
+            arch: amd64
+          - plugin: zfs
+            arch: arm64
+          - plugin: s3
+            arch: amd64
+          - plugin: s3
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -46,14 +52,40 @@ jobs:
           puts "s3_ref=#{defaults.fetch("terrarium_cockpit_s3_ref")}"
           RUBY
 
+      - name: Resolve bundle basename
+        id: bundle
+        env:
+          PLUGIN: ${{ matrix.plugin }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          sanitize() {
+            printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-'
+          }
+          case "${PLUGIN}" in
+            zfs) PLUGIN_REF='${{ steps.refs.outputs.zfs_ref }}' ;;
+            s3) PLUGIN_REF='${{ steps.refs.outputs.s3_ref }}' ;;
+          esac
+          PLUGIN_REF_SAFE="$(sanitize "${PLUGIN_REF}")"
+          BASENAME="cockpit-plugin-${PLUGIN}-${PLUGIN_REF_SAFE}-linux-${TARGET_ARCH}.tar.gz"
+          echo "basename=${BASENAME}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_name=${BASENAME%.tar.gz}" >> "${GITHUB_OUTPUT}"
+
       - name: Build Cockpit plugin bundle
         env:
+          PLUGIN: ${{ matrix.plugin }}
           TARGET_ARCH: ${{ matrix.arch }}
-          ZFS_REPO: ${{ steps.refs.outputs.zfs_repo }}
-          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
-          S3_REPO: ${{ steps.refs.outputs.s3_repo }}
-          S3_REF: ${{ steps.refs.outputs.s3_ref }}
+          BUNDLE_BASENAME: ${{ steps.bundle.outputs.basename }}
         run: |
+          case "${PLUGIN}" in
+            zfs)
+              PLUGIN_REPO='${{ steps.refs.outputs.zfs_repo }}'
+              PLUGIN_REF='${{ steps.refs.outputs.zfs_ref }}'
+              ;;
+            s3)
+              PLUGIN_REPO='${{ steps.refs.outputs.s3_repo }}'
+              PLUGIN_REF='${{ steps.refs.outputs.s3_ref }}'
+              ;;
+          esac
           mkdir -p release-assets
           chmod +x scripts/build-cockpit-plugins-bundle.sh
           docker run --rm \
@@ -62,25 +94,36 @@ jobs:
             -w /workspace \
             ubuntu:24.04 \
             bash -lc "./scripts/build-cockpit-plugins-bundle.sh \
-              --output /workspace/release-assets/terrarium-cockpit-plugins-linux-${TARGET_ARCH}.tar.gz \
-              --zfs-repo ${ZFS_REPO@Q} \
-              --zfs-ref ${ZFS_REF@Q} \
-              --s3-repo ${S3_REPO@Q} \
-              --s3-ref ${S3_REF@Q}"
+              --plugin ${PLUGIN@Q} \
+              --output /workspace/release-assets/${BUNDLE_BASENAME} \
+              --repo ${PLUGIN_REPO@Q} \
+              --ref ${PLUGIN_REF@Q}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cockpit-plugins-${{ matrix.arch }}
-          path: release-assets/terrarium-cockpit-plugins-linux-${{ matrix.arch }}.tar.gz
+          name: ${{ steps.bundle.outputs.artifact_name }}
+          path: release-assets/${{ steps.bundle.outputs.basename }}
           if-no-files-found: error
 
   publish:
     runs-on: ubuntu-24.04
     needs: build
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Resolve pinned plugin refs
+        id: refs
+        run: |
+          ruby <<'RUBY' >> "${GITHUB_OUTPUT}"
+          require "yaml"
+          defaults = YAML.load_file("ansible/roles/cockpit_plugins/defaults/main.yml")
+          puts "zfs_ref=#{defaults.fetch("terrarium_cockpit_zfs_ref")}"
+          puts "s3_ref=#{defaults.fetch("terrarium_cockpit_s3_ref")}"
+          RUBY
 
       - name: Resolve publish ref
         id: ref
@@ -96,16 +139,29 @@ jobs:
           fi
 
       - name: Prepare release assets
+        env:
+          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
+          S3_REF: ${{ steps.refs.outputs.s3_ref }}
         run: |
+          sanitize() {
+            printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-'
+          }
+          ZFS_REF_SAFE="$(sanitize "${ZFS_REF}")"
+          S3_REF_SAFE="$(sanitize "${S3_REF}")"
           mkdir -p release-assets
-          cp artifacts/cockpit-plugins-amd64/terrarium-cockpit-plugins-linux-amd64.tar.gz release-assets/
-          cp artifacts/cockpit-plugins-arm64/terrarium-cockpit-plugins-linux-arm64.tar.gz release-assets/
+          for BASENAME in \
+            "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-amd64.tar.gz" \
+            "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-arm64.tar.gz" \
+            "cockpit-plugin-s3-${S3_REF_SAFE}-linux-amd64.tar.gz" \
+            "cockpit-plugin-s3-${S3_REF_SAFE}-linux-arm64.tar.gz"
+          do
+            cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/${BASENAME}"
+          done
 
       - name: Publish plugin bundles
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ref.outputs.value }}
           files: |
-            release-assets/terrarium-cockpit-plugins-linux-amd64.tar.gz
-            release-assets/terrarium-cockpit-plugins-linux-arm64.tar.gz
+            release-assets/*.tar.gz
           prerelease: ${{ steps.ref.outputs.value == 'cockpit-plugins-main' || contains(steps.ref.outputs.value, '-') }}
