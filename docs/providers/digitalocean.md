@@ -24,13 +24,14 @@ Official references:
 2. Create a new Droplet with Ubuntu 24.04 and select that SSH key.
 3. Create a separate Volume in the same region as the Droplet.
 4. Attach the volume to the Droplet.
-5. SSH into the Droplet as `root`.
-6. Run Terrarium and point it at the attached volume.
+5. Make sure the volume is not left auto-formatted and auto-mounted for normal filesystem use before handing it to Terrarium.
+6. SSH into the Droplet as `root`.
+7. Run Terrarium and point it at the attached volume.
 
 Example install:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/latest/install.sh | bash -s -- \
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \
@@ -76,7 +77,7 @@ doctl compute volume-action attach <volume-id> <droplet-id> --wait
 Then SSH in and install Terrarium:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/latest/install.sh | bash -s -- \
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \
@@ -87,4 +88,4 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/download/latest/ins
 ## Notes
 
 - DigitalOcean volumes must live in the same region as the Droplet.
-- DigitalOcean documents that pre-formatted volumes can auto-mount on newer Ubuntu Droplets, but Terrarium will wipe the selected data disk for ZFS anyway, so treat the attached volume as dedicated Terrarium storage.
+- DigitalOcean documents that control-panel-created volumes can auto-format and auto-mount on newer Ubuntu Droplets. Terrarium will wipe the selected data disk for ZFS anyway, so treat the attached volume as dedicated Terrarium storage and remove any normal filesystem mount config before handing it to Terrarium.

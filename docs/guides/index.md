@@ -12,7 +12,7 @@ Each page explains:
 - whether the service should stay private, use Terrarium's `user.proxy`, or follow a different access pattern
 - why Terrarium is a good fit for that workload in the first place
 
-One important default behind all of these guides: workloads inside LXC containers are private until you publish them. That is why Terrarium is comfortable for things like agent runtimes, dev servers, browser IDEs, and full Docker Compose stacks. You can run a lot inside the container without making all of it internet-facing by accident.
+One important default behind all of these guides: workloads inside LXC containers are private until you publish them. That is why Terrarium is comfortable for things like agent runtimes, dev servers, browser IDEs, and full Compose stacks. You can run a lot inside the container without making all of it internet-facing by accident.
 
 Start here:
 

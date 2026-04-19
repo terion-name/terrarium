@@ -11,6 +11,15 @@ Terrarium installs onto a single Ubuntu 24.04 VPS and turns it into a hardened h
   - a dedicated extra disk for the LXD ZFS pool, which is the recommended setup
   - or enough root-disk space to use `--storage-mode file`
 
+If you still need to create the VPS itself, start with the provider setup guides:
+
+- [DigitalOcean](../providers/digitalocean.md)
+- [Vultr](../providers/vultr.md)
+- [Hetzner Cloud](../providers/hetzner.md)
+- [Hostinger](../providers/hostinger.md)
+
+Or browse the full [Provider Guides](../providers/README.md) section first.
+
 ## Recommended Install
 
 ```bash

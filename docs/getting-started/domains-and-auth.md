@@ -106,8 +106,15 @@ You must provide:
 Requirements for the external provider:
 
 - allow `https://<manage-domain>/oauth2/callback`
+- allow `https://<manage-domain>/oauth2/app/callback` if you want to protect published app routes with `@auth`
 - allow `https://<lxd-domain>/oidc/callback`
 - emit a `groups` claim as a JSON string array containing the configured admin group
+
+Terrarium reuses the same external OIDC client for:
+
+- Cockpit's oauth2-proxy
+- LXD
+- published HTTP(S) routes protected with `@auth`
 
 ## Admin Group
 

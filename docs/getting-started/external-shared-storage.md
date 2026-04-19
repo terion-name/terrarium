@@ -82,7 +82,7 @@ Terrarium will:
 - add a managed block to `/etc/fstab`
 - mount the share immediately
 
-If you prefer, you can also pass the password as the last positional argument:
+If you prefer automation, you can also pass the password explicitly:
 
 ```bash
 terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345 -p your-password

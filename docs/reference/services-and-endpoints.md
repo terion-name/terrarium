@@ -35,7 +35,7 @@ These can be overridden with:
 - SSH: key-only
 - Cockpit: OIDC gate through `oauth2-proxy`, then local PAM login
 - LXD: native OIDC plus Terrarium-managed group mapping
-- Published app routes: optional OIDC gate through `@auth` or `@auth:group1,group2`
+- Published app routes: optional OIDC gate through `@auth` or `@auth:group1,group2` on HTTP(S) routes under the Terrarium root domain; with no root domain configured, route auth is limited to the `manage` hostname
 
 ## Runtime Paths
 
@@ -47,4 +47,3 @@ These can be overridden with:
 - route-auth oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy-routes`
 - S3 catalog: `/var/lib/terrarium/catalog`
 - last exported snapshots: `/var/lib/terrarium/lastsnapshots`
-- restore workspace: `/var/lib/terrarium/restore`

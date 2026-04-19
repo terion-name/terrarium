@@ -24,13 +24,14 @@ In the LXD UI:
 
 1. Open `https://lxd.<your-domain>` and log in.
 2. Create a new instance from the `images:ubuntu/24.04` image.
-3. Name it `devbox` or `codium`.
-4. Start the container.
+3. Attach the `terrarium` profile so the container gets Terrarium's storage and isolation settings.
+4. Name it `devbox` or `codium`.
+5. Start the container.
 
 From the CLI:
 
 ```bash
-lxc launch images:ubuntu/24.04 devbox
+lxc launch images:ubuntu/24.04 devbox --profile terrarium
 ```
 
 ## Recommended setup: enter the container and configure it there
@@ -136,7 +137,7 @@ If you later place the route behind a real auth layer, then dropping the token c
 If you want the same setup as a condensed host-side sequence, use:
 
 ```bash
-lxc launch images:ubuntu/24.04 devbox
+lxc launch images:ubuntu/24.04 devbox --profile terrarium
 lxc exec devbox -- bash -lc 'apt-get update && apt-get install -y wget gpg apt-transport-https openssl'
 lxc exec devbox -- bash -lc 'wget https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg -O /usr/share/keyrings/vscodium-archive-keyring.asc'
 lxc exec devbox -- bash -lc "echo 'deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/vscodium-archive-keyring.asc ] https://paulcarroty.gitlab.io/vscodium-deb-rpm-repo/debs vscodium main' > /etc/apt/sources.list.d/vscodium.list"

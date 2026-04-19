@@ -103,6 +103,8 @@ Terrarium can still protect published routes, but your external OIDC client must
 https://manage.<your-domain>/oauth2/app/callback
 ```
 
+Terrarium reuses the same external OIDC client for Cockpit, LXD, and route protection, so this callback is an addition to the normal management callbacks rather than a separate app.
+
 If you use group-restricted routes, your provider must also include a `groups` claim.
 
 One-time checklist for external OIDC:
@@ -146,6 +148,8 @@ So routes like these are fine:
 This is not a good fit:
 
 - `https://totally-other-domain.net@auth`
+
+One important default to keep in mind: if you installed Terrarium without a custom root domain and stayed on the default IP-based management domains, route auth is effectively limited to the `manage` hostname. For arbitrary protected app hostnames, use a real `--domain`.
 
 ## How the Callback Works
 

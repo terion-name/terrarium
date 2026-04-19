@@ -1,8 +1,18 @@
 # Isolated Docker Compose Deployments on Terrarium
 
-One of the cleanest Terrarium patterns is to run a Docker Compose stack inside its own LXC container instead of directly on the host. That gives the stack a real Linux environment to live in, while keeping host-level Docker, ports, and runtime state out of the way.
+Running a Docker Compose stack inside its own LXC container is one of the main Terrarium patterns.
+
+That gives the stack a real Linux environment to live in, while keeping host-level Docker, ports, and runtime state out of the way.
 
 This is especially useful for complex projects that want their own dependencies, databases, helper services, and network assumptions without interfering with other Docker workloads on the same VPS.
+
+Terrarium's default LXD profile enables the settings that Docker-in-LXC usually needs:
+
+- `security.nesting=true`
+- `security.syscalls.intercept.mknod=true`
+- `security.syscalls.intercept.setxattr=true`
+
+That means Compose stacks work with the normal Terrarium container profile instead of needing a separate special-case setup.
 
 ## Why this setup works
 
@@ -60,11 +70,31 @@ You do not need a separate reverse-proxy stack inside every container unless the
 
 ## Suggested workflow
 
-1. Create a dedicated LXC container for the project.
+1. Create a dedicated LXC container for the project with the normal `terrarium` profile.
 2. Install Docker and Compose inside that container.
 3. Place the Compose files and environment config inside the container.
 4. Start the stack and verify the main service binds to `0.0.0.0:<port>`.
 5. Add a `user.proxy` label for the route you want to expose.
 6. Snapshot the container once the deployment reaches a stable state.
+
+## If You Want To Disable Docker-Friendly Features
+
+Some people will prefer a stricter baseline for containers that should never run nested container runtimes.
+
+You can create a stricter profile like this:
+
+```bash
+lxc profile copy terrarium terrarium-strict
+lxc profile set terrarium-strict security.nesting false
+lxc profile unset terrarium-strict security.syscalls.intercept.mknod
+lxc profile unset terrarium-strict security.syscalls.intercept.setxattr
+```
+
+Then launch selected containers with that stricter profile instead of the default Terrarium one.
+
+That gives you a practical split:
+
+- `terrarium` for the general Terrarium experience, including Docker/Compose-friendly environments
+- `terrarium-strict` for containers that should never need nested container features
 
 This keeps the project self-contained, safer to operate, and much easier to step backward when changes do not go as planned.

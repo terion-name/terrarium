@@ -4,7 +4,7 @@ Sometimes you want several Terrarium containers to see the same small piece of s
 
 Common examples:
 
-- one OpenAI or OpenRouter login that several agent environments should reuse
+- one Codex login that several agent environments should reuse
 - shared CLI credentials for internal tools
 - one small config or cache directory that belongs to a group of related containers
 
@@ -32,7 +32,7 @@ This is a good fit for shared credentials, small agent memories, common configur
 
 If the data should also be mounted on your own computer and live outside the VPS, use [External Shared Storage](./external-shared-storage) instead.
 
-## Example: One OpenAI Login Across Several Agent Containers
+## Example: One Codex Login Across Several Agent Containers
 
 Imagine you have three separate containers:
 
@@ -40,22 +40,24 @@ Imagine you have three separate containers:
 - `hermes`
 - `research`
 
-You want all three to see the same credentials directory so you can authorize once and reuse it.
+You want all three to see the same Codex credentials so you can authorize once and reuse it.
+
+OpenAI's Codex CLI defaults `CODEX_HOME` to `~/.codex`, and the upstream codebase documents that credentials are persisted in `CODEX_HOME/auth.json`. That makes `~/.codex` the correct shared mount point for this specific workflow.
 
 The important idea is:
 
 - create one shared volume
-- attach it to each container at the path where that tool expects its credentials
+- attach it to each container at the path where Codex expects its home directory
 
 ## Create The Shared Volume
 
 On the host:
 
 ```bash
-lxc storage volume create terrarium openai-auth
+lxc storage volume create terrarium codex-auth
 ```
 
-This creates a filesystem volume named `openai-auth` on the Terrarium storage pool.
+This creates a filesystem volume on the Terrarium storage pool that we will use for Codex state.
 
 ## Attach It To Containers
 
@@ -64,17 +66,15 @@ Attach the same volume to each container at the credentials path you want to sha
 Example:
 
 ```bash
-lxc storage volume attach terrarium openai-auth openclaw openai-auth /root/.config/openai
-lxc storage volume attach terrarium openai-auth hermes openai-auth /root/.config/openai
-lxc storage volume attach terrarium openai-auth research openai-auth /root/.config/openai
+lxc storage volume attach terrarium codex-auth openclaw codex-auth /root/.codex
+lxc storage volume attach terrarium codex-auth hermes codex-auth /root/.codex
+lxc storage volume attach terrarium codex-auth research codex-auth /root/.codex
 ```
 
-You can use a different mount path if the tool stores credentials somewhere else.
-
-The pattern matters more than the exact path:
+For this Codex-specific example, the path does matter:
 
 - one shared volume
-- same mount path in every container that should reuse it
+- same mount path in every container that should reuse the login
 
 ## Authorize Once
 
@@ -84,14 +84,14 @@ Now enter one of the containers and complete the login flow there:
 lxc exec openclaw -- bash
 ```
 
-After the tool writes its credentials into `/root/.config/openai`, the same files are visible in the other containers because they are all looking at the same shared volume.
+After Codex writes its credentials into `/root/.codex/auth.json`, the same files are visible in the other containers because they are all looking at the same shared volume.
 
 ## Verify It
 
 From another container:
 
 ```bash
-lxc exec hermes -- ls -la /root/.config/openai
+lxc exec hermes -- ls -la /root/.codex
 ```
 
 If you see the same files, the sharing is working.
@@ -131,7 +131,7 @@ If you prefer to do this visually, the shipped LXD UI handles most of this flow 
 2. Select the Terrarium storage pool.
 3. Open `Volumes`.
 4. Create a new `Custom` filesystem volume.
-5. Give it a clear name such as `openai-auth` or `agent-memory`.
+5. Give it a clear name such as `codex-auth` or `agent-memory`.
 
 ### Attach it to each container in LXD UI
 
@@ -140,7 +140,7 @@ If you prefer to do this visually, the shipped LXD UI handles most of this flow 
 3. Open `Devices`.
 4. Add a new `Disk` device.
 5. Choose the custom volume you created.
-6. Set the target path inside the container, for example `/root/.config/openai`.
+6. Set the target path inside the container, for example `/root/.codex`.
 7. Repeat for every other container that should share the same data.
 
 ### Finish the login inside one container

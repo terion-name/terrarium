@@ -30,7 +30,7 @@ Official references:
 Example install:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/latest/install.sh | bash -s -- \
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \
@@ -76,7 +76,7 @@ vultr-cli block-storage attach <block-storage-id> --instance=<instance-id>
 Then SSH in and install Terrarium:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/latest/install.sh | bash -s -- \
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \

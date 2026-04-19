@@ -220,8 +220,8 @@ Top-level commands:
 | `--idp` | `local` or `oidc` | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Selects whether Terrarium uses self-hosted ZITADEL (`local`) or an external OIDC issuer (`oidc`). |
 | `--admin-group` | group name | yes when `--idp=oidc`; no otherwise | `terrarium-admins` when `--idp=local`, otherwise prompted in interactive mode | Sets the management admin group that is allowed into Cockpit and LXD. |
 | `--oidc` | issuer URL | yes when `--idp=oidc`; no otherwise | derived from `https://<auth-domain>` when `--idp=local` | Sets the OIDC issuer URL. |
-| `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy and LXD. |
-| `--oidc-secret` | client secret | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy and LXD. |
+| `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
+| `--oidc-secret` | client secret | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
 | `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
 | `--root-pwd` | password | yes in non-interactive mode when root has no usable local password; no otherwise | existing root password if already set, otherwise prompted in interactive mode | Sets or updates the root password used for Cockpit login. |
@@ -229,9 +229,9 @@ Top-level commands:
 | `--storage-source` | path or `auto` | yes for `disk` and `partition` in non-interactive installs; no in interactive mode | prompted when needed in interactive mode | Sets the source disk or partition for `disk` or `partition` mode, or uses `auto` to pick the largest valid target. |
 | `--storage-size` | size string | only for `file` mode when overriding the default | `64G` in interactive prompts and non-interactive fallback | Sets the size of the file-backed ZFS pool for `file` mode. |
 | `--enable-s3` | none | no | disabled | Enables S3-backed archive exports. |
-| `--s3-endpoint` | URL | only when using a custom S3-compatible provider | `https://s3.amazonaws.com` in interactive prompts; otherwise provider/default SDK behavior | Sets a custom S3-compatible API endpoint. |
+| `--s3-endpoint` | URL | only when using a custom S3-compatible provider | `https://s3.amazonaws.com` when omitted | Sets a custom S3-compatible API endpoint. |
 | `--s3-bucket` | bucket name | yes if `--enable-s3` is set | none | Sets the destination bucket for S3 exports. |
-| `--s3-region` | region name | no | provider default or empty | Sets the S3 region. |
+| `--s3-region` | region name | no | `us-east-1` when omitted | Sets the S3 region. |
 | `--s3-prefix` | prefix | no | `terrarium` | Sets the object prefix under the bucket. |
 | `--s3-access-key` | access key | yes if `--enable-s3` is set | none | Sets the S3 access key. |
 | `--s3-secret-key` | secret key | yes if `--enable-s3` is set | none | Sets the S3 secret key. |
@@ -312,14 +312,15 @@ terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/
 | `--auth-domain` | domain | no | derived from the current root domain or IP when mode is `local` | Overrides the self-hosted ZITADEL auth domain. |
 | `--admin-group` | group name | required when mode is `oidc`; optional otherwise | existing configured value, or `terrarium-admins` when mode is `local` | Sets the management admin group for Cockpit and LXD authorization. |
 | `--oidc` | issuer URL | required when mode is `oidc` and no issuer is already configured | existing configured issuer, or derived from `auth-domain` when mode is `local` | Sets the OIDC issuer URL. |
-| `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID shared by Cockpit's oauth2-proxy and LXD. |
-| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured | existing configured value | Sets the external OIDC client secret shared by Cockpit's oauth2-proxy and LXD. |
+| `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID shared by Cockpit's oauth2-proxy, LXD, and published-route auth. |
+| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured | existing configured value | Sets the external OIDC client secret shared by Cockpit's oauth2-proxy, LXD, and published-route auth. |
 | `--zitadel-admin-email` | email address | no | existing configured value or `--email` | Updates the ZITADEL bootstrap admin email when mode is `local`. |
 
 External OIDC note:
 
 - Terrarium auto-provisions OIDC clients only for self-hosted ZITADEL.
-- When you use external OIDC, Terrarium persists the issuer URL, client ID, client secret, and admin group, and configures both Cockpit's oauth2-proxy and LXD from them.
+- When you use external OIDC, Terrarium persists the issuer URL, client ID, client secret, and admin group, and configures Cockpit's oauth2-proxy, LXD, and published-route auth from them.
+- If you want to use `@auth` on published routes, the external client must also allow `https://<manage-domain>/oauth2/app/callback`.
 - The external client must allow both `https://<manage-domain>/oauth2/callback` and `https://<lxd-domain>/oidc/callback`.
 - The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
 - `terrariumctl set idp oidc --oidc ... --oidc-client ... --oidc-secret ... --admin-group ...` verifies the external issuer and credentials before reconfiguring both the Cockpit OIDC gate and LXD management authorization.
@@ -383,7 +384,7 @@ Rules:
 - `http://domain[:container_port][/path]` creates an HTTP router only.
 - Append `@auth` to an HTTP(S) route to require OIDC login through Terrarium's shared published-app auth gate.
 - Append `@auth:group,anothergroup` to require OIDC login and membership in at least one listed group.
-- Route-level auth currently supports only HTTP(S) routes on the Terrarium root domain or its subdomains, because the shared callback lives at `https://manage.<domain>/oauth2/app/callback`.
+- Route-level auth currently supports only HTTP(S) routes on the Terrarium root domain or its subdomains, because the shared callback lives at `https://manage.<domain>/oauth2/app/callback`. If no root domain is configured, route auth is effectively limited to the `manage` hostname.
 - `tcp://hostport:containerport` exposes a raw TCP port through Traefik.
 - `udp://hostport:containerport` exposes a raw UDP port through Traefik.
 - Dynamic TCP/UDP host ports are also opened and closed in UFW automatically by the sync job.

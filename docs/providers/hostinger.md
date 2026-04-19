@@ -41,7 +41,7 @@ Because of that, Hostinger is not the ideal provider for Terrarium’s recommend
 Example install:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/latest/install.sh | bash -s -- \
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \

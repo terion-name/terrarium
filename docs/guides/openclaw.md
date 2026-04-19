@@ -30,13 +30,14 @@ In the LXD UI:
 
 1. Open `https://lxd.<your-domain>` and log in.
 2. Create a new instance from the `images:ubuntu/24.04` image.
-3. Name it `openclaw`.
-4. Start the container.
+3. Attach the `terrarium` profile so the container gets Terrarium's storage and isolation settings.
+4. Name it `openclaw`.
+5. Start the container.
 
 From the CLI:
 
 ```bash
-lxc launch images:ubuntu/24.04 openclaw
+lxc launch images:ubuntu/24.04 openclaw --profile terrarium
 ```
 
 ## Recommended setup: enter the container and use OpenClaw the way it expects
@@ -70,19 +71,15 @@ By default, you should end up with the gateway on port `18789`.
 
 ## Recommended access pattern: keep OpenClaw private
 
-This is the path upstream recommends for Linux VPS deployments.
+This is where OpenClaw's normal Linux-server guidance needs one Terrarium-specific adjustment.
 
-Keep the gateway on loopback, then access it from your laptop with SSH:
+OpenClaw's simple SSH-tunnel example assumes the gateway is running on the SSH target host itself. In Terrarium, OpenClaw is inside a separate LXC, so the host's `127.0.0.1` is not the container's `127.0.0.1`.
 
-```bash
-ssh -N -L 18789:127.0.0.1:18789 root@your-terrarium-host
-```
+So for a private setup on Terrarium, use one of these patterns instead:
 
-Then open:
-
-```text
-http://127.0.0.1:18789/
-```
+- the public-through-Traefik pattern below, with explicit gateway auth
+- OpenClaw's Tailscale pattern inside the container, if you want private remote access without publishing the app through Terrarium
+- the LXD console for local setup, onboarding, and troubleshooting
 
 This works well with Terrarium because:
 
@@ -107,25 +104,25 @@ Create or update `~/.openclaw/openclaw.json`:
 ```bash
 cat > ~/.openclaw/openclaw.json <<'EOF'
 {
-  gateway: {
-    bind: 'lan',
-    port: 18789,
-    controlUi: {
-      enabled: true,
-      allowedOrigins: ['https://openclaw.example.com']
+  "gateway": {
+    "bind": "lan",
+    "port": 18789,
+    "controlUi": {
+      "enabled": true,
+      "allowedOrigins": ["https://openclaw.example.com"]
     },
-    auth: {
-      mode: 'password'
+    "auth": {
+      "mode": "password",
+      "password": "replace-with-a-long-random-secret"
     }
   }
 }
 EOF
 ```
 
-Set the gateway password and restart the gateway:
+Restart the gateway:
 
 ```bash
-export OPENCLAW_GATEWAY_PASSWORD='replace-with-a-long-random-secret'
 openclaw gateway restart
 ```
 
@@ -147,26 +144,27 @@ That gives you:
 If you want the setup condensed into host-side commands, this is the scriptable path:
 
 ```bash
-lxc launch images:ubuntu/24.04 openclaw
+lxc launch images:ubuntu/24.04 openclaw --profile terrarium
 lxc exec openclaw -- bash -lc 'apt-get update && apt-get install -y curl'
 lxc exec openclaw -- bash -lc 'curl -fsSL https://openclaw.ai/install.sh | bash'
 lxc exec openclaw -- bash -lc 'openclaw onboard --install-daemon'
 lxc exec openclaw -- bash -lc "cat > ~/.openclaw/openclaw.json <<'EOF'
 {
-  gateway: {
-    bind: 'lan',
-    port: 18789,
-    controlUi: {
-      enabled: true,
-      allowedOrigins: ['https://openclaw.example.com']
+  \"gateway\": {
+    \"bind\": \"lan\",
+    \"port\": 18789,
+    \"controlUi\": {
+      \"enabled\": true,
+      \"allowedOrigins\": [\"https://openclaw.example.com\"]
     },
-    auth: {
-      mode: 'password'
+    \"auth\": {
+      \"mode\": \"password\",
+      \"password\": \"replace-with-a-long-random-secret\"
     }
   }
 }
 EOF"
-lxc exec openclaw -- bash -lc "export OPENCLAW_GATEWAY_PASSWORD='replace-with-a-long-random-secret' && openclaw gateway restart"
+lxc exec openclaw -- bash -lc 'openclaw gateway restart'
 lxc config set openclaw user.proxy "https://openclaw.example.com:18789"
 terrariumctl proxy sync
 ```

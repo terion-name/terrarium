@@ -28,7 +28,7 @@ Terrarium is split into four layers:
 
 - Traefik is the only public web entrypoint.
 - Cockpit listens on loopback and is reverse-proxied through Traefik.
-- A host-level `oauth2-proxy` instance also listens on loopback and is published only through same-domain `/oauth2/*` routes on the Cockpit hostname.
+- A host-level `oauth2-proxy` instance also listens on loopback and is published through same-domain `/oauth2/*` routes on both the Cockpit and Traefik dashboard hostnames.
 - LXD listens on loopback and is exposed through Traefik TCP passthrough so LXD keeps control of its own API/UI auth model.
 - Self-hosted ZITADEL, when enabled, is also published through Traefik.
 - UFW defaults to deny incoming and allow outgoing. Terrarium explicitly opens only the expected public ports, then adds or removes dynamic TCP/UDP rules for container-level proxy exposure.
@@ -43,7 +43,7 @@ They sit behind LXD's private bridge and NAT, which gives them an important base
 - a process binding `0.0.0.0` inside a container is not automatically internet-reachable
 - misconfigured internal services are less likely to become public by accident
 
-This is especially useful for complex or messy environments. A Docker Compose stack inside an LXC can expose databases, caches, queues, metrics, or internal dashboards inside that container environment without making them public on the host. Only the things Terrarium explicitly publishes through Traefik or raw TCP/UDP proxy rules become reachable from outside.
+This is especially useful for complex or messy environments. Even when a workload opens several internal ports inside the container, they do not become public on the host unless Terrarium explicitly publishes them through Traefik or raw TCP/UDP proxy rules.
 
 ## Authentication Model
 
@@ -77,7 +77,7 @@ This is especially useful for complex or messy environments. A Docker Compose st
 - For auth-protected published routes, the sync job also reconciles a host-side oauth2-proxy route-auth stack and publishes a shared callback under `https://manage.<domain>/oauth2/app/callback`.
 - `@auth` means “any authenticated user”.
 - `@auth:group1,group2` means “any authenticated user in at least one listed group”.
-- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so that the shared callback and cookie domain remain valid.
+- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so that the shared callback and cookie domain remain valid. If no root domain is configured, only the `manage` hostname qualifies.
 
 The key behavior for non-experts is simple:
 
@@ -101,6 +101,23 @@ Pool behavior:
 - Terrarium creates the pool with `compression=zstd`, `atime=off`, `xattr=sa`, and `normalization=formD`.
 - Dedup is not enabled.
 - Terrarium does not attempt to shrink the mounted root filesystem.
+
+## Default Container Profile
+
+Terrarium creates an LXD profile named `terrarium` and expects user workloads to use it.
+
+Current baseline profile behavior:
+
+- `security.idmap.isolated=true`
+- `security.nesting=true`
+- `security.syscalls.intercept.mknod=true`
+- `security.syscalls.intercept.setxattr=true`
+- root disk on the Terrarium pool
+- NIC attached to `lxdbr0`
+
+This is an intentional product choice: Terrarium optimizes for isolated environments that can still run realistic developer and agent workloads, including Docker Compose stacks, instead of optimizing for the narrowest possible LXC feature surface.
+
+If you want stricter containers for selected workloads, create a derived profile and turn those settings back off there.
 
 ## Backup Model
 
@@ -166,7 +183,6 @@ Important runtime paths in the current implementation:
 - oauth2-proxy published-route runtime: `/var/lib/terrarium/oauth2-proxy-routes`
 - S3 catalog: `/var/lib/terrarium/catalog`
 - Last exported snapshots: `/var/lib/terrarium/lastsnapshots`
-- Restore workspace: `/var/lib/terrarium/restore`
 
 ## Scope
 

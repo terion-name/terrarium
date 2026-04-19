@@ -69,6 +69,38 @@ Terrarium also hardens the host itself:
 
 Cockpit and LXD are not just left open on default ports. They are routed and controlled through the Terrarium management layer.
 
+## Docker In Containers
+
+Terrarium enables a Docker-friendly LXD profile by default.
+
+That means the baseline `terrarium` profile includes:
+
+- `security.nesting=true`
+- `security.syscalls.intercept.mknod=true`
+- `security.syscalls.intercept.setxattr=true`
+
+Why Terrarium does this:
+
+- running Docker Compose inside its own LXC is a very common Terrarium use case
+- it keeps complex app stacks away from the host
+- it avoids turning the host into one giant shared Docker machine
+
+Tradeoff:
+
+- this is more permissive than a minimal non-nested container profile
+- it is a convenience and compatibility choice, not the narrowest possible baseline
+
+If you do not want Docker-friendly features for a given workload, create a stricter profile and launch that container with it:
+
+```bash
+lxc profile copy terrarium terrarium-strict
+lxc profile set terrarium-strict security.nesting false
+lxc profile unset terrarium-strict security.syscalls.intercept.mknod
+lxc profile unset terrarium-strict security.syscalls.intercept.setxattr
+```
+
+That way you can keep the general Terrarium experience friendly for common real-world workloads, while still choosing stricter containers when you want them.
+
 ## The Time Machine As A Security Feature
 
 Security is not only about blocking attackers. It is also about recovering from mistakes.
