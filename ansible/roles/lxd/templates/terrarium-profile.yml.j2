@@ -1,6 +1,8 @@
 config:
   security.idmap.isolated: "true"
-  security.nesting: "false"
+  security.nesting: "true"
+  security.syscalls.intercept.mknod: "true"
+  security.syscalls.intercept.setxattr: "true"
 description: Terrarium baseline container profile
 devices:
   eth0:
