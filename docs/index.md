@@ -1,30 +1,92 @@
-# Terrarium Docs
+---
+layout: home
 
-Terrarium turns a plain Ubuntu 24.04 VPS into a secure, rewindable home for isolated environments.
+hero:
+  name: Terrarium
+  text: Real VPS environments for agents, dev tools, and messy apps
+  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, publish only what you mean, and rewind mistakes in small ZFS-backed steps.
+  image:
+    src: /banner.webp
+    alt: Terrarium banner
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /getting-started/
+    - theme: alt
+      text: See Guides
+      link: /guides/
+    - theme: alt
+      text: Understand Security
+      link: /security
 
-It is built for the way people actually use agents and development tools now: giving software enough freedom to be useful, without giving it the whole host. Agent systems like OpenClaw, Hermes, browser-based editors, internal dashboards, and temporary development environments can run inside real LXD containers on ZFS, while the host stays hardened and recoverable.
+features:
+  - title: Private by default
+    details: Containers sit behind LXD NAT, so random scans and inbound internet noise do not hit them directly. A service only becomes public when you expose it.
+  - title: Rewind instead of rebuild
+    details: ZFS snapshots give you small-step rollback for broken agents, failed upgrades, and experiments that went sideways.
+  - title: Publish only what matters
+    details: Put apps behind Traefik with TLS and optional OIDC, while databases, Redis, admin ports, and internal APIs stay private inside the container.
+  - title: Real environments, not toy sandboxes
+    details: Run OpenClaw, Hermes, VSCodium, Docker Compose stacks, and other workloads that need packages, services, shells, and background processes.
+---
 
-That gives you three things at once:
+<div class="terrarium-home-grid">
+  <section class="terrarium-panel terrarium-panel-accent">
+    <p class="terrarium-eyebrow">Why people use it</p>
+    <h2>One VPS, many isolated environments, much less regret.</h2>
+    <p>
+      Terrarium is for people who want to give agents and development tools room to operate without
+      turning the whole host into a shared blast radius. Each workload gets a real container. The host
+      stays hardened. Recovery stays fast.
+    </p>
+  </section>
 
-- isolation, so one workload does not become everyone else's problem
-- rewindability, so a broken environment can be rolled back instead of rebuilt
-- easy publishing, so containerized web apps can be exposed through Traefik with TLS and optional OIDC protection
+  <section class="terrarium-panel">
+    <p class="terrarium-eyebrow">What changes</p>
+    <ul class="terrarium-checklist">
+      <li>Agent breaks an environment: roll it back.</li>
+      <li>Compose stack needs Postgres, Redis, workers, and dashboards: keep them inside one private LXC.</li>
+      <li>Browser IDE or internal UI needs public access: publish it through Traefik and protect it with OIDC.</li>
+    </ul>
+  </section>
+</div>
 
-One of the most important parts is easy to miss if you are not already deep into infrastructure: Terrarium containers are not exposed directly to the internet. They sit behind LXD's private bridge and NAT by default, which means random inbound scans, probes, and malicious requests do not hit them directly. A service only becomes public when you explicitly publish it through Terrarium's proxy system.
+## Why Terrarium feels safer
 
-If you are new to Terrarium, start here:
+The most important part is not flashy, but it changes how comfortable the whole system feels.
 
-- [Getting Started](/getting-started/)
-- [Security Model](/security)
-- [Provider Guides](/providers/)
-- [Use-case Guides](/guides/)
-- [Operations](/operations/)
-- [Reference](/reference/)
-- [Architecture](/architecture)
+Containers are not exposed directly to the internet. They sit behind LXD's private bridge and NAT, which means:
 
-## What Terrarium Installs
+- random scans and probes do not hit them directly
+- a service listening on `0.0.0.0` inside the container is still not automatically public
+- complex stacks can keep internal services private even when one frontend is exposed
 
-Terrarium provisions a host with:
+That is why Terrarium works so well for non-experts. You can run a lot inside a container without accidentally publishing all of it.
+
+## Good fits
+
+<div class="terrarium-cards">
+  <a class="terrarium-card" href="/guides/openclaw">
+    <strong>OpenClaw</strong>
+    <span>Give it a real environment and keep risky experimentation away from the host.</span>
+  </a>
+  <a class="terrarium-card" href="/guides/hermes">
+    <strong>Hermes</strong>
+    <span>Run agent services in their own container and expose only the UI or API you actually want public.</span>
+  </a>
+  <a class="terrarium-card" href="/guides/vscode">
+    <strong>VSCodium Web</strong>
+    <span>Spin up browser-accessible coding environments with custom packages, isolated filesystems, and proxy-based access.</span>
+  </a>
+  <a class="terrarium-card" href="/guides/compose">
+    <strong>Compose stacks</strong>
+    <span>Keep multi-service apps together inside one rewindable LXC instead of tangling them into the host Docker setup.</span>
+  </a>
+</div>
+
+## What Terrarium installs
+
+Terrarium provisions the host with:
 
 - [Cockpit](https://github.com/cockpit-project/cockpit)
 - [`45Drives/cockpit-zfs`](https://github.com/45Drives/cockpit-zfs)
@@ -37,20 +99,23 @@ Terrarium provisions a host with:
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel)
 - [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening)
 
-## Supported Scope
+## Start here
 
-- Ubuntu Server 24.04 LTS
-- Single-host install only
-- LXC containers only
-
-## Why The Default Network Model Matters
-
-Terrarium is opinionated in a useful way:
-
-- containers live on a private LXD network behind NAT
-- host-level exposure is explicit
-- only the routes or ports you publish are reachable from outside
-
-That means you can run messy or complex workloads more safely. For example, a Docker Compose stack inside an LXC can expose a web app, a database, Redis, internal admin ports, and metrics inside that container network, but nothing is reachable from the public internet unless you deliberately put it behind Terrarium's proxy or raw port publishing.
-
-For advanced users, this means more freedom. For non-experts, it means fewer accidental mistakes turn into public incidents.
+<div class="terrarium-cards terrarium-cards-tight">
+  <a class="terrarium-card" href="/getting-started/">
+    <strong>Getting Started</strong>
+    <span>Install flow, storage strategy, domains, and identity provider choices.</span>
+  </a>
+  <a class="terrarium-card" href="/security">
+    <strong>Security Model</strong>
+    <span>Why private-by-default networking and explicit exposure matter so much here.</span>
+  </a>
+  <a class="terrarium-card" href="/providers/">
+    <strong>Provider Guides</strong>
+    <span>How to create the VPS correctly on DigitalOcean, Vultr, Hetzner, or Hostinger.</span>
+  </a>
+  <a class="terrarium-card" href="/reference/terrariumctl">
+    <strong>terrariumctl Reference</strong>
+    <span>The full command surface for install, reconfiguration, backup, restore, and proxy sync.</span>
+  </a>
+</div>
