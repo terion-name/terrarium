@@ -2,6 +2,8 @@
 
 Terrarium gives the host a few public management endpoints and can either self-host the identity provider or use an external one.
 
+Before thinking about domains, it helps to understand one important Terrarium default: containers are private behind LXD NAT unless you explicitly publish something. A service listening inside a container does not become public on its own.
+
 ## Default Public Endpoints
 
 By default, Terrarium exposes:
@@ -22,6 +24,8 @@ If you set only `--domain`, Terrarium derives:
 - `manage.<domain>`
 - `lxd.<domain>`
 - `auth.<domain>` when self-hosted ZITADEL is enabled
+
+These domains are for management and explicitly published services. They are not a sign that every service inside every container is reachable from outside.
 
 ## Email Settings
 

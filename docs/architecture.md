@@ -33,6 +33,18 @@ Terrarium is split into four layers:
 - Self-hosted ZITADEL, when enabled, is also published through Traefik.
 - UFW defaults to deny incoming and allow outgoing. Terrarium explicitly opens only the expected public ports, then adds or removes dynamic TCP/UDP rules for container-level proxy exposure.
 
+## Network Isolation Model
+
+Terrarium containers are not public by default.
+
+They sit behind LXD's private bridge and NAT, which gives them an important baseline layer of protection:
+
+- inbound scans from the internet do not hit container services directly
+- a process binding `0.0.0.0` inside a container is not automatically internet-reachable
+- misconfigured internal services are less likely to become public by accident
+
+This is especially useful for complex or messy environments. A Docker Compose stack inside an LXC can expose databases, caches, queues, metrics, or internal dashboards inside that container environment without making them public on the host. Only the things Terrarium explicitly publishes through Traefik or raw TCP/UDP proxy rules become reachable from outside.
+
 ## Authentication Model
 
 - SSH is hardened to key-based access; password SSH is disabled.
@@ -66,6 +78,12 @@ Terrarium is split into four layers:
 - `@auth` means “any authenticated user”.
 - `@auth:group1,group2` means “any authenticated user in at least one listed group”.
 - Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so that the shared callback and cookie domain remain valid.
+
+The key behavior for non-experts is simple:
+
+- listening inside the container does not make a service public
+- adding a `user.proxy` rule does
+- if you do not publish it, it stays behind the host
 
 ## Storage
 

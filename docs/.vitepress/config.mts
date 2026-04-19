@@ -21,6 +21,7 @@ export default defineConfig({
         text: "Overview",
         items: [
           { text: "Docs Home", link: "/" },
+          { text: "Security Model", link: "/security" },
           { text: "Architecture", link: "/architecture" }
         ]
       },
