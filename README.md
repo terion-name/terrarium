@@ -14,6 +14,14 @@ Terrarium is just as useful for human workflows. You can spin up development env
 
 The goal is simple: make a single VPS feel safe enough for experimentation, capable enough for real work, and forgiving enough that you can move fast without being one bad command away from starting over.
 
+## Documentation
+
+- Published docs site: [terion-name.github.io/terrarium](https://terion-name.github.io/terrarium/)
+- [Docs home](docs/README.md)
+- [Getting Started](docs/getting-started/README.md)
+- [Operations](docs/operations/README.md)
+- [Reference](docs/reference/README.md)
+
 
 ## Install:
 
