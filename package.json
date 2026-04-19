@@ -7,7 +7,10 @@
     "build": "bun run scripts/build.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "integration": "bun run tests/integration/index.ts",
+    "integration:smoke": "bun run tests/integration/index.ts --suite smoke",
+    "integration:full": "bun run tests/integration/index.ts --suite full"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.8.4",
@@ -18,6 +21,7 @@
   "devDependencies": {
     "@types/bun": "^1.3.12",
     "@types/node": "^25.6.0",
+    "playwright": "^1.56.1",
     "vitepress": "^1.6.4"
   }
 }

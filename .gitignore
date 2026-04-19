@@ -3,3 +3,4 @@ node_modules/
 bun.lockb
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+tests/integration/output/
