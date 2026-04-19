@@ -448,6 +448,7 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
 
 function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Record<string, { address: string }>): string {
   return yamlStringify({
+    api: {},
     entryPoints: {
       web: { address: ":80" },
       websecure: { address: ":443" },
