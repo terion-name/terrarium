@@ -23,16 +23,14 @@ If you are new to Terrarium, start here:
 
 Terrarium provisions a host with:
 
-- [Cockpit](https://github.com/cockpit-project/cockpit)
-- [`45Drives/cockpit-zfs`](https://github.com/45Drives/cockpit-zfs)
-- [`45Drives/cockpit-S3ObjectBroswer`](https://github.com/45Drives/cockpit-S3ObjectBroswer)
+- [Cockpit](https://github.com/cockpit-project/cockpit) with [cockpit-zfs](https://github.com/45Drives/cockpit-zfs) and [cockpit-S3ObjectBroswer](https://github.com/45Drives/cockpit-S3ObjectBroswer)
 - [LXD](https://github.com/canonical/lxd) with the built-in web UI
 - [OpenZFS](https://github.com/openzfs/zfs)
-- [`sanoid` and `syncoid`](https://github.com/jimsalterjrs/sanoid)
-- [Traefik](https://github.com/traefik/traefik)
+- [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
+- [Traefik](https://github.com/traefik/traefik) with the built-in dashboard
 - [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy)
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel)
-- [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening)
+- [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening)
 
 ## Supported Scope
 

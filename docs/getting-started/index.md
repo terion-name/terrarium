@@ -5,6 +5,7 @@ This section covers the pieces you usually want before the first install:
 - [Installation](/getting-started/installation)
 - [Storage and Sizing](/getting-started/storage)
 - [Domains and Authentication](/getting-started/domains-and-auth)
+- [Management GUIs](/getting-started/management-guis)
 
 Recommended order:
 

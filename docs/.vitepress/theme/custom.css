@@ -10,6 +10,18 @@
   --terrarium-border: rgba(18, 52, 45, 0.12);
 }
 
+[data-theme="dark"] {
+  --vp-c-brand-1: #53c1aa;
+  --vp-c-brand-2: #7dd2c1;
+  --vp-c-brand-3: #2e8f7b;
+  --vp-c-brand-soft: rgba(83, 193, 170, 0.2);
+  --terrarium-ink: #eef8f4;
+  --terrarium-moss: #b6cdc6;
+  --terrarium-sand: #15221f;
+  --terrarium-panel: rgba(18, 28, 25, 0.82);
+  --terrarium-border: rgba(171, 214, 200, 0.14);
+}
+
 .VPHome {
   background:
     radial-gradient(circle at top left, rgba(161, 200, 181, 0.26), transparent 32rem),
@@ -17,19 +29,40 @@
     linear-gradient(180deg, #f8f4ea 0%, #eef4ef 32%, #fbfaf6 100%);
 }
 
+[data-theme="dark"] .VPHome {
+  background:
+    radial-gradient(circle at top left, rgba(83, 193, 170, 0.12), transparent 30rem),
+    radial-gradient(circle at top right, rgba(214, 164, 84, 0.1), transparent 26rem),
+    linear-gradient(180deg, #0f1514 0%, #121917 36%, #0d1110 100%);
+}
+
 .VPHome .VPHero {
-  padding-top: 28px;
+  padding-top: 72px;
+}
+
+.VPHome .VPHero .heading {
+  max-width: 38rem;
+}
+
+.VPHome .VPHero .text {
+  font-size: clamp(2.3rem, 5vw, 4rem);
+  line-height: 1.02;
+}
+
+.VPHome .VPHero .image-container,
+.VPHome .VPHero .image-bg {
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
 }
 
 .VPHome .VPHero .image {
-  max-width: min(640px, 48vw);
+  max-width: min(640px, 46vw);
 }
 
 .VPHome .VPHero .image img {
-  border-radius: 28px;
-  box-shadow:
-    0 30px 80px rgba(24, 63, 54, 0.18),
-    0 8px 24px rgba(24, 63, 54, 0.08);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .VPHome .name,
@@ -39,6 +72,8 @@
 
 .VPHome .tagline {
   max-width: 40rem;
+  font-size: 1.02rem;
+  line-height: 1.55;
   color: var(--terrarium-moss);
 }
 
@@ -46,6 +81,10 @@
   border: 1px solid var(--terrarium-border);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 244, 0.9));
   backdrop-filter: blur(10px);
+}
+
+[data-theme="dark"] .VPFeature {
+  background: linear-gradient(180deg, rgba(22, 29, 27, 0.94), rgba(14, 19, 18, 0.94));
 }
 
 .terrarium-home-grid {
@@ -124,6 +163,14 @@
     border-color 0.2s ease;
 }
 
+.terrarium-card,
+.terrarium-card:hover,
+.terrarium-card:visited,
+.terrarium-card strong,
+.terrarium-card span {
+  text-decoration: none !important;
+}
+
 .terrarium-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 18px 40px rgba(35, 66, 58, 0.1);
@@ -140,9 +187,19 @@
   line-height: 1.5;
 }
 
+[data-theme="dark"] .terrarium-card,
+[data-theme="dark"] .terrarium-panel,
+[data-theme="dark"] .terrarium-panel-accent {
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+}
+
 @media (max-width: 960px) {
   .terrarium-home-grid,
   .terrarium-cards {
     grid-template-columns: 1fr;
+  }
+
+  .VPHome .VPHero {
+    padding-top: 52px;
   }
 }

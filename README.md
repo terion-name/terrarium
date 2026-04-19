@@ -39,17 +39,15 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/download/0.0.0-beta
 
 Terrarium provisions the host with:
 
-- [Cockpit](https://github.com/cockpit-project/cockpit)
-- [`45Drives/cockpit-zfs`](https://github.com/45Drives/cockpit-zfs)
-- [`45Drives/cockpit-S3ObjectBroswer`](https://github.com/45Drives/cockpit-S3ObjectBroswer)
+- [Cockpit](https://github.com/cockpit-project/cockpit) with [cockpit-zfs](https://github.com/45Drives/cockpit-zfs) and [cockpit-S3ObjectBroswer](https://github.com/45Drives/cockpit-S3ObjectBroswer)
 - [LXD](https://github.com/canonical/lxd) with the built-in web UI
 - [OpenZFS](https://github.com/openzfs/zfs)
-- [`sanoid` and `syncoid`](https://github.com/jimsalterjrs/sanoid)
-- [Traefik](https://github.com/traefik/traefik) for public management endpoints
+- [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
+- [Traefik](https://github.com/traefik/traefik) with the built-in dashboard for public management endpoints
 - [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`
 - External OIDC issuer support when you do not want to self-host the IDP
-- [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
+- [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
 
 ## Supported Host
 
@@ -142,6 +140,7 @@ Example sizing:
 By default, Terrarium exposes:
 
 - `https://manage.<dashed-public-ip>.traefik.me` for Cockpit
+- `https://proxy.<dashed-public-ip>.traefik.me` for the Traefik dashboard
 - `https://lxd.<dashed-public-ip>.traefik.me` for the LXD API and UI
 - `https://auth.<dashed-public-ip>.traefik.me` for self-hosted ZITADEL when `--idp=local` is enabled
 
@@ -149,6 +148,7 @@ You can override the domains with:
 
 - `--domain`
 - `--manage-domain`
+- `--proxy-domain`
 - `--lxd-domain`
 - `--auth-domain`
 
@@ -212,6 +212,7 @@ Top-level commands:
 | `--acme-email` | email address | no | falls back to `--email` | Sets the ACME account identity for Traefik and LXD certificate automation. |
 | `--domain` | root domain | no | service domains default to `<service>.<dashed-public-ip>.traefik.me` when omitted | Sets the root domain used to derive service subdomains. |
 | `--manage-domain` | domain | no | `manage.<domain>` when `--domain` is set, otherwise `manage.<dashed-public-ip>.traefik.me` | Overrides the Cockpit domain. |
+| `--proxy-domain` | domain | no | `proxy.<domain>` when `--domain` is set, otherwise `proxy.<dashed-public-ip>.traefik.me` | Overrides the Traefik dashboard domain. |
 | `--lxd-domain` | domain | no | `lxd.<domain>` when `--domain` is set, otherwise `lxd.<dashed-public-ip>.traefik.me` | Overrides the LXD domain. |
 | `--idp` | `local` or `oidc` | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Selects whether Terrarium uses self-hosted ZITADEL (`local`) or an external OIDC issuer (`oidc`). |
 | `--admin-group` | group name | yes when `--idp=oidc`; no otherwise | `terrarium-admins` when `--idp=local`, otherwise prompted in interactive mode | Sets the management admin group that is allowed into Cockpit and LXD. |
@@ -261,6 +262,7 @@ Restore behavior:
 | --- | --- | --- | --- | --- |
 | positional `rootDomain` | domain | no | prompted when omitted | Sets the new root domain. |
 | `--manage-domain` | domain | no | `manage.<rootDomain>` | Overrides the Cockpit domain. |
+| `--proxy-domain` | domain | no | `proxy.<rootDomain>` | Overrides the Traefik dashboard domain. |
 | `--lxd-domain` | domain | no | `lxd.<rootDomain>` | Overrides the LXD domain. |
 | `--auth-domain` | domain | no | `auth.<rootDomain>` when self-hosted ZITADEL is enabled | Overrides the ZITADEL domain. |
 

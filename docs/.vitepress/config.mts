@@ -31,7 +31,8 @@ export default defineConfig({
           { text: "Overview", link: "/getting-started/" },
           { text: "Installation", link: "/getting-started/installation" },
           { text: "Storage and Sizing", link: "/getting-started/storage" },
-          { text: "Domains and Authentication", link: "/getting-started/domains-and-auth" }
+          { text: "Domains and Authentication", link: "/getting-started/domains-and-auth" },
+          { text: "Management GUIs", link: "/getting-started/management-guis" }
         ]
       },
       {

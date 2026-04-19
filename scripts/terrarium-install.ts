@@ -52,6 +52,7 @@ type InstallOptions = {
   acmeEmail: string;
   domain: string;
   manageDomain: string;
+  proxyDomain: string;
   lxdDomain: string;
   idpMode: IdpMode | "";
   adminGroup: string;
@@ -475,15 +476,20 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   if (!options.domain && !options.manageDomain) {
     options.manageDomain = `manage.${dashed}.traefik.me`;
   }
+  if (!options.domain && !options.proxyDomain) {
+    options.proxyDomain = `proxy.${dashed}.traefik.me`;
+  }
   if (!options.domain && !options.lxdDomain) {
     options.lxdDomain = `lxd.${dashed}.traefik.me`;
   }
 
   if (options.domain) {
     options.manageDomain = options.manageDomain || `manage.${options.domain}`;
+    options.proxyDomain = options.proxyDomain || `proxy.${options.domain}`;
     options.lxdDomain = options.lxdDomain || `lxd.${options.domain}`;
   } else {
     options.manageDomain = await promptText("Cockpit domain", options.manageDomain);
+    options.proxyDomain = await promptText("Traefik dashboard domain", options.proxyDomain);
     options.lxdDomain = await promptText("LXD domain", options.lxdDomain);
   }
 
@@ -634,6 +640,7 @@ function validateNonInteractive(options: InstallOptions): void {
   }
   const dashed = dashedIp(options.publicIp);
   options.manageDomain = options.manageDomain || (options.domain ? `manage.${options.domain}` : `manage.${dashed}.traefik.me`);
+  options.proxyDomain = options.proxyDomain || (options.domain ? `proxy.${options.domain}` : `proxy.${dashed}.traefik.me`);
   options.lxdDomain = options.lxdDomain || (options.domain ? `lxd.${options.domain}` : `lxd.${dashed}.traefik.me`);
 
   if (!options.email) {
@@ -757,6 +764,7 @@ function buildConfig(options: InstallOptions): string {
     terrarium_email: options.email,
     terrarium_acme_email: options.acmeEmail,
     terrarium_manage_domain: options.manageDomain,
+    terrarium_proxy_domain: options.proxyDomain,
     terrarium_lxd_domain: options.lxdDomain,
     terrarium_idp_mode: options.idpMode,
     terrarium_admin_group: options.adminGroup,
@@ -797,17 +805,20 @@ async function runPlaybook(configPath: string, secretConfigPath: string): Promis
 function printDnsGuidance(options: InstallOptions): void {
   const dashed = dashedIp(options.publicIp);
   const defaultManage = `manage.${dashed}.traefik.me`;
+  const defaultProxy = `proxy.${dashed}.traefik.me`;
   const defaultLxd = `lxd.${dashed}.traefik.me`;
   const defaultAuth = `auth.${dashed}.traefik.me`;
 
   if (
     options.domain ||
     options.manageDomain !== defaultManage ||
+    options.proxyDomain !== defaultProxy ||
     options.lxdDomain !== defaultLxd ||
     (options.idpMode === "local" && options.authDomain !== defaultAuth)
   ) {
     info("DNS records to create if you are using custom domains:");
     info(`  A ${options.manageDomain} -> ${options.publicIp}`);
+    info(`  A ${options.proxyDomain} -> ${options.publicIp}`);
     info(`  A ${options.lxdDomain} -> ${options.publicIp}`);
     if (options.idpMode === "local") {
       info(`  A ${options.authDomain} -> ${options.publicIp}`);
@@ -825,6 +836,7 @@ function defaultOptions(): InstallOptions {
     acmeEmail: "",
     domain: "",
     manageDomain: "",
+    proxyDomain: "",
     lxdDomain: "",
     idpMode: "",
     adminGroup: "",
@@ -895,6 +907,7 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
 
   success("Terrarium installation finished.");
   console.log(`${chalk.cyan("Cockpit:")} ${chalk.white(`https://${options.manageDomain}`)}`);
+  console.log(`${chalk.cyan("Traefik dashboard:")} ${chalk.white(`https://${options.proxyDomain}`)}`);
   console.log(`${chalk.cyan("LXD UI/API:")} ${chalk.white(`https://${options.lxdDomain}`)}`);
   if (options.idpMode === "local") {
     console.log(`${chalk.cyan("ZITADEL:")} ${chalk.white(`https://${options.authDomain}`)}`);
@@ -918,6 +931,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--acme-email <email>", "ACME account email for Traefik and LXD")
     .option("--domain <domain>", "Root domain used to derive service subdomains")
     .option("--manage-domain <domain>", "Cockpit domain")
+    .option("--proxy-domain <domain>", "Traefik dashboard domain")
     .option("--lxd-domain <domain>", "LXD domain")
     .option("--idp <mode>", "Identity provider mode: local or oidc")
     .option("--admin-group <group>", "Management admin group; required when --idp=oidc")
@@ -951,6 +965,7 @@ export function registerInstallCommand(cli: CAC): void {
       options.acmeEmail = readCliOption(cliOptions, "acmeEmail");
       options.domain = readCliOption(cliOptions, "domain");
       options.manageDomain = readCliOption(cliOptions, "manageDomain");
+      options.proxyDomain = readCliOption(cliOptions, "proxyDomain");
       options.lxdDomain = readCliOption(cliOptions, "lxdDomain");
       options.idpMode = readCliOption(cliOptions, "idp").trim().toLowerCase() as IdpMode | "";
       options.adminGroup = readCliOption(cliOptions, "adminGroup");

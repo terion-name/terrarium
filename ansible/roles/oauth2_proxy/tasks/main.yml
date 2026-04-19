@@ -110,6 +110,14 @@
               else terrarium_oidc_issuer
             ) | default('', true)
           }}
+        terrarium_oauth2_proxy_cookie_domain_effective: >-
+          {{
+            (
+              terrarium_root_domain
+              if terrarium_root_domain | length > 0
+              else (terrarium_public_ip | replace('.', '-') ~ '.traefik.me')
+            )
+          }}
 
     - name: Assert oauth2-proxy client credentials are present
       ansible.builtin.assert:
@@ -130,6 +138,7 @@
         terrarium_oauth2_proxy_client_secret: "{{ terrarium_oauth2_proxy_client_secret_effective }}"
         terrarium_oauth2_proxy_oidc_issuer: "{{ terrarium_oauth2_proxy_oidc_issuer_effective }}"
         terrarium_oauth2_proxy_cookie_secret: "{{ terrarium_oauth2_proxy_cookie_secret_raw.stdout }}"
+        terrarium_oauth2_proxy_cookie_domain: "{{ terrarium_oauth2_proxy_cookie_domain_effective }}"
       no_log: true
       notify: restart terrarium oauth2 proxy
 

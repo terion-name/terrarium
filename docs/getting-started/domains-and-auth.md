@@ -9,6 +9,7 @@ Before thinking about domains, it helps to understand one important Terrarium de
 By default, Terrarium exposes:
 
 - `https://manage.<dashed-public-ip>.traefik.me` for Cockpit
+- `https://proxy.<dashed-public-ip>.traefik.me` for the Traefik dashboard
 - `https://lxd.<dashed-public-ip>.traefik.me` for the LXD API and UI
 - `https://auth.<dashed-public-ip>.traefik.me` for self-hosted ZITADEL when `--idp=local`
 
@@ -16,12 +17,14 @@ You can override those with:
 
 - `--domain`
 - `--manage-domain`
+- `--proxy-domain`
 - `--lxd-domain`
 - `--auth-domain`
 
 If you set only `--domain`, Terrarium derives:
 
 - `manage.<domain>`
+- `proxy.<domain>`
 - `lxd.<domain>`
 - `auth.<domain>` when self-hosted ZITADEL is enabled
 

@@ -1,6 +1,6 @@
 http:
   middlewares:
-    cockpit-forward-auth:
+    admin-forward-auth:
       forwardAuth:
         address: http://127.0.0.1:{{ terrarium_oauth2_proxy_port | default(4180) }}/
         trustForwardHeader: true
@@ -8,6 +8,10 @@ http:
           - X-Auth-Request-User
           - X-Auth-Request-Email
           - X-Auth-Request-Groups
+    traefik-dashboard-root-redirect:
+      redirectRegex:
+        regex: "^https?://([^/]+)/?$"
+        replacement: "https://$1/dashboard/"
 {% if terrarium_idp_mode == 'local' %}
     zitadel-root-rewrite:
       replacePath:
@@ -27,13 +31,40 @@ http:
       priority: 500
       tls:
         certResolver: letsencrypt
+    proxy-oauth2:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_proxy_domain }}`) && PathPrefix(`/oauth2/`)
+      service: oauth2-proxy
+      priority: 500
+      tls:
+        certResolver: letsencrypt
     cockpit:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_manage_domain }}`)
       middlewares:
-        - cockpit-forward-auth
+        - admin-forward-auth
       service: cockpit
+      tls:
+        certResolver: letsencrypt
+    traefik-dashboard-root:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_proxy_domain }}`) && Path(`/`)
+      middlewares:
+        - admin-forward-auth
+        - traefik-dashboard-root-redirect
+      service: api@internal
+      tls:
+        certResolver: letsencrypt
+    traefik-dashboard:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_proxy_domain }}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))
+      middlewares:
+        - admin-forward-auth
+      service: api@internal
       tls:
         certResolver: letsencrypt
 {% if terrarium_idp_mode == 'local' %}

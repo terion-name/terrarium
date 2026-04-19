@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Terrarium
   text: Real VPS environments for agents, dev tools, and messy apps
-  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, publish only what you mean, and rewind mistakes in small ZFS-backed steps.
+  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, manage it from built-in web UIs, publish only what you mean, and rewind mistakes in small ZFS-backed steps.
   image:
     src: /banner.webp
     alt: Terrarium banner
@@ -20,13 +20,15 @@ hero:
       link: /security
 
 features:
-  - title: Private by default
+  - title: 🛡️ Private by default
     details: Containers sit behind LXD NAT, so random scans and inbound internet noise do not hit them directly. A service only becomes public when you expose it.
-  - title: Rewind instead of rebuild
+  - title: ⏪ Rewind instead of rebuild
     details: ZFS snapshots give you small-step rollback for broken agents, failed upgrades, and experiments that went sideways.
-  - title: Publish only what matters
+  - title: 🌐 Publish only what matters
     details: Put apps behind Traefik with TLS and optional OIDC, while databases, Redis, admin ports, and internal APIs stay private inside the container.
-  - title: Real environments, not toy sandboxes
+  - title: 🖥️ Built-in management UIs
+    details: Cockpit, the LXD UI, and the Traefik dashboard give you a visual control plane instead of forcing everything through the terminal.
+  - title: 🧪 Real environments, not toy sandboxes
     details: Run OpenClaw, Hermes, VSCodium, Docker Compose stacks, and other workloads that need packages, services, shells, and background processes.
 ---
 
@@ -84,20 +86,30 @@ That is why Terrarium works so well for non-experts. You can run a lot inside a 
   </a>
 </div>
 
+## Management without memorizing everything
+
+Terrarium is friendly to terminal users, but it is also practical for people who do not want to manage a whole host from raw commands alone.
+
+You get three management surfaces out of the box:
+
+- **Cockpit** for host administration, logs, terminal access, and ZFS-oriented extensions
+- **LXD UI** for creating and managing containers, profiles, networks, and snapshots
+- **Traefik dashboard** at `proxy.<domain>` for understanding the live routing layer
+
+If you want the visual tour, start with [Management GUIs](/getting-started/management-guis).
+
 ## What Terrarium installs
 
 Terrarium provisions the host with:
 
-- [Cockpit](https://github.com/cockpit-project/cockpit)
-- [`45Drives/cockpit-zfs`](https://github.com/45Drives/cockpit-zfs)
-- [`45Drives/cockpit-S3ObjectBroswer`](https://github.com/45Drives/cockpit-S3ObjectBroswer)
+- [Cockpit](https://github.com/cockpit-project/cockpit) with [cockpit-zfs](https://github.com/45Drives/cockpit-zfs) and [cockpit-S3ObjectBroswer](https://github.com/45Drives/cockpit-S3ObjectBroswer)
 - [LXD](https://github.com/canonical/lxd) with the built-in web UI
 - [OpenZFS](https://github.com/openzfs/zfs)
-- [`sanoid` and `syncoid`](https://github.com/jimsalterjrs/sanoid)
-- [Traefik](https://github.com/traefik/traefik)
+- [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
+- [Traefik](https://github.com/traefik/traefik) with the built-in dashboard
 - [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy)
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel)
-- [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening)
+- [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening)
 
 ## Start here
 
@@ -109,6 +121,10 @@ Terrarium provisions the host with:
   <a class="terrarium-card" href="/security">
     <strong>Security Model</strong>
     <span>Why private-by-default networking and explicit exposure matter so much here.</span>
+  </a>
+  <a class="terrarium-card" href="/getting-started/management-guis">
+    <strong>Management GUIs</strong>
+    <span>See what Cockpit, the LXD UI, and the Traefik dashboard are each good for.</span>
   </a>
   <a class="terrarium-card" href="/providers/">
     <strong>Provider Guides</strong>

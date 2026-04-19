@@ -117,8 +117,11 @@ async function findSnapshot(dataset: string, query = ""): Promise<string> {
 async function statusCmd(): Promise<void> {
   const config = requireConfig();
   const pool = configString(config, "terrarium_lxd_pool_name", "terrarium");
-  const manage = configString(config, "terrarium_manage_domain");
-  const lxd = configString(config, "terrarium_lxd_domain");
+  const publicIp = configString(config, "terrarium_public_ip");
+  const rootDomain = configString(config, "terrarium_root_domain");
+  const manage = configString(config, "terrarium_manage_domain", defaultServiceDomain(rootDomain, publicIp, "manage"));
+  const proxy = configString(config, "terrarium_proxy_domain", defaultServiceDomain(rootDomain, publicIp, "proxy"));
+  const lxd = configString(config, "terrarium_lxd_domain", defaultServiceDomain(rootDomain, publicIp, "lxd"));
   const auth = configString(config, "terrarium_auth_domain");
   const oidc = oidcIssuer(config);
   const mode = idpMode(config);
@@ -138,6 +141,7 @@ async function statusCmd(): Promise<void> {
   console.log(`  ${label("Config:")} ${value(CONFIG_PATH)}`);
   console.log(`  ${label("Pool:")} ${value(pool)}`);
   console.log(`  ${label("Cockpit:")} ${value(`https://${manage}`)}`);
+  console.log(`  ${label("Traefik dashboard:")} ${value(`https://${proxy}`)}`);
   console.log(`  ${label("LXD:")} ${value(`https://${lxd}`)}`);
   console.log(`  ${label("IDP mode:")} ${value(mode)}`);
   if (oidc) {
@@ -323,7 +327,7 @@ async function reconfigureCmd(): Promise<void> {
 
 async function setDomainsCmd(
   rootDomainArg?: string,
-  options: { manageDomain?: string; lxdDomain?: string; authDomain?: string } = {}
+  options: { manageDomain?: string; proxyDomain?: string; lxdDomain?: string; authDomain?: string } = {}
 ): Promise<void> {
   const config = loadMutableConfig();
   const publicIp = configString(config, "terrarium_public_ip");
@@ -337,6 +341,7 @@ async function setDomainsCmd(
 
   setConfigValue(config, "terrarium_root_domain", rootDomain);
   setConfigValue(config, "terrarium_manage_domain", options.manageDomain || defaultServiceDomain(rootDomain, publicIp, "manage"));
+  setConfigValue(config, "terrarium_proxy_domain", options.proxyDomain || defaultServiceDomain(rootDomain, publicIp, "proxy"));
   setConfigValue(config, "terrarium_lxd_domain", options.lxdDomain || defaultServiceDomain(rootDomain, publicIp, "lxd"));
   if (localIdpEnabled(config)) {
     const authDomain = options.authDomain || defaultServiceDomain(rootDomain, publicIp, "auth");
@@ -345,7 +350,7 @@ async function setDomainsCmd(
   }
 
   await confirmDestructive(
-    `Apply domains: manage=${String(config.terrarium_manage_domain)}, lxd=${String(config.terrarium_lxd_domain)}${
+    `Apply domains: manage=${String(config.terrarium_manage_domain)}, proxy=${String(config.terrarium_proxy_domain)}, lxd=${String(config.terrarium_lxd_domain)}${
       config.terrarium_auth_domain ? `, auth=${String(config.terrarium_auth_domain)}` : ""
     }?`
   );
@@ -556,6 +561,7 @@ cli
 cli
   .command("set <section> [value]", "Update persisted Terrarium configuration")
   .option("--manage-domain <domain>", "Override the Cockpit domain")
+  .option("--proxy-domain <domain>", "Override the Traefik dashboard domain")
   .option("--lxd-domain <domain>", "Override the LXD domain")
   .option("--auth-domain <domain>", "Override the ZITADEL domain")
   .option("--email <email>", "Terrarium contact/admin email")
@@ -582,6 +588,7 @@ cli
     if (section === "domains") {
       await setDomainsCmd((value as string | undefined) || "", {
         manageDomain: cliOption(cliOptions, "manageDomain"),
+        proxyDomain: cliOption(cliOptions, "proxyDomain"),
         lxdDomain: cliOption(cliOptions, "lxdDomain"),
         authDomain: cliOption(cliOptions, "authDomain")
       });
