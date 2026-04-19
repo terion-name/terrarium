@@ -97,6 +97,7 @@ html.dark .VPHome {
 
 .VPHome .VPHero .image-container {
   width: min(100%, 640px);
+  transform: none;
 }
 
 .VPHome .VPHero .image-bg {
@@ -106,16 +107,15 @@ html.dark .VPHome {
 
 .VPHome .VPHero .image {
   padding-top: 2em;
-  width: 100%!important;
-  height: auto;
-  max-width: fit-content;
   /* max-width: min(640px, 46vw); */
 }
 
 .VPHome .VPHero .image img {
-  width: 100%;
   border-radius: 0;
   box-shadow: none;
+  width: 100%!important;
+  height: auto;
+  max-width: fit-content;
 }
 
 .VPHome .name,
