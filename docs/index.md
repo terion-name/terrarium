@@ -3,11 +3,11 @@ layout: home
 
 hero:
   name: Terrarium
-  text: Real VPS environments for agents, development, and workloads
-  tagline: Transform any VPS into a secure host with isolated environments for your agents, development, and workloads. Time machine included.
+  text: Transform any VPS into a secure host with isolated environments for your agents, development, and workloads. Time machine included.
+  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, manage it from built-in web UIs, publish only what you mean, and rewind mistakes in small ZFS-backed steps.
   image:
     src: /banner.webp
-    alt: Terrarium banner
+    alt: Terrarium
   actions:
     - theme: brand
       text: Get Started
