@@ -18,7 +18,6 @@ type HostProvisionOptions = {
 type InstallOptions = {
   idpMode: "local" | "oidc";
   storageMode: "disk" | "partition" | "file";
-  useDerivedDomains?: boolean;
   storageSource?: string;
   storageSize?: string;
   manageDomain?: string;
@@ -136,11 +135,9 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     `--storage-mode ${options.storageMode}`
   ];
 
-  if (!options.useDerivedDomains) {
-    args.push(`--manage-domain ${shellArg(options.manageDomain || host.domains.manage)}`);
-    args.push(`--proxy-domain ${shellArg(options.proxyDomain || host.domains.proxy)}`);
-    args.push(`--lxd-domain ${shellArg(options.lxdDomain || host.domains.lxd)}`);
-  }
+  args.push(`--manage-domain ${shellArg(options.manageDomain || host.domains.manage)}`);
+  args.push(`--proxy-domain ${shellArg(options.proxyDomain || host.domains.proxy)}`);
+  args.push(`--lxd-domain ${shellArg(options.lxdDomain || host.domains.lxd)}`);
 
   if (storageSource) {
     args.push(`--storage-source ${shellArg(storageSource)}`);
@@ -149,9 +146,7 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     args.push(`--storage-size ${shellArg(options.storageSize)}`);
   }
   if (options.idpMode === "local") {
-    if (!options.useDerivedDomains) {
-      args.push(`--auth-domain ${shellArg(options.authDomain || host.domains.auth)}`);
-    }
+    args.push(`--auth-domain ${shellArg(options.authDomain || host.domains.auth)}`);
     args.push(`--zitadel-admin-email ${shellArg(options.zitadelAdminEmail || baseEmail(context))}`);
     args.push(`--admin-group ${shellArg(options.adminGroup || "terrarium-admins")}`);
   } else {

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runAllowFailure } from "../lib/common";
+import { normalizeS3Endpoint, runAllowFailure } from "../lib/common";
 
 /** Input required to verify a writable S3-compatible backup target. */
 export type S3VerificationOptions = {
@@ -39,7 +39,7 @@ async function ensureAwsCli(): Promise<void> {
     return;
   }
 
-  const fallbackArch = ({ x86_64: "x86_64", amd64: "x86_64", aarch64: "aarch64", arm64: "aarch64" } as Record<string, string>)[
+  const fallbackArch = ({ x64: "x86_64", x86_64: "x86_64", amd64: "x86_64", aarch64: "aarch64", arm64: "aarch64" } as Record<string, string>)[
     process.arch
   ] ?? process.arch;
   const tempDir = mkdtempSync(join(tmpdir(), "terrarium-awscli-install-"));
@@ -103,8 +103,9 @@ function s3Env(options: S3VerificationOptions): Record<string, string> {
 /** Builds the common AWS CLI prefix, including custom endpoint handling. */
 function s3BaseArgs(options: S3VerificationOptions): string[] {
   const args = ["aws"];
-  if (options.endpoint) {
-    args.push("--endpoint-url", options.endpoint);
+  const endpoint = normalizeS3Endpoint(options.endpoint);
+  if (endpoint) {
+    args.push("--endpoint-url", endpoint);
   }
   return args;
 }

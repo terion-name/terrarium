@@ -99,3 +99,7 @@
     - role: lxd
     - role: backups
     - role: hardening
+  post_tasks:
+    - name: Run Traefik sync after all dependent services are configured
+      ansible.builtin.command: /usr/local/bin/terrariumctl proxy sync
+      changed_when: false

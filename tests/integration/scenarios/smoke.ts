@@ -33,18 +33,23 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
   const replicaSsh = context.ssh(replica);
 
   try {
-    await context.duckdns.update(primary.server.ipv4);
+    await context.duckdns.update(replica.server.ipv4);
     await context.duckdns.waitForHosts(
-      [primary.domains.manage, primary.domains.proxy, primary.domains.lxd, primary.domains.auth],
-      primary.server.ipv4
+      [replica.domains.manage, replica.domains.proxy, replica.domains.lxd, replica.domains.auth],
+      replica.server.ipv4
     );
 
     await installTerrarium(context, replica, {
       idpMode: "local",
       storageMode: "file",
-      storageSize: "32G",
-      useDerivedDomains: true
+      storageSize: "32G"
     });
+
+    await context.duckdns.update(primary.server.ipv4);
+    await context.duckdns.waitForHosts(
+      [primary.domains.manage, primary.domains.proxy, primary.domains.lxd, primary.domains.auth],
+      primary.server.ipv4
+    );
 
     await installSyncoidKey(primarySsh, context.config.sshPrivateKey, context.config.sshPublicKey);
 

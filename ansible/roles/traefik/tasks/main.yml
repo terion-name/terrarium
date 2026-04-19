@@ -100,7 +100,3 @@
     state: started
     enabled: true
     daemon_reload: true
-
-- name: Run Traefik sync immediately
-  ansible.builtin.command: /usr/local/bin/terrariumctl proxy sync
-  changed_when: false

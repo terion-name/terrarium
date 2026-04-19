@@ -1,6 +1,17 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { configString, loadConfig, makeTempDir, readJsonFile, removePath, runAllowFailure, runShell, runText, shellEscape } from "./lib/common";
+import {
+  configString,
+  loadConfig,
+  makeTempDir,
+  normalizeS3Endpoint,
+  readJsonFile,
+  removePath,
+  runAllowFailure,
+  runShell,
+  runText,
+  shellEscape
+} from "./lib/common";
 
 const PREFIX = "terrariumctl backup reconstruct";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
@@ -55,7 +66,7 @@ function selectChain(directory: string, match = ""): Manifest[] {
 export async function reconstructFromS3(instance: string, at: string, targetDataset: string, configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
   const bucket = configString(config, "terrarium_s3_bucket");
-  const endpoint = configString(config, "terrarium_s3_endpoint");
+  const endpoint = normalizeS3Endpoint(configString(config, "terrarium_s3_endpoint"));
   const prefix = configString(config, "terrarium_s3_prefix", "terrarium");
   const awsEnv = s3Env(config);
   const awsBase = ["aws"];

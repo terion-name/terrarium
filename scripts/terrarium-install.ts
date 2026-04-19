@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { stringify } from "yaml";
 import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
 import { verifyOidcConfig, verifyS3Config } from "./ctl/verify";
+import { normalizeS3Endpoint } from "./lib/common";
 
 const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
@@ -493,7 +494,7 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
  */
 async function promptAndVerifyS3(options: InstallOptions): Promise<void> {
   while (true) {
-    options.s3Endpoint = await promptText("S3 endpoint", options.s3Endpoint || "https://s3.amazonaws.com");
+    options.s3Endpoint = normalizeS3Endpoint(await promptText("S3 endpoint", options.s3Endpoint || "https://s3.amazonaws.com"));
     options.s3Bucket = await promptText("S3 bucket", options.s3Bucket);
     options.s3Region = await promptText("S3 region", options.s3Region || "us-east-1");
     options.s3Prefix = await promptText("S3 prefix", options.s3Prefix || "terrarium");
@@ -809,7 +810,7 @@ function validateNonInteractive(options: InstallOptions): void {
     if (!options.s3SecretKey) {
       fail("--s3-secret-key is required when S3 is enabled");
     }
-    options.s3Endpoint = options.s3Endpoint || "https://s3.amazonaws.com";
+    options.s3Endpoint = normalizeS3Endpoint(options.s3Endpoint || "https://s3.amazonaws.com");
     options.s3Region = options.s3Region || "us-east-1";
   }
 
@@ -1079,7 +1080,7 @@ export function registerInstallCommand(cli: CAC): void {
       options.storageSource = readCliOption(cliOptions, "storageSource");
       options.storageSize = readCliOption(cliOptions, "storageSize");
       options.enableS3 = Boolean(cliOptions.enableS3);
-      options.s3Endpoint = readCliOption(cliOptions, "s3Endpoint", ["s3-endpoint"]);
+      options.s3Endpoint = normalizeS3Endpoint(readCliOption(cliOptions, "s3Endpoint", ["s3-endpoint"]));
       options.s3Bucket = readCliOption(cliOptions, "s3Bucket", ["s3-bucket"]);
       options.s3Region = readCliOption(cliOptions, "s3Region", ["s3-region"]);
       options.s3Prefix = readCliOption(cliOptions, "s3Prefix", ["s3-prefix"]) || options.s3Prefix;
