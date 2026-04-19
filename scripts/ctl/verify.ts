@@ -28,6 +28,10 @@ export type OidcVerificationOptions = {
  *
  * Terrarium uses the CLI here because it already depends on it for backup
  * export/restore workflows and it gives us a provider-neutral test path.
+ *
+ * Noble no longer ships a usable `awscli` apt package, so this follows the
+ * AWS-documented Linux installer path directly instead of probing dead distro
+ * packages first.
  */
 async function ensureAwsCli(): Promise<void> {
   const check = await runAllowFailure(["bash", "-lc", "command -v aws >/dev/null 2>&1"]);
@@ -35,14 +39,54 @@ async function ensureAwsCli(): Promise<void> {
     return;
   }
 
-  const update = await runAllowFailure(["apt-get", "update", "-y"]);
-  if (update.exitCode !== 0) {
-    throw new Error(`failed to install awscli: ${update.stderr.trim() || update.stdout.trim() || "apt-get update failed"}`);
-  }
+  const fallbackArch = ({ x86_64: "x86_64", amd64: "x86_64", aarch64: "aarch64", arm64: "aarch64" } as Record<string, string>)[
+    process.arch
+  ] ?? process.arch;
+  const tempDir = mkdtempSync(join(tmpdir(), "terrarium-awscli-install-"));
+  const archivePath = join(tempDir, `awscliv2-${fallbackArch}.zip`);
 
-  const install = await runAllowFailure(["apt-get", "install", "-y", "awscli"]);
-  if (install.exitCode !== 0) {
-    throw new Error(`failed to install awscli: ${install.stderr.trim() || install.stdout.trim() || "apt-get install failed"}`);
+  try {
+    const update = await runAllowFailure(["apt-get", "update", "-y"]);
+    if (update.exitCode !== 0) {
+      throw new Error(update.stderr.trim() || update.stdout.trim() || "apt-get update failed");
+    }
+
+    const prereqs = await runAllowFailure(["apt-get", "install", "-y", "curl", "unzip"]);
+    if (prereqs.exitCode !== 0) {
+      throw new Error(prereqs.stderr.trim() || prereqs.stdout.trim() || "failed to install AWS CLI installer prerequisites");
+    }
+
+    const download = await runAllowFailure([
+      "curl",
+      "-fsSL",
+      `https://awscli.amazonaws.com/awscli-exe-linux-${fallbackArch}.zip`,
+      "-o",
+      archivePath
+    ]);
+    if (download.exitCode !== 0) {
+      throw new Error(download.stderr.trim() || download.stdout.trim() || "failed to download AWS CLI fallback archive");
+    }
+
+    const extract = await runAllowFailure(["unzip", "-q", archivePath, "-d", tempDir]);
+    if (extract.exitCode !== 0) {
+      throw new Error(extract.stderr.trim() || extract.stdout.trim() || "failed to extract AWS CLI fallback archive");
+    }
+
+    const fallbackInstall = await runAllowFailure([
+      join(tempDir, "aws", "install"),
+      "--bin-dir",
+      "/usr/local/bin",
+      "--install-dir",
+      "/usr/local/aws-cli",
+      "--update"
+    ]);
+    if (fallbackInstall.exitCode !== 0) {
+      throw new Error(fallbackInstall.stderr.trim() || fallbackInstall.stdout.trim() || "failed to install AWS CLI");
+    }
+  } catch (error) {
+    throw new Error(`failed to install awscli: ${String(error).replace(/^Error: /, "")}`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
