@@ -1,0 +1,127 @@
+name: integration-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_on_failure:
+        description: Leave infrastructure running for debugging
+        required: false
+        default: false
+        type: boolean
+      only:
+        description: Optional scenario filter
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      keep_on_failure:
+        required: false
+        type: boolean
+        default: false
+      only:
+        required: false
+        type: string
+        default: ""
+      release_preflight:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      HCLOUD_TOKEN:
+        required: true
+      HCLOUD_LOCATION:
+        required: true
+      HCLOUD_SERVER_TYPE:
+        required: true
+      HCLOUD_SSH_PRIVATE_KEY:
+        required: true
+      HCLOUD_SSH_PUBLIC_KEY:
+        required: true
+      DUCKDNS_DOMAIN:
+        required: true
+      DUCKDNS_TOKEN:
+        required: true
+      ZITADEL_CLOUD_ISSUER:
+        required: true
+      ZITADEL_CLOUD_PAT:
+        required: true
+      ZITADEL_CLOUD_ORG_ID:
+        required: false
+      S3_ENDPOINT:
+        required: true
+      S3_BUCKET:
+        required: true
+      S3_REGION:
+        required: true
+      S3_ACCESS_KEY:
+        required: true
+      S3_SECRET_KEY:
+        required: true
+      CIFS_ADDRESS:
+        required: true
+      CIFS_USERNAME:
+        required: true
+      CIFS_PASSWORD:
+        required: true
+      CIFS_HOST_PATH_BASE:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+    concurrency:
+      group: terrarium-integration-full
+      cancel-in-progress: false
+    env:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      HCLOUD_LOCATION: ${{ secrets.HCLOUD_LOCATION }}
+      HCLOUD_SERVER_TYPE: ${{ secrets.HCLOUD_SERVER_TYPE }}
+      HCLOUD_SSH_PRIVATE_KEY: ${{ secrets.HCLOUD_SSH_PRIVATE_KEY }}
+      HCLOUD_SSH_PUBLIC_KEY: ${{ secrets.HCLOUD_SSH_PUBLIC_KEY }}
+      DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
+      DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
+      ZITADEL_CLOUD_ISSUER: ${{ secrets.ZITADEL_CLOUD_ISSUER }}
+      ZITADEL_CLOUD_PAT: ${{ secrets.ZITADEL_CLOUD_PAT }}
+      ZITADEL_CLOUD_ORG_ID: ${{ secrets.ZITADEL_CLOUD_ORG_ID }}
+      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_REGION: ${{ secrets.S3_REGION }}
+      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      CIFS_ADDRESS: ${{ secrets.CIFS_ADDRESS }}
+      CIFS_USERNAME: ${{ secrets.CIFS_USERNAME }}
+      CIFS_PASSWORD: ${{ secrets.CIFS_PASSWORD }}
+      CIFS_HOST_PATH_BASE: ${{ secrets.CIFS_HOST_PATH_BASE }}
+      TERRARIUM_INTEGRATION_OUTPUT_DIR: ${{ github.workspace }}/tests/integration/output
+      KEEP_ON_FAILURE: ${{ inputs.keep_on_failure && 'true' || 'false' }}
+      RELEASE_PREFLIGHT: ${{ inputs.release_preflight && 'true' || 'false' }}
+      ONLY_SCENARIO: ${{ inputs.only }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install integration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client tar awscli
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+      - name: Run full suite
+        run: |
+          if [ -n "${ONLY_SCENARIO}" ]; then
+            bun run tests/integration/index.ts --suite full --release-preflight --only "${ONLY_SCENARIO}"
+          elif [ "${RELEASE_PREFLIGHT}" = "true" ]; then
+            bun run tests/integration/index.ts --suite full --release-preflight
+          else
+            bun run tests/integration/index.ts --suite full
+          fi
+      - name: Upload integration artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-full-artifacts
+          path: tests/integration/output
+          if-no-files-found: warn

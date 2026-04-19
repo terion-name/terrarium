@@ -9,6 +9,7 @@
     "types": ["bun-types"]
   },
   "include": [
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
   ]
 }

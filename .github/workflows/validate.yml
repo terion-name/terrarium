@@ -22,5 +22,6 @@ jobs:
         run: |
           bash -n install.sh
           test -x dist/terrariumctl
+          bun run tests/integration/index.ts --help
       - name: Ansible syntax
         run: ansible-playbook -i ansible/inventory.ini ansible/site.yml --syntax-check
