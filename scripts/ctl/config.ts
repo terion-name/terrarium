@@ -13,6 +13,7 @@ import {
 } from "./context";
 import { configBoolean, configString } from "../lib/common";
 import { writeFileSync } from "node:fs";
+import { verifyOidcConfig, verifyS3Config } from "./verify";
 
 /** Callback bundle used after any persisted config change that affects the running host. */
 export type ReconcileActions = {
@@ -111,6 +112,16 @@ export async function setDomainsCmd(
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
   }
 
+  if (!localIdpEnabled(config)) {
+    await verifyOidcConfig({
+      issuer: configString(config, "terrarium_oidc_issuer"),
+      clientId: configString(config, "terrarium_oidc_client_id"),
+      clientSecret: configString(config, "terrarium_oidc_client_secret"),
+      manageDomain: configString(config, "terrarium_manage_domain"),
+      lxdDomain: configString(config, "terrarium_lxd_domain")
+    });
+  }
+
   await confirmDestructive(
     `Apply domains: manage=${String(config.terrarium_manage_domain)}, proxy=${String(config.terrarium_proxy_domain)}, lxd=${String(config.terrarium_lxd_domain)}${
       config.terrarium_auth_domain ? `, auth=${String(config.terrarium_auth_domain)}` : ""
@@ -184,6 +195,13 @@ export async function setIdpCmd(options: SetIdpOptions, actions: ReconcileAction
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", clientId);
     setConfigValue(config, "terrarium_oidc_client_secret", clientSecret);
+    await verifyOidcConfig({
+      issuer: configString(config, "terrarium_oidc_issuer"),
+      clientId: configString(config, "terrarium_oidc_client_id"),
+      clientSecret: configString(config, "terrarium_oidc_client_secret"),
+      manageDomain: configString(config, "terrarium_manage_domain"),
+      lxdDomain: configString(config, "terrarium_lxd_domain")
+    });
   }
 
   await persistAndReconcile(config, nextMode === "local" ? "Switched IDP mode to local" : "Switched IDP mode to oidc", actions);
@@ -210,6 +228,14 @@ export async function setS3Cmd(options: SetS3Options, actions: ReconcileActions)
     if (!configString(config, "terrarium_s3_access_key")) throw new Error("S3 requires --s3-access-key");
     if (!configString(config, "terrarium_s3_secret_key")) throw new Error("S3 requires --s3-secret-key");
     if (!configString(config, "terrarium_s3_prefix")) setConfigValue(config, "terrarium_s3_prefix", "terrarium");
+    await verifyS3Config({
+      endpoint: configString(config, "terrarium_s3_endpoint"),
+      bucket: configString(config, "terrarium_s3_bucket"),
+      region: configString(config, "terrarium_s3_region", "us-east-1"),
+      prefix: configString(config, "terrarium_s3_prefix", "terrarium"),
+      accessKey: configString(config, "terrarium_s3_access_key"),
+      secretKey: configString(config, "terrarium_s3_secret_key")
+    });
   }
 
   await persistAndReconcile(config, nextEnabled ? "Updated S3 settings" : "Disabled S3 backups", actions);

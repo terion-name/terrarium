@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
 import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
+import { verifyOidcConfig, verifyS3Config } from "./ctl/verify";
 
 const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
@@ -93,6 +94,10 @@ function info(message: string): void {
 
 function success(message: string): void {
   console.log(chalk.green(`${PREFIX}: ${message}`));
+}
+
+function warn(message: string): void {
+  console.log(chalk.yellow(`${PREFIX}: ${message}`));
 }
 
 function printSplash(): void {
@@ -429,6 +434,121 @@ async function promptConfirm(message: string, defaultValue: boolean, assumeYes: 
   return await confirm({ message, default: defaultValue });
 }
 
+/**
+ * Collects external OIDC settings and verifies them before install continues.
+ *
+ * Interactive installs loop here until the issuer, client, and callback
+ * registration look valid. Non-interactive installs fail earlier in validation
+ * and then use the same verifier without a retry loop.
+ */
+async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<void> {
+  while (true) {
+    options.adminGroup = await promptText("Management admin group", options.adminGroup);
+    if (!options.adminGroup) {
+      warn("Management admin group is required for external OIDC mode.");
+      continue;
+    }
+
+    options.authDomain = "";
+    options.oidcIssuer = normalizeOidcIssuer(
+      await promptText("External OIDC issuer URL", options.oidcIssuer),
+      "--oidc"
+    );
+    options.oidcClientId = await promptText("External OIDC client ID", options.oidcClientId);
+    options.oidcClientSecret = await promptText("External OIDC client secret", options.oidcClientSecret);
+
+    if (!options.oidcClientId) {
+      warn("OIDC client ID is required for external OIDC mode.");
+      continue;
+    }
+    if (!options.oidcClientSecret) {
+      warn("OIDC client secret is required for external OIDC mode.");
+      continue;
+    }
+
+    try {
+      await verifyOidcConfig({
+        issuer: options.oidcIssuer,
+        clientId: options.oidcClientId,
+        clientSecret: options.oidcClientSecret,
+        manageDomain: options.manageDomain,
+        lxdDomain: options.lxdDomain
+      });
+      info("OIDC verification passed.");
+      return;
+    } catch (error) {
+      warn(`OIDC verification failed: ${String(error).replace(/^Error: /, "")}`);
+      if (!(await promptConfirm("Update the OIDC settings and try again?", true, false))) {
+        fail("aborted");
+      }
+    }
+  }
+}
+
+/**
+ * Collects S3 settings and verifies them with a real write/delete probe.
+ *
+ * This loop is intentionally strict because backup destinations are easy to
+ * misconfigure in ways that only show up when a restore is already urgent.
+ */
+async function promptAndVerifyS3(options: InstallOptions): Promise<void> {
+  while (true) {
+    options.s3Endpoint = await promptText("S3 endpoint", options.s3Endpoint || "https://s3.amazonaws.com");
+    options.s3Bucket = await promptText("S3 bucket", options.s3Bucket);
+    options.s3Region = await promptText("S3 region", options.s3Region || "us-east-1");
+    options.s3Prefix = await promptText("S3 prefix", options.s3Prefix || "terrarium");
+    options.s3AccessKey = await promptText("S3 access key", options.s3AccessKey);
+    options.s3SecretKey = await promptText("S3 secret key", options.s3SecretKey);
+
+    if (!options.s3Bucket || !options.s3AccessKey || !options.s3SecretKey) {
+      warn("S3 bucket, access key, and secret key are all required.");
+      continue;
+    }
+
+    try {
+      await verifyS3Config({
+        endpoint: options.s3Endpoint,
+        bucket: options.s3Bucket,
+        region: options.s3Region || "us-east-1",
+        prefix: options.s3Prefix || "terrarium",
+        accessKey: options.s3AccessKey,
+        secretKey: options.s3SecretKey
+      });
+      info("S3 verification passed.");
+      return;
+    } catch (error) {
+      warn(`S3 verification failed: ${String(error).replace(/^Error: /, "")}`);
+      if (!(await promptConfirm("Update the S3 settings and try again?", true, false))) {
+        fail("aborted");
+      }
+    }
+  }
+}
+
+/** Runs non-interactive preflight checks for integrations that commonly fail from configuration drift. */
+async function verifyConfiguredIntegrations(options: InstallOptions): Promise<void> {
+  if (options.idpMode === "oidc") {
+    await verifyOidcConfig({
+      issuer: options.oidcIssuer,
+      clientId: options.oidcClientId,
+      clientSecret: options.oidcClientSecret,
+      manageDomain: options.manageDomain,
+      lxdDomain: options.lxdDomain
+    });
+  }
+
+  if (options.enableS3) {
+    await verifyS3Config({
+      endpoint: options.s3Endpoint,
+      bucket: options.s3Bucket,
+      region: options.s3Region || "us-east-1",
+      prefix: options.s3Prefix || "terrarium",
+      accessKey: options.s3AccessKey,
+      secretKey: options.s3SecretKey
+    });
+  }
+}
+
 function applyPartitionCandidate(options: InstallOptions, candidate: PartitionCandidate): void {
   options.storageSource = candidate.source;
   if (candidate.kind === "free-space") {
@@ -516,23 +636,7 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
       "--zitadel-admin-email"
     );
   } else {
-    options.adminGroup = options.adminGroup || (await promptText("Management admin group", ""));
-    if (!options.adminGroup) {
-      fail("--admin-group is required for external OIDC mode");
-    }
-    options.authDomain = "";
-    options.oidcIssuer = normalizeOidcIssuer(
-      options.oidcIssuer || (await promptText("External OIDC issuer URL", "")),
-      "--oidc"
-    );
-    options.oidcClientId = options.oidcClientId || (await promptText("External OIDC client ID", ""));
-    options.oidcClientSecret = options.oidcClientSecret || (await promptText("External OIDC client secret", ""));
-    if (!options.oidcClientId) {
-      fail("--oidc-client is required for external OIDC mode");
-    }
-    if (!options.oidcClientSecret) {
-      fail("--oidc-secret is required for external OIDC mode");
-    }
+    await promptAndVerifyExternalOidc(options);
   }
 
   const disks = await listCandidateDisks();
@@ -615,12 +719,7 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
 
   if (await promptConfirm("Configure S3 archive backups?", false, options.assumeYes)) {
     options.enableS3 = true;
-    options.s3Endpoint = options.s3Endpoint || (await promptText("S3 endpoint", "https://s3.amazonaws.com"));
-    options.s3Bucket = options.s3Bucket || (await promptText("S3 bucket", ""));
-    options.s3Region = options.s3Region || (await promptText("S3 region", "us-east-1"));
-    options.s3Prefix = options.s3Prefix || (await promptText("S3 prefix", "terrarium"));
-    options.s3AccessKey = options.s3AccessKey || (await promptText("S3 access key", ""));
-    options.s3SecretKey = options.s3SecretKey || (await promptText("S3 secret key", ""));
+    await promptAndVerifyS3(options);
   }
 
   if (await promptConfirm("Configure syncoid replication to another ZFS host?", false, options.assumeYes)) {
@@ -888,6 +987,7 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   } else {
     await resolveNonInteractiveStorage(options);
     validateNonInteractive(options);
+    await verifyConfiguredIntegrations(options);
   }
 
   await confirmDestructiveActions(options);

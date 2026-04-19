@@ -6,7 +6,7 @@
 
 | Command | Arguments | Defaults | Meaning |
 | --- | --- | --- | --- |
-| `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host. |
+| `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host, including preflight verification for external OIDC and S3 when enabled. |
 | `terrariumctl status` | none | n/a | Shows Terrarium service status, management endpoints, IDP mode, admin group, and the oauth2-proxy state. |
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
@@ -17,10 +17,10 @@
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
 | `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
 | `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
-| `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, and re-runs reconciliation. |
+| `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, re-verifies external OIDC when needed, and re-runs reconciliation. |
 | `terrariumctl set emails` | optional flags | existing values when omitted | Updates Terrarium contact, ACME, and ZITADEL admin emails. |
-| `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, and reconfigures oauth2-proxy plus LXD management auth together. |
-| `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings and can enable or disable S3 exports. |
+| `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, verifies external OIDC settings when applicable, and reconfigures oauth2-proxy plus LXD management auth together. |
+| `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings, verifies the target with a real test operation, and can enable or disable S3 exports. |
 | `terrariumctl set syncoid` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates syncoid replication settings and can enable or disable syncoid. |
 
 ## install
@@ -54,6 +54,12 @@
 | `--s3-prefix` | prefix | no | `terrarium` | Sets the object prefix under the bucket. |
 | `--s3-access-key` | access key | yes if `--enable-s3` is set | none | Sets the S3 access key. |
 | `--s3-secret-key` | secret key | yes if `--enable-s3` is set | none | Sets the S3 secret key. |
+
+Install verification notes:
+
+- In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials.
+- In interactive mode, S3 is not accepted until Terrarium can reach the bucket and complete a write/delete verification object cycle.
+- In non-interactive mode, the same checks run once and the install exits on failure.
 | `--enable-syncoid` | none | no | disabled | Enables syncoid replication to a second ZFS host. |
 | `--syncoid-target` | host | yes if `--enable-syncoid` is set | none | Sets the remote SSH target for syncoid replication. |
 | `--syncoid-target-dataset` | dataset | yes if `--enable-syncoid` is set | `backup/terrarium` in interactive prompts | Sets the remote target dataset for syncoid replication. |
@@ -169,6 +175,7 @@ External OIDC notes:
   - `https://<manage-domain>/oauth2/callback`
   - `https://<lxd-domain>/oidc/callback`
 - The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
+- `terrariumctl set idp oidc ...` verifies the issuer, callback flow, and client credentials before persisting the new settings.
 
 Local ZITADEL notes:
 
@@ -188,6 +195,11 @@ Local ZITADEL notes:
 | `--s3-prefix` | prefix | no | existing configured value or `terrarium` | Updates the S3 object prefix. |
 | `--s3-access-key` | access key | required when S3 is enabled | existing configured value | Updates the S3 access key. |
 | `--s3-secret-key` | secret key | required when S3 is enabled | existing configured value | Updates the S3 secret key. |
+
+S3 verification notes:
+
+- When S3 is enabled or updated, Terrarium verifies the target bucket with a real write/delete probe.
+- This catches wrong endpoint, wrong credentials, wrong bucket, and missing write permissions before backup settings are persisted.
 
 ## set syncoid
 

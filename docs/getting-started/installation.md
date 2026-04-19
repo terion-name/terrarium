@@ -76,6 +76,13 @@ The installer will guide you through:
 - optional S3 archive backups
 - optional syncoid replication
 
+Terrarium also verifies the most failure-prone integrations while you configure them:
+
+- external OIDC settings are probed against the issuer, callback flow, and client credentials before install continues
+- S3 settings are tested with a real write/delete probe against the configured bucket
+
+In interactive mode, failed verification sends you back to the relevant prompts. In non-interactive mode, install exits with an error instead of persisting broken settings.
+
 ## After Install
 
 Terrarium keeps:
