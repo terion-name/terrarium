@@ -1,9 +1,18 @@
 import { defineConfig } from "vitepress";
 
+function resolveBase(): string {
+  const raw = (process.env.TERRARIUM_DOCS_BASE ?? "/terrarium/").trim();
+  if (!raw || raw === "/") {
+    return "/";
+  }
+  const withLeadingSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
+}
+
 export default defineConfig({
   title: "Terrarium",
   description: "Secure, rewindable VPS environments for agents, dev tools, and isolated apps.",
-  base: "./",
+  base: resolveBase(),
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {

@@ -18,6 +18,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      TERRARIUM_DOCS_BASE: ${{ vars.TERRARIUM_DOCS_BASE || '/terrarium/' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
