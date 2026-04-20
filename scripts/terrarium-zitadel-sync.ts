@@ -96,6 +96,10 @@ async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
     const result = await runAllowFailure([
       "curl",
       "-fsS",
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "20",
       `https://${authDomain}/.well-known/openid-configuration`
     ]);
     if (result.exitCode === 0) {
@@ -105,6 +109,27 @@ async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
   throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
+}
+
+async function runCurlAllowFailureWithRetry(
+  cmd: string[],
+  label: string
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  let lastResult = { exitCode: 1, stdout: "", stderr: `${label} failed` };
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(cmd);
+    if (result.exitCode === 0) {
+      return result;
+    }
+
+    lastResult = result;
+    const combined = `${result.stdout}\n${result.stderr}`.trim();
+    if (!isRetriableZitadelApiError(combined)) {
+      return result;
+    }
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  return lastResult;
 }
 
 function terraformResourceCount(tfDir: string): number {
@@ -211,7 +236,7 @@ async function lookupProjectId(authDomain: string, pat: string): Promise<string>
 }
 
 async function ensureProjectRole(authDomain: string, pat: string, projectId: string, adminGroup: string): Promise<void> {
-  const updateResult = await runAllowFailure(
+  const updateResult = await runCurlAllowFailureWithRetry(
     [
       "curl",
       "-fsS",
@@ -221,15 +246,20 @@ async function ensureProjectRole(authDomain: string, pat: string, projectId: str
       `Authorization: Bearer ${pat}`,
       "-H",
       "Content-Type: application/json",
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "20",
       `https://${authDomain}/management/v1/projects/${projectId}/roles/${encodeURIComponent(adminGroup)}`,
       "-d",
       JSON.stringify({ displayName: "Terrarium Management Admin", group: "Terrarium" })
-    ]
+    ],
+    "update Terrarium project role"
   );
   if (updateResult.exitCode === 0) {
     return;
   }
-  const createResult = await runAllowFailure(
+  const createResult = await runCurlAllowFailureWithRetry(
     [
       "curl",
       "-fsS",
@@ -239,10 +269,15 @@ async function ensureProjectRole(authDomain: string, pat: string, projectId: str
       `Authorization: Bearer ${pat}`,
       "-H",
       "Content-Type: application/json",
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "20",
       `https://${authDomain}/management/v1/projects/${projectId}/roles`,
       "-d",
       JSON.stringify({ roleKey: adminGroup, displayName: "Terrarium Management Admin", group: "Terrarium" })
-    ]
+    ],
+    "create Terrarium project role"
   );
   if (createResult.exitCode !== 0) {
     throw new Error(createResult.stderr.trim() || createResult.stdout.trim() || "failed to ensure Terrarium project role");

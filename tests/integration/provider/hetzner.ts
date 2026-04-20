@@ -3,7 +3,15 @@ import { IntegrationLogger } from "../lib/logger";
 
 type HetznerAction = { id: number; status: string };
 type HetznerServerResponse = { server: { id: number; name: string; public_net?: { ipv4?: { ip?: string } } }; action?: HetznerAction };
-type HetznerVolumeResponse = { volume: { id: number; name: string; linux_device?: string }; action?: HetznerAction };
+type HetznerVolumeResponse = {
+  volume: {
+    id: number;
+    name: string;
+    linux_device?: string;
+    server?: number | null;
+  };
+  action?: HetznerAction;
+};
 type HetznerSshKey = { id: number; name: string; public_key: string };
 type HetznerLocation = { name: string; network_zone?: string };
 
@@ -201,12 +209,31 @@ export class HetznerCloudProvider {
   }
 
   async deleteVolume(id: number): Promise<void> {
-    const response = await fetch(`https://api.hetzner.cloud/v1/volumes/${id}`, {
+    let response = await fetch(`https://api.hetzner.cloud/v1/volumes/${id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${this.token}` }
     });
+    if (response.status === 422) {
+      await this.detachVolumeIfNeeded(id);
+      response = await fetch(`https://api.hetzner.cloud/v1/volumes/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${this.token}` }
+      });
+    }
     if (!response.ok && response.status !== 404) {
       throw new Error(`failed to delete Hetzner volume ${id}: HTTP ${response.status}`);
+    }
+  }
+
+  private async detachVolumeIfNeeded(id: number): Promise<void> {
+    const volume = await this.request<{ volume: { id: number; server?: number | null } }>("GET", `/volumes/${id}`);
+    if (!volume.volume.server) {
+      return;
+    }
+
+    const response = await this.request<{ action?: HetznerAction }>("POST", `/volumes/${id}/actions/detach`);
+    if (response.action) {
+      await this.waitForAction(response.action.id);
     }
   }
 
