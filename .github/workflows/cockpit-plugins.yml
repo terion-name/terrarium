@@ -5,11 +5,7 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/cockpit-plugins.yml"
-      - "scripts/build-cockpit-plugins-bundle.sh"
       - "ansible/roles/cockpit_plugins/defaults/main.yml"
-    tags:
-      - "*"
   workflow_dispatch:
 permissions:
   contents: write

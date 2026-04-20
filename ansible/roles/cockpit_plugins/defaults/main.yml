@@ -17,7 +17,6 @@ terrarium_cockpit_plugin_build_deps:
 
 terrarium_cockpit_plugin_bundle_enabled: true
 terrarium_cockpit_plugin_bundle_repo: terion-name/terrarium
-terrarium_cockpit_plugin_bundle_main_ref: cockpit-plugins-main
 
 terrarium_cockpit_zfs_repo: https://github.com/45Drives/cockpit-zfs.git
 terrarium_cockpit_zfs_ref: v1.2.21-3

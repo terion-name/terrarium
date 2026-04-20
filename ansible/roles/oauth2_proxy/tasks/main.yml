@@ -115,7 +115,7 @@
             (
               terrarium_root_domain
               if terrarium_root_domain | length > 0
-              else (terrarium_public_ip | replace('.', '-') ~ '.traefik.me')
+              else (terrarium_manage_domain | regex_replace('^[^.]+\\.', ''))
             )
           }}
 

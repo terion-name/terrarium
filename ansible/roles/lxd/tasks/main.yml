@@ -1,7 +1,12 @@
 - name: Install LXD snap
-  ansible.builtin.command: "snap install lxd --channel={{ terrarium_lxd_snap_channel }}"
-  args:
-    creates: /snap/bin/lxd
+  community.general.snap:
+    name: lxd
+    channel: "{{ terrarium_lxd_snap_channel }}"
+    state: present
+  register: terrarium_lxd_snap_install
+  until: terrarium_lxd_snap_install is succeeded
+  retries: 30
+  delay: 10
 
 - name: Enable LXD UI
   ansible.builtin.command: snap set lxd ui.enable=true

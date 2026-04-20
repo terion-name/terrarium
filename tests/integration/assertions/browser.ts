@@ -8,24 +8,45 @@ type LoginOptions = {
 };
 
 async function firstVisible(page: Page, selectors: string[]): Promise<string> {
-  for (const selector of selectors) {
-    const locator = page.locator(selector).first();
-    if (await locator.isVisible().catch(() => false)) {
-      return selector;
+  const deadline = Date.now() + 30000;
+
+  while (Date.now() < deadline) {
+    for (const selector of selectors) {
+      const locator = page.locator(selector).first();
+      if (await locator.isVisible().catch(() => false)) {
+        return selector;
+      }
     }
+
+    await page.waitForTimeout(500);
   }
+
   throw new Error(`none of the selectors were visible: ${selectors.join(", ")}`);
 }
 
 async function clickFirst(page: Page, selectors: string[]): Promise<void> {
-  for (const selector of selectors) {
-    const locator = page.locator(selector).first();
-    if (await locator.isVisible().catch(() => false)) {
-      await locator.click();
-      return;
+  const deadline = Date.now() + 30000;
+
+  while (Date.now() < deadline) {
+    for (const selector of selectors) {
+      const locator = page.locator(selector).first();
+      if (await locator.isVisible().catch(() => false)) {
+        await locator.click();
+        return;
+      }
     }
+
+    await page.waitForTimeout(500);
   }
+
   throw new Error(`none of the click selectors were visible: ${selectors.join(", ")}`);
+}
+
+async function typeInto(page: Page, selector: string, value: string): Promise<void> {
+  const locator = page.locator(selector).first();
+  await locator.click();
+  await locator.clear();
+  await locator.pressSequentially(value, { delay: 30 });
 }
 
 /** Runs a browser flow and preserves screenshots for post-failure inspection. */
@@ -50,17 +71,19 @@ export async function loginThroughZitadel(url: string, user: OidcTestUser, optio
       'input[type="email"]',
       'input[name="loginName"]',
       'input[name="username"]',
-      'input[autocomplete="username"]'
+      'input[autocomplete="username"]',
+      '[data-testid="username-text-input"]'
     ]);
-    await page.fill(emailSelector, user.email);
+    await typeInto(page, emailSelector, user.email);
     await clickFirst(page, ['button:has-text("Next")', 'button:has-text("Continue")', 'button:has-text("Sign in")']);
 
     const passwordSelector = await firstVisible(page, [
       'input[type="password"]',
       'input[name="password"]',
-      'input[autocomplete="current-password"]'
+      'input[autocomplete="current-password"]',
+      '[data-testid="password-text-input"]'
     ]);
-    await page.fill(passwordSelector, user.password);
+    await typeInto(page, passwordSelector, user.password);
     await clickFirst(page, ['button:has-text("Sign in")', 'button:has-text("Login")', 'button:has-text("Continue")']);
 
     await page.waitForLoadState("networkidle", { timeout: 120000 });

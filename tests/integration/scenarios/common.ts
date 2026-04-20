@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
 import type { DomainBundle, ExternalOidcFixture, ManagedHost, ServerRecord, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
-import { expectHttpBodyContains, waitForHttpStatus } from "../assertions/http";
+import { expectHttpBodyContains, waitForHttpStatus, waitForHttpStatusInsecure } from "../assertions/http";
 import { expectCockpitLogin, expectProtectedRoute, expectTraefikDashboard } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
@@ -202,7 +202,7 @@ export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: str
 export async function waitForTerrariumPublicEndpoints(host: ManagedHost, includeAuth: boolean): Promise<void> {
   await waitForHttpStatus(`https://${host.domains.manage}`, [302, 303]);
   await waitForHttpStatus(`https://${host.domains.proxy}`, [302, 303]);
-  await waitForHttpStatus(`https://${host.domains.lxd}`, [200, 302]);
+  await waitForHttpStatusInsecure(`https://${host.domains.lxd}`, [200, 302]);
   if (includeAuth) {
     await waitForHttpStatus(`https://${host.domains.auth}/.well-known/openid-configuration`, [200]);
   }

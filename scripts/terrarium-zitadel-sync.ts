@@ -12,6 +12,23 @@ const DEFAULT_TOFU_IMAGE = "ghcr.io/opentofu/opentofu:1.10.6";
 const WAIT_INTERVAL_MS = 5000;
 const WAIT_ATTEMPTS = 36;
 
+function isRetriableZitadelApiError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return [
+    "failed to connect",
+    "connection refused",
+    "empty reply from server",
+    "timed out",
+    "timeout was reached",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "http 502",
+    "http 503",
+    "http 504"
+  ].some((needle) => lowered.includes(needle));
+}
+
 async function dockerRun(args: string[]): Promise<string> {
   return await runText(["docker", ...args], PREFIX);
 }
@@ -166,8 +183,22 @@ async function zitadelApi<T>(
   if (body !== undefined && method !== "GET") {
     cmd.push("-d", JSON.stringify(body));
   }
-  const stdout = await runText(cmd, PREFIX);
-  return JSON.parse(stdout) as T;
+
+  let lastError = "";
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(cmd);
+    if (result.exitCode === 0) {
+      return JSON.parse(result.stdout) as T;
+    }
+
+    lastError = result.stderr.trim() || result.stdout.trim() || `ZITADEL API ${method} ${path} failed`;
+    if (!isRetriableZitadelApiError(lastError)) {
+      throw new Error(lastError);
+    }
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+
+  throw new Error(`timed out waiting for ZITADEL API ${method} ${path}: ${lastError}`);
 }
 
 async function lookupProjectId(authDomain: string, pat: string): Promise<string> {
