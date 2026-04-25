@@ -1,5 +1,5 @@
 import { cac } from "cac";
-import { createContext } from "./context";
+import { createContext, type IntegrationContext } from "./context";
 import type { IntegrationCliOptions, SuiteName } from "./types";
 import { runSmokeSuite } from "./scenarios/smoke";
 import { runFullSuite } from "./scenarios/full";
@@ -13,9 +13,31 @@ cli
   .option("--keep-on-failure", "Skip teardown when a scenario fails")
   .option("--reuse-infra", "Reuse previously created infrastructure when supported")
   .option("--release-preflight", "Mark the run as a release-preflight invocation")
+  .option("--cleanup-only", "Clean resources from the existing output-dir manifest without provisioning")
   .help();
 
 try {
+  let context: IntegrationContext | undefined;
+  let cleanupStarted = false;
+
+  async function cleanupOnce(reason: string): Promise<void> {
+    if (!context || cleanupStarted) {
+      return;
+    }
+    cleanupStarted = true;
+    context.logger.warn(`running integration cleanup (${reason})`);
+    await context.runCleanup();
+  }
+
+  function installSignalHandler(signal: NodeJS.Signals): void {
+    process.on(signal, () => {
+      void (async () => {
+        await cleanupOnce(signal);
+        process.exit(signal === "SIGINT" ? 130 : 143);
+      })();
+    });
+  }
+
   const parsed = cli.parse();
   if ((parsed.options as Record<string, unknown>).help) {
     process.exit(0);
@@ -31,10 +53,19 @@ try {
     only: Array.isArray(options.only) ? (options.only as string[]) : options.only ? [String(options.only)] : [],
     keepOnFailure: Boolean(options.keepOnFailure),
     reuseInfra: Boolean(options.reuseInfra),
-    releasePreflight: Boolean(options.releasePreflight)
+    releasePreflight: Boolean(options.releasePreflight),
+    cleanupOnly: Boolean(options.cleanupOnly)
   };
 
-  const context = createContext(normalized);
+  context = createContext(normalized);
+  installSignalHandler("SIGINT");
+  installSignalHandler("SIGTERM");
+
+  if (normalized.cleanupOnly) {
+    await cleanupOnce("cleanup-only");
+    process.exit(0);
+  }
+
   await context.buildLinuxBundle();
 
   try {
@@ -49,7 +80,7 @@ try {
     }
   } finally {
     if (!context.config.keepOnFailure) {
-      await context.runCleanup();
+      await cleanupOnce("normal-exit");
     } else {
       context.logger.warn("KEEP_ON_FAILURE enabled, leaving infrastructure in place");
     }

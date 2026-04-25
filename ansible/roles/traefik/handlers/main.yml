@@ -7,9 +7,6 @@
     name: traefik
     state: restarted
 
-- name: reload traefik sync timer
+- name: reload traefik sync systemd
   ansible.builtin.systemd:
-    name: terrarium-traefik-sync.timer
-    enabled: true
-    state: restarted
     daemon_reload: true

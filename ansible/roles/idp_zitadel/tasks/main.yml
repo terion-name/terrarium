@@ -48,7 +48,10 @@
         creates: /etc/terrarium/secrets/zitadel_postgres_password
 
     - name: Generate ZITADEL bootstrap admin password
-      ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 > /etc/terrarium/secrets/zitadel_admin_password"
+      ansible.builtin.shell: |
+        umask 077
+        pw="$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)!$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 28)"
+        printf '%s' "$pw" > /etc/terrarium/secrets/zitadel_admin_password
       args:
         creates: /etc/terrarium/secrets/zitadel_admin_password
 

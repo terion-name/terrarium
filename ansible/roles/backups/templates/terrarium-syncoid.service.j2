@@ -5,4 +5,5 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/syncoid --recursive --no-sync-snap --sshkey {{ terrarium_syncoid_ssh_key }} {{ terrarium_lxd_pool_name }}/containers {{ terrarium_syncoid_target }}:{{ terrarium_syncoid_target_dataset }}
+Environment=HOME=/root
+ExecStart=/usr/sbin/syncoid --recursive --sshkey {{ terrarium_syncoid_ssh_key }} {{ terrarium_lxd_pool_name }}/containers {{ terrarium_syncoid_target }}:{{ terrarium_syncoid_target_dataset }}

@@ -38,8 +38,15 @@ export function writeIfChanged(path: string, content: string): boolean {
   if (current === content) {
     return false;
   }
-  mkdirSync(dirname(path), { recursive: true });
-  const tempPath = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  const targetDir = dirname(path);
+  mkdirSync(targetDir, { recursive: true });
+
+  // Write into a sibling temp directory outside the watched target directory so
+  // file watchers such as Traefik do not try to parse half-written temp files.
+  const parentDir = dirname(targetDir);
+  const tempRoot = join(parentDir === targetDir ? targetDir : parentDir, ".codex-tmp");
+  mkdirSync(tempRoot, { recursive: true });
+  const tempPath = join(tempRoot, `.${basename(path)}.${process.pid}.tmp`);
   writeFileSync(tempPath, content, "utf8");
   renameSync(tempPath, path);
   return true;
@@ -91,8 +98,14 @@ async function shellCommand(cmd: string[], options: CommandOptions = {}) {
 export async function runText(cmd: string[], prefix: string, options: CommandOptions = {}): Promise<string> {
   const proc = await shellCommand(cmd, options);
   if (proc.exitCode !== 0) {
+    const stdout = proc.stdout.toString().trim();
     const stderr = proc.stderr.toString().trim();
-    const rendered = stderr || `command failed: ${cmd.join(" ")}`;
+    const details = [
+      `command failed (${proc.exitCode}): ${cmd.join(" ")}`,
+      stdout ? `stdout:\n${stdout}` : "",
+      stderr ? `stderr:\n${stderr}` : ""
+    ].filter(Boolean);
+    const rendered = details.join("\n\n");
     fail(prefix, rendered);
   }
   return proc.stdout.toString();

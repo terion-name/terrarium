@@ -110,14 +110,51 @@
               else terrarium_oidc_issuer
             ) | default('', true)
           }}
-        terrarium_oauth2_proxy_cookie_domain_effective: >-
-          {{
-            (
-              terrarium_root_domain
-              if terrarium_root_domain | length > 0
-              else (terrarium_manage_domain | regex_replace('^[^.]+\\.', ''))
-            )
-          }}
+
+    - name: Derive oauth2-proxy cookie domain
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+              import sys
+
+              explicit_root = sys.argv[1].strip()
+              domains = [item.strip() for item in sys.argv[2:] if item.strip()]
+              if explicit_root:
+                  print(explicit_root)
+                  raise SystemExit(0)
+              if not domains:
+                  print("")
+                  raise SystemExit(0)
+
+              suffix = domains[0].split(".")
+              for domain in domains[1:]:
+                  labels = domain.split(".")
+                  common = []
+                  for left, right in zip(reversed(suffix), reversed(labels)):
+                      if left != right:
+                          break
+                      common.append(left)
+                  suffix = list(reversed(common))
+                  if not suffix:
+                      break
+
+              candidate = ".".join(suffix)
+              if not candidate or candidate == domains[0]:
+                  labels = domains[0].split(".")
+                  candidate = ".".join(labels[1:]) if len(labels) > 1 else domains[0]
+              print(candidate)
+          - "{{ terrarium_root_domain }}"
+          - "{{ terrarium_manage_domain }}"
+          - "{{ terrarium_proxy_domain }}"
+          - "{{ terrarium_auth_domain | default('') }}"
+      register: terrarium_oauth2_proxy_cookie_domain_raw
+      changed_when: false
+
+    - name: Persist derived oauth2-proxy cookie domain
+      ansible.builtin.set_fact:
+        terrarium_oauth2_proxy_cookie_domain_effective: "{{ terrarium_oauth2_proxy_cookie_domain_raw.stdout | trim }}"
 
     - name: Assert oauth2-proxy client credentials are present
       ansible.builtin.assert:
@@ -125,8 +162,9 @@
           - terrarium_oauth2_proxy_client_id_effective | length > 0
           - terrarium_oauth2_proxy_client_secret_effective | length > 0
           - terrarium_oauth2_proxy_oidc_issuer_effective | length > 0
+          - terrarium_oauth2_proxy_cookie_domain_effective | length > 0
           - terrarium_admin_group | length > 0
-        fail_msg: oauth2-proxy requires an OIDC issuer, client credentials, and terrarium_admin_group
+        fail_msg: oauth2-proxy requires an OIDC issuer, client credentials, a cookie domain, and terrarium_admin_group
 
     - name: Render oauth2-proxy config
       ansible.builtin.template:

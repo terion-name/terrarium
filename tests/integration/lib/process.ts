@@ -1,9 +1,8 @@
-import { $ } from "bun";
-
 export type CommandOptions = {
   cwd?: string;
   env?: Record<string, string>;
   stdin?: string;
+  timeoutMs?: number;
 };
 
 export type CommandResult = {
@@ -12,7 +11,18 @@ export type CommandResult = {
   stderr: string;
 };
 
-$.throws(false);
+function renderCommandFailure(cmd: string[], result: CommandResult): string {
+  const parts = [`command failed (${result.exitCode}): ${cmd.join(" ")}`];
+  const stdout = result.stdout.trim();
+  const stderr = result.stderr.trim();
+  if (stdout) {
+    parts.push(`stdout:\n${stdout}`);
+  }
+  if (stderr) {
+    parts.push(`stderr:\n${stderr}`);
+  }
+  return parts.join("\n\n");
+}
 
 /**
  * Runs a command as argv, captures stdout/stderr, and never throws on non-zero exit.
@@ -21,23 +31,48 @@ $.throws(false);
  * remote helper, and assertion can decide whether a failure is expected or fatal.
  */
 export async function runAllowFailure(cmd: string[], options: CommandOptions = {}): Promise<CommandResult> {
-  const proc = $`${cmd}`.quiet().nothrow();
-  if (options.cwd) {
-    proc.cwd(options.cwd);
-  }
-  if (options.env) {
-    proc.env(options.env);
-  }
+  const proc = Bun.spawn({
+    cmd,
+    cwd: options.cwd,
+    env: options.env ? { ...process.env, ...options.env } : process.env,
+    stdin: options.stdin !== undefined ? "pipe" : "ignore",
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+
+  let timedOut = false;
+  let killTimer: Timer | undefined;
+  const timeout =
+    options.timeoutMs !== undefined
+      ? setTimeout(() => {
+          timedOut = true;
+          proc.kill("SIGTERM");
+          killTimer = setTimeout(() => proc.kill("SIGKILL"), 2000);
+        }, options.timeoutMs)
+      : undefined;
+
   if (options.stdin !== undefined) {
-    const writer = proc.stdin.getWriter();
-    await writer.write(new TextEncoder().encode(options.stdin));
-    await writer.close();
+    proc.stdin?.write(options.stdin);
+    proc.stdin?.end();
   }
-  const result = await proc;
+
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text()
+  ]);
+
+  if (timeout) {
+    clearTimeout(timeout);
+  }
+  if (killTimer) {
+    clearTimeout(killTimer);
+  }
+
   return {
-    exitCode: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString()
+    exitCode,
+    stdout,
+    stderr: timedOut ? `${stderr}${stderr ? "\n" : ""}command timed out after ${options.timeoutMs}ms` : stderr
   };
 }
 
@@ -45,7 +80,7 @@ export async function runAllowFailure(cmd: string[], options: CommandOptions = {
 export async function run(cmd: string[], options: CommandOptions = {}): Promise<string> {
   const result = await runAllowFailure(cmd, options);
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `command failed: ${cmd.join(" ")}`);
+    throw new Error(renderCommandFailure(cmd, result));
   }
   return result.stdout;
 }

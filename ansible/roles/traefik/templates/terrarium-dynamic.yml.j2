@@ -68,6 +68,34 @@ http:
       tls:
         certResolver: letsencrypt
 {% if terrarium_idp_mode == 'local' %}
+    zitadel-root-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`) && Path(`/`)
+      middlewares:
+        - zitadel-root-rewrite
+      service: zitadel-login
+      priority: 400
+    zitadel-login-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/ui/v2/login`)
+      service: zitadel-login
+      priority: 250
+    zitadel-api-alias-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/api`)
+      middlewares:
+        - zitadel-strip-api
+      service: zitadel-api
+      priority: 200
+    zitadel-canonical-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`)
+      service: zitadel-api
+      priority: 100
     zitadel-root:
       entryPoints:
         - websecure

@@ -14,6 +14,12 @@ type HetznerVolumeResponse = {
 };
 type HetznerSshKey = { id: number; name: string; public_key: string };
 type HetznerLocation = { name: string; network_zone?: string };
+export type HetznerSshKeyHandle = { id: number; reused: boolean };
+export type HetznerServerCreated = { id: number; name: string };
+export type HetznerVolumeCreated = { id: number; name: string; linuxDevice?: string };
+
+const VOLUME_DELETE_ATTEMPTS = 12;
+const VOLUME_DELETE_RETRY_MS = 5000;
 
 function normalizePublicKey(value: string): string {
   return value
@@ -33,6 +39,8 @@ export class HetznerCloudProvider {
   private readonly token: string;
   private readonly logger: IntegrationLogger;
   private readonly requestedLocation: string;
+  private readonly requestTimeoutMs = 30000;
+  private readonly maxAttempts = 8;
   private resolvedLocationName = "";
 
   constructor(config: IntegrationConfig, logger: IntegrationLogger) {
@@ -41,16 +49,35 @@ export class HetznerCloudProvider {
     this.requestedLocation = config.hcloudLocation.trim();
   }
 
+  private async requestResponse(method: string, path: string, body?: unknown): Promise<Response> {
+    const url = `https://api.hetzner.cloud/v1${path}`;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      this.logger.info(`hetzner ${method} ${path}${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json"
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(this.requestTimeoutMs)
+        });
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= this.maxAttempts) {
+          break;
+        }
+        await Bun.sleep(attempt * 2000);
+      }
+    }
+    throw new Error(`Hetzner API ${method} ${path} failed after retries: ${String(lastError)}`);
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    this.logger.info(`hetzner ${method} ${path}`);
-    const response = await fetch(`https://api.hetzner.cloud/v1${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json"
-      },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
+    const response = await this.requestResponse(method, path, body);
     if (!response.ok) {
       throw new Error(`Hetzner API ${method} ${path} failed with HTTP ${response.status}: ${await response.text()}`);
     }
@@ -83,22 +110,15 @@ export class HetznerCloudProvider {
     throw new Error(`unable to resolve Hetzner location ${this.requestedLocation}`);
   }
 
-  async createSshKey(name: string, publicKey: string): Promise<number> {
+  async createSshKey(name: string, publicKey: string): Promise<HetznerSshKeyHandle> {
     const normalized = normalizePublicKey(publicKey);
-    const response = await fetch("https://api.hetzner.cloud/v1/ssh_keys", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name,
-        public_key: normalized
-      })
+    const response = await this.requestResponse("POST", "/ssh_keys", {
+      name,
+      public_key: normalized
     });
     if (response.ok) {
       const payload = (await response.json()) as { ssh_key: { id: number } };
-      return payload.ssh_key.id;
+      return { id: payload.ssh_key.id, reused: false };
     }
 
     const body = await response.text();
@@ -106,7 +126,7 @@ export class HetznerCloudProvider {
       const existing = await this.findSshKeyByPublicKey(normalized);
       if (existing) {
         this.logger.info(`reuse existing Hetzner SSH key ${existing.id} (${existing.name})`);
-        return existing.id;
+        return { id: existing.id, reused: true };
       }
     }
     throw new Error(`Hetzner API POST /ssh_keys failed with HTTP ${response.status}: ${body}`);
@@ -119,10 +139,7 @@ export class HetznerCloudProvider {
   }
 
   async deleteSshKey(id: number): Promise<void> {
-    const response = await fetch(`https://api.hetzner.cloud/v1/ssh_keys/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.token}` }
-    });
+    const response = await this.requestResponse("DELETE", `/ssh_keys/${id}`);
     if (!response.ok && response.status !== 404) {
       throw new Error(`failed to delete Hetzner SSH key ${id}: HTTP ${response.status}`);
     }
@@ -133,7 +150,8 @@ export class HetznerCloudProvider {
     serverType: string,
     location: string,
     sshKeyIds: number[],
-    labels: Record<string, string>
+    labels: Record<string, string>,
+    onCreated?: (server: HetznerServerCreated) => void | Promise<void>
   ): Promise<ServerRecord> {
     const resolvedLocation = await this.resolveLocationName();
     const response = await this.request<HetznerServerResponse>("POST", "/servers", {
@@ -145,35 +163,50 @@ export class HetznerCloudProvider {
       labels
     });
     if (response.action) {
-      await this.waitForAction(response.action.id);
+      this.logger.info(
+        `created Hetzner server ${response.server.id} with action ${response.action.id}; waiting for server readiness instead of action completion`
+      );
     }
+    await onCreated?.({ id: response.server.id, name: response.server.name });
     return await this.waitForServer(response.server.id);
   }
 
   async waitForServer(id: number, timeoutMs = 240000): Promise<ServerRecord> {
     const deadline = Date.now() + timeoutMs;
+    let lastError = "";
     while (Date.now() < deadline) {
-      const response = await this.request<{ server: { id: number; name: string; public_net?: { ipv4?: { ip?: string } } } }>("GET", `/servers/${id}`);
-      const ip = response.server.public_net?.ipv4?.ip;
-      if (ip) {
-        return { id: response.server.id, name: response.server.name, ipv4: ip };
+      try {
+        const response = await this.request<{ server: { id: number; name: string; public_net?: { ipv4?: { ip?: string } } } }>(
+          "GET",
+          `/servers/${id}`
+        );
+        const ip = response.server.public_net?.ipv4?.ip;
+        if (ip) {
+          return { id: response.server.id, name: response.server.name, ipv4: ip };
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
       }
       await Bun.sleep(3000);
     }
-    throw new Error(`timed out waiting for Hetzner server ${id} IPv4`);
+    const suffix = lastError ? `; last error: ${lastError}` : "";
+    throw new Error(`timed out waiting for Hetzner server ${id} IPv4${suffix}`);
   }
 
   async deleteServer(id: number): Promise<void> {
-    const response = await fetch(`https://api.hetzner.cloud/v1/servers/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.token}` }
-    });
+    const response = await this.requestResponse("DELETE", `/servers/${id}`);
     if (!response.ok && response.status !== 404) {
       throw new Error(`failed to delete Hetzner server ${id}: HTTP ${response.status}`);
     }
   }
 
-  async createVolume(name: string, sizeGb: number, location: string, labels: Record<string, string>): Promise<VolumeRecord> {
+  async createVolume(
+    name: string,
+    sizeGb: number,
+    location: string,
+    labels: Record<string, string>,
+    onCreated?: (volume: HetznerVolumeCreated) => void | Promise<void>
+  ): Promise<VolumeRecord> {
     const resolvedLocation = await this.resolveLocationName();
     const response = await this.request<HetznerVolumeResponse>("POST", "/volumes", {
       name,
@@ -181,6 +214,11 @@ export class HetznerCloudProvider {
       location: resolvedLocation || location,
       labels,
       format: ""
+    });
+    await onCreated?.({
+      id: response.volume.id,
+      name: response.volume.name,
+      linuxDevice: response.volume.linux_device
     });
     if (response.action) {
       await this.waitForAction(response.action.id);
@@ -198,43 +236,108 @@ export class HetznerCloudProvider {
       automount: false
     });
     if (response.action) {
-      await this.waitForAction(response.action.id);
+      this.logger.info(`attaching Hetzner volume ${volumeId} with action ${response.action.id}; waiting for volume state instead of action completion`);
     }
-    const volume = await this.request<{ volume: { id: number; name: string; linux_device?: string } }>("GET", `/volumes/${volumeId}`);
-    return {
-      id: volume.volume.id,
-      name: volume.volume.name,
-      linuxDevice: volume.volume.linux_device
-    };
+    return await this.waitForAttachedVolume(volumeId, serverId);
   }
 
   async deleteVolume(id: number): Promise<void> {
-    let response = await fetch(`https://api.hetzner.cloud/v1/volumes/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.token}` }
-    });
-    if (response.status === 422) {
-      await this.detachVolumeIfNeeded(id);
-      response = await fetch(`https://api.hetzner.cloud/v1/volumes/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${this.token}` }
-      });
+    let lastFailure = "";
+    for (let attempt = 1; attempt <= VOLUME_DELETE_ATTEMPTS; attempt += 1) {
+      const response = await this.requestResponse("DELETE", `/volumes/${id}`);
+      if (response.ok || response.status === 404) {
+        return;
+      }
+
+      const body = await response.text();
+      lastFailure = `HTTP ${response.status}${body ? `: ${body}` : ""}`;
+      if (response.status === 422) {
+        const detachState = await this.detachVolumeIfNeeded(id);
+        if (detachState === "missing") {
+          return;
+        }
+        this.logger.info(`Hetzner volume ${id} delete blocked by attachment (${detachState}); retrying`);
+        await Bun.sleep(VOLUME_DELETE_RETRY_MS);
+        continue;
+      }
+
+      if (this.isLockedResponse(response.status, body) && attempt < VOLUME_DELETE_ATTEMPTS) {
+        this.logger.info(`Hetzner volume ${id} delete is locked; retrying after provider settles`);
+        await Bun.sleep(VOLUME_DELETE_RETRY_MS);
+        continue;
+      }
+
+      throw new Error(`failed to delete Hetzner volume ${id}: ${lastFailure}`);
     }
-    if (!response.ok && response.status !== 404) {
-      throw new Error(`failed to delete Hetzner volume ${id}: HTTP ${response.status}`);
-    }
+
+    throw new Error(`failed to delete Hetzner volume ${id} after retries: ${lastFailure}`);
   }
 
-  private async detachVolumeIfNeeded(id: number): Promise<void> {
-    const volume = await this.request<{ volume: { id: number; server?: number | null } }>("GET", `/volumes/${id}`);
-    if (!volume.volume.server) {
-      return;
+  private async detachVolumeIfNeeded(id: number): Promise<"already-detached" | "detaching" | "locked" | "missing"> {
+    const volumeResponse = await this.requestResponse("GET", `/volumes/${id}`);
+    if (volumeResponse.status === 404) {
+      return "missing";
+    }
+    if (!volumeResponse.ok) {
+      const body = await volumeResponse.text();
+      if (this.isLockedResponse(volumeResponse.status, body)) {
+        return "locked";
+      }
+      throw new Error(`Hetzner API GET /volumes/${id} failed with HTTP ${volumeResponse.status}: ${body}`);
     }
 
-    const response = await this.request<{ action?: HetznerAction }>("POST", `/volumes/${id}/actions/detach`);
-    if (response.action) {
-      await this.waitForAction(response.action.id);
+    const volume = (await volumeResponse.json()) as { volume: { id: number; server?: number | null } };
+    if (!volume.volume.server) {
+      return "already-detached";
     }
+
+    const detachResponse = await this.requestResponse("POST", `/volumes/${id}/actions/detach`);
+    if (detachResponse.status === 404) {
+      return "missing";
+    }
+    const body = await detachResponse.text();
+    if (!detachResponse.ok) {
+      if (this.isLockedResponse(detachResponse.status, body)) {
+        return "locked";
+      }
+      throw new Error(`Hetzner API POST /volumes/${id}/actions/detach failed with HTTP ${detachResponse.status}: ${body}`);
+    }
+
+    const response = body ? (JSON.parse(body) as { action?: HetznerAction }) : {};
+    if (!response.action) {
+      return "detaching";
+    }
+    await this.waitForAction(response.action.id);
+    return "detaching";
+  }
+
+  private isLockedResponse(status: number, body: string): boolean {
+    return status === 423 || body.includes('"code":"locked"') || body.includes('"code": "locked"');
+  }
+
+  private async waitForAttachedVolume(volumeId: number, serverId: number, timeoutMs = 240000): Promise<VolumeRecord> {
+    const deadline = Date.now() + timeoutMs;
+    let lastError = "";
+    while (Date.now() < deadline) {
+      try {
+        const volume = await this.request<{ volume: { id: number; name: string; linux_device?: string; server?: number | null } }>(
+          "GET",
+          `/volumes/${volumeId}`
+        );
+        if (volume.volume.server === serverId && volume.volume.linux_device) {
+          return {
+            id: volume.volume.id,
+            name: volume.volume.name,
+            linuxDevice: volume.volume.linux_device
+          };
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+      await Bun.sleep(3000);
+    }
+    const suffix = lastError ? `; last error: ${lastError}` : "";
+    throw new Error(`timed out waiting for Hetzner volume ${volumeId} to attach to server ${serverId}${suffix}`);
   }
 
   private async waitForAction(actionId: number, timeoutMs = 240000): Promise<void> {

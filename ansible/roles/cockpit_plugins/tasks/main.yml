@@ -59,6 +59,22 @@
     - terrarium_cockpit_plugin_bundle_enabled
     - terrarium_cockpit_plugin_bundle_arch | length > 0
 
+- name: Check downloaded cockpit-zfs bundle
+  ansible.builtin.stat:
+    path: "{{ terrarium_cockpit_zfs_bundle_download.dest }}"
+  register: terrarium_cockpit_zfs_bundle_file
+  when:
+    - terrarium_cockpit_zfs_bundle_download is defined
+    - terrarium_cockpit_zfs_bundle_download.dest is defined
+
+- name: Check downloaded cockpit-s3 bundle
+  ansible.builtin.stat:
+    path: "{{ terrarium_cockpit_s3_bundle_download.dest }}"
+  register: terrarium_cockpit_s3_bundle_file
+  when:
+    - terrarium_cockpit_s3_bundle_download is defined
+    - terrarium_cockpit_s3_bundle_download.dest is defined
+
 - name: Determine whether prebuilt cockpit-zfs bundle is usable
   ansible.builtin.set_fact:
     terrarium_cockpit_zfs_bundle_usable: >-
@@ -66,6 +82,8 @@
         terrarium_cockpit_zfs_bundle_download is defined
         and terrarium_cockpit_zfs_bundle_download is succeeded
         and terrarium_cockpit_zfs_bundle_download.dest is defined
+        and terrarium_cockpit_zfs_bundle_file.stat.exists | default(false)
+        and (terrarium_cockpit_zfs_bundle_file.stat.size | default(0) | int) > 0
       }}
 
 - name: Determine whether prebuilt cockpit-s3 bundle is usable
@@ -75,6 +93,8 @@
         terrarium_cockpit_s3_bundle_download is defined
         and terrarium_cockpit_s3_bundle_download is succeeded
         and terrarium_cockpit_s3_bundle_download.dest is defined
+        and terrarium_cockpit_s3_bundle_file.stat.exists | default(false)
+        and (terrarium_cockpit_s3_bundle_file.stat.size | default(0) | int) > 0
       }}
 
 - name: Install prebuilt cockpit-zfs bundle

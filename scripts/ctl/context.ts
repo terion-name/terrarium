@@ -139,10 +139,31 @@ export function setConfigValue(config: MutableConfig, key: string, nextValue: un
  * dashed spellings in different situations.
  */
 export function cliOption(options: Record<string, unknown>, key: string, aliases: string[] = []): string | undefined {
-  for (const candidate of [key, ...aliases]) {
+  const candidates = [key, ...aliases];
+  for (const candidate of candidates) {
     const nextValue = options[candidate];
     if (typeof nextValue === "string") {
       return nextValue;
+    }
+    if (typeof nextValue === "number") {
+      return rawCliOption(candidates) ?? String(nextValue);
+    }
+  }
+  return undefined;
+}
+
+function rawCliOption(names: string[]): string | undefined {
+  const longNames = new Set(names.map((name) => `--${name}`));
+  const argv = process.argv;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (longNames.has(arg)) {
+      return argv[index + 1];
+    }
+    for (const longName of longNames) {
+      if (arg.startsWith(`${longName}=`)) {
+        return arg.slice(longName.length + 1);
+      }
     }
   }
   return undefined;

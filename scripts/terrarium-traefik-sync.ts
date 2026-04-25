@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { URL } from "node:url";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
 
 const PREFIX = "terrariumctl proxy sync";
@@ -11,7 +12,15 @@ const OAUTH2_PROXY_COOKIE_SECRET_PATH = "/etc/terrarium/secrets/oauth2_proxy_coo
 const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
-const ROUTE_AUTH_GROUP_BASE_PORT = 4200;
+const ROUTE_AUTH_READY_ATTEMPTS = 12;
+const ROUTE_AUTH_READY_INTERVAL_MS = 1000;
+const ZITADEL_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
+const ZITADEL_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
+const ZITADEL_BOOTSTRAP_CERT_PATH = "/etc/traefik/bootstrap-certs/terrarium-bootstrap.crt";
+const ZITADEL_ROUTES_APP_NAME = "terrarium-routes";
+const ZITADEL_WAIT_ATTEMPTS = 12;
+const ZITADEL_WAIT_INTERVAL_MS = 3000;
+const ZITADEL_HTTP_STATUS_MARKER = "__terrarium_http_status__:";
 
 type LxcAddress = {
   family?: string;
@@ -58,13 +67,139 @@ type TransportProxyItem = { kind: "tcp" | "udp"; hostPort: number; containerPort
 
 type RouteAuthProfile = {
   key: string;
+  host: string;
   groups: string[];
   port: number;
+  proxyPrefix: string;
   callbackPath: string;
   middlewareName: string;
   serviceName: string;
   containerName: string;
 };
+
+type RouteAuthComposeArtifacts = {
+  composeYaml: string;
+  profileConfigs: Record<string, string>;
+};
+
+type CommandResult = Awaited<ReturnType<typeof runAllowFailure>>;
+
+type ProxySyncErrorGroups = {
+  dynamicErrors?: string[];
+  ufwErrors?: string[];
+  localRouteClientErrors?: string[];
+  routeAuthErrors?: string[];
+};
+
+type ZitadelProject = { id?: string; name?: string };
+type ZitadelApp = { id?: string; name?: string };
+
+function compactCommandOutput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "<empty>";
+  }
+  return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}...` : trimmed;
+}
+
+function formatCommandResult(result: Pick<CommandResult, "stdout" | "stderr">): string {
+  return `last stderr/stdout: stderr=${JSON.stringify(compactCommandOutput(result.stderr))} stdout=${JSON.stringify(compactCommandOutput(result.stdout))}`;
+}
+
+function formatRouteAuthProfile(profile: Pick<RouteAuthProfile, "host" | "groups" | "port">): string {
+  const groups = profile.groups.length > 0 ? profile.groups.join(",") : "<none>";
+  return `host=${profile.host} groups=${groups} port=${profile.port}`;
+}
+
+export function formatRouteAuthReadinessError(
+  profile: Pick<RouteAuthProfile, "host" | "groups" | "port">,
+  endpoint: string,
+  result: Pick<CommandResult, "stdout" | "stderr">
+): string {
+  return `route auth listener failed readiness probe for ${formatRouteAuthProfile(profile)} at ${endpoint}: ${formatCommandResult(result)}`;
+}
+
+function formatRouteAuthCommandFailure(message: string, result: Pick<CommandResult, "stdout" | "stderr">): string {
+  return `${message}: ${formatCommandResult(result)}`;
+}
+
+function appendLabeledErrors(output: string[], label: string, errors: string[] | undefined): void {
+  for (const error of errors ?? []) {
+    output.push(`${label}: ${error}`);
+  }
+}
+
+export function buildProxySyncFailureMessage(errorGroups: ProxySyncErrorGroups): string | null {
+  const errors: string[] = [];
+  appendLabeledErrors(errors, "dynamic config", errorGroups.dynamicErrors);
+  appendLabeledErrors(errors, "ufw", errorGroups.ufwErrors);
+  appendLabeledErrors(errors, "local route client", errorGroups.localRouteClientErrors);
+  appendLabeledErrors(errors, "route auth", errorGroups.routeAuthErrors);
+
+  if (errors.length === 0) {
+    return null;
+  }
+
+  return `proxy sync failed:\n${errors.map((error) => `- ${error}`).join("\n")}`;
+}
+
+export function assertProxySyncSucceeded(errorGroups: ProxySyncErrorGroups): void {
+  const message = buildProxySyncFailureMessage(errorGroups);
+  if (message) {
+    throw new Error(message);
+  }
+}
+
+function isRetriableZitadelApiError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return [
+    "failed to connect",
+    "connection refused",
+    "empty reply from server",
+    "timed out",
+    "timeout was reached",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "404 page not found",
+    "http 400",
+    "http 404",
+    "http 502",
+    "http 503",
+    "http 504"
+  ].some((needle) => lowered.includes(needle));
+}
+
+export function parseZitadelHttpOutput(raw: string): { status: number; body: string } {
+  const markerIndex = raw.lastIndexOf(ZITADEL_HTTP_STATUS_MARKER);
+  if (markerIndex === -1) {
+    throw new Error("ZITADEL API response did not include an HTTP status marker");
+  }
+
+  const body = raw.slice(0, markerIndex).replace(/\n$/, "");
+  const statusRaw = raw.slice(markerIndex + ZITADEL_HTTP_STATUS_MARKER.length).trim();
+  const status = Number(statusRaw);
+  if (!Number.isInteger(status) || status < 100 || status > 599) {
+    throw new Error(`ZITADEL API response included invalid HTTP status: ${statusRaw || "<empty>"}`);
+  }
+  return { status, body };
+}
+
+function formatZitadelHttpFailure(method: string, path: string, status: number, body: string): string {
+  return `ZITADEL API ${method} ${path} returned HTTP ${status}: ${compactCommandOutput(body)}`;
+}
+
+export function isZitadelNoChangesResponse(status: number, body: string): boolean {
+  if (status !== 400) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown; message?: unknown };
+    return parsed.code === 9 && typeof parsed.message === "string" && parsed.message.toLowerCase().includes("no changes");
+  } catch {
+    return body.toLowerCase().includes("no changes");
+  }
+}
 
 /**
  * Extracts a JSON document from command output that may contain leading chatter.
@@ -202,6 +337,212 @@ function parseProxyItem(item: string): HttpProxyItem | TransportProxyItem {
   };
 }
 
+function deriveSharedCookieDomain(config: Record<string, unknown>): string {
+  const explicitRoot = configString(config, "terrarium_root_domain");
+  if (explicitRoot) {
+    return explicitRoot;
+  }
+
+  const domains = [
+    configString(config, "terrarium_manage_domain"),
+    configString(config, "terrarium_proxy_domain"),
+    configString(config, "terrarium_auth_domain")
+  ].filter((value) => value.length > 0);
+
+  if (domains.length === 0) {
+    return "";
+  }
+
+  let suffix = domains[0].split(".");
+  for (const domain of domains.slice(1)) {
+    const labels = domain.split(".");
+    const common: string[] = [];
+    for (let index = 1; index <= Math.min(suffix.length, labels.length); index += 1) {
+      const left = suffix[suffix.length - index];
+      const right = labels[labels.length - index];
+      if (left !== right) {
+        break;
+      }
+      common.unshift(left);
+    }
+    suffix = common;
+    if (suffix.length === 0) {
+      break;
+    }
+  }
+
+  const candidate = suffix.join(".");
+  if (candidate && candidate !== domains[0]) {
+    return candidate;
+  }
+
+  const fallback = domains[0].split(".");
+  return fallback.length > 1 ? fallback.slice(1).join(".") : domains[0];
+}
+
+function normalizeCookieDomain(domain: string): string {
+  if (!domain) {
+    return domain;
+  }
+  return domain.startsWith(".") ? domain : `.${domain}`;
+}
+
+function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string): string[] {
+  const cmd = [
+    "curl",
+    "-sS",
+    "--resolve",
+    `${authDomain}:443:127.0.0.1`,
+    "--connect-timeout",
+    "10",
+    "--max-time",
+    "20",
+    "--write-out",
+    `\n${ZITADEL_HTTP_STATUS_MARKER}%{http_code}`
+  ];
+  if (existsSync(ZITADEL_BOOTSTRAP_CERT_PATH)) {
+    cmd.push("--cacert", ZITADEL_BOOTSTRAP_CERT_PATH);
+  }
+  cmd.push("-X", method, "-H", `Authorization: Bearer ${pat}`, "-H", "Content-Type: application/json", url);
+  return cmd;
+}
+
+async function zitadelApi<T>(
+  authDomain: string,
+  pat: string,
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const cmd = zitadelCurlBase(authDomain, pat, method, `https://${authDomain}${path}`);
+  if (body !== undefined && method !== "GET") {
+    cmd.push("-d", JSON.stringify(body));
+  }
+
+  let lastError = "";
+  for (let attempt = 0; attempt < ZITADEL_WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(cmd);
+    if (result.exitCode === 0) {
+      try {
+        const response = parseZitadelHttpOutput(result.stdout);
+        if (response.status >= 200 && response.status < 300) {
+          return JSON.parse(response.body || "null") as T;
+        }
+        if (isZitadelNoChangesResponse(response.status, response.body)) {
+          return JSON.parse(response.body || "null") as T;
+        }
+        lastError = formatZitadelHttpFailure(method, path, response.status, response.body);
+      } catch (error) {
+        lastError = String(error).replace(/^Error: /, "");
+      }
+    } else {
+      lastError = result.stderr.trim() || result.stdout.trim() || `ZITADEL API ${method} ${path} failed`;
+    }
+    if (!isRetriableZitadelApiError(lastError)) {
+      throw new Error(lastError);
+    }
+    await Bun.sleep(ZITADEL_WAIT_INTERVAL_MS);
+  }
+
+  throw new Error(`timed out waiting for ZITADEL API ${method} ${path}: ${lastError}`);
+}
+
+async function lookupZitadelProjectId(authDomain: string, pat: string, outputs: Record<string, { value?: string }>): Promise<string> {
+  const outputValue = outputs.project_id?.value?.trim();
+  if (outputValue) {
+    return outputValue;
+  }
+
+  const projects = await zitadelApi<{ result?: ZitadelProject[] }>(authDomain, pat, "POST", "/management/v1/projects/_search", {});
+  const project = (projects.result ?? []).find((entry) => entry.name === "Terrarium");
+  if (!project?.id) {
+    throw new Error("failed to find Terrarium project in ZITADEL");
+  }
+  return project.id;
+}
+
+async function lookupRoutesAppId(authDomain: string, pat: string, projectId: string): Promise<string> {
+  const apps = await zitadelApi<{ result?: ZitadelApp[] }>(
+    authDomain,
+    pat,
+    "POST",
+    `/management/v1/projects/${projectId}/apps/_search`,
+    {}
+  );
+  const app = (apps.result ?? []).find((entry) => entry.name === ZITADEL_ROUTES_APP_NAME);
+  if (!app?.id) {
+    throw new Error("failed to find terrarium-routes app in ZITADEL");
+  }
+  return app.id;
+}
+
+async function syncLocalRoutesClient(config: Record<string, unknown>, profiles: RouteAuthProfile[]): Promise<string[]> {
+  if (configString(config, "terrarium_idp_mode") !== "local") {
+    return [];
+  }
+
+  const authDomain = configString(config, "terrarium_auth_domain");
+  const manageDomain = configString(config, "terrarium_manage_domain");
+  if (!authDomain || !manageDomain) {
+    return ["route auth local IDP sync requires terrarium_auth_domain and terrarium_manage_domain"];
+  }
+
+  const patPath = `${ZITADEL_BOOTSTRAP_DIR}/admin-sa.pat`;
+  if (!existsSync(patPath)) {
+    return ["route auth local IDP sync requires /var/lib/terrarium/zitadel/bootstrap/admin-sa.pat"];
+  }
+
+  const adminPat = readFileSync(patPath, "utf8").trim();
+  if (!adminPat) {
+    return ["route auth local IDP sync requires a non-empty bootstrap PAT"];
+  }
+
+  const outputs = readJsonFile<Record<string, { value?: string }>>(ZITADEL_OUTPUTS_PATH, {});
+
+  try {
+    const projectId = await lookupZitadelProjectId(authDomain, adminPat, outputs);
+    const appId = await lookupRoutesAppId(authDomain, adminPat, projectId);
+    const redirectUris =
+      profiles.length > 0
+        ? profiles.map((profile) => `https://${profile.host}${profile.callbackPath}`)
+        : [`https://${manageDomain}/oauth2/app/callback`];
+    const postLogoutRedirectUris = [...new Set([`https://${manageDomain}/`, ...profiles.map((profile) => `https://${profile.host}/`)])];
+
+    await zitadelApi(
+      authDomain,
+      adminPat,
+      "PUT",
+      `/management/v1/projects/${projectId}/apps/${appId}/oidc_config`,
+      {
+        redirectUris,
+        responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+        grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+        appType: "OIDC_APP_TYPE_WEB",
+        authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+        postLogoutRedirectUris,
+        version: "OIDC_VERSION_1_0",
+        devMode: false,
+        accessTokenType: "OIDC_TOKEN_TYPE_BEARER",
+        accessTokenRoleAssertion: true,
+        idTokenRoleAssertion: true,
+        idTokenUserinfoAssertion: true,
+        clockSkew: "0s",
+        additionalOrigins: [],
+        skipNativeAppSuccessPage: false,
+        loginVersion: {
+          loginV2: {
+            baseUri: `https://${authDomain}/ui/v2/login/`
+          }
+        }
+      }
+    );
+  } catch (error) {
+    return [String(error).replace(/^Error: /, "")];
+  }
+
+  return [];
+}
+
 function loadUfwState(): DesiredPort[] {
   return readJsonFile<DesiredPort[]>(UFW_STATE_PATH, []);
 }
@@ -248,7 +589,8 @@ async function deleteUfwRule(proto: "tcp" | "udp", port: number): Promise<void> 
 
 async function syncUfw(desiredPorts: DesiredPort[]): Promise<string[]> {
   if (!Bun.which("ufw")) {
-    return ["ufw not found; skipped firewall sync"];
+    console.warn(`${PREFIX}: ufw not found; skipped firewall sync`);
+    return [];
   }
 
   const previous = loadUfwState();
@@ -323,10 +665,30 @@ function routeHostAllowedForSharedAuth(host: string, rootDomain: string, manageD
   return host === rootDomain || host.endsWith(`.${rootDomain}`);
 }
 
-function buildRouteAuthProfiles(containers: LxcInstance[], config: Record<string, unknown>): { profiles: RouteAuthProfile[]; errors: string[] } {
+function normalizedRouteAuthGroups(groups: string[]): string[] {
+  return [...new Set(groups)].sort();
+}
+
+function routeAuthProfileKey(host: string, groups: string[]): string {
+  return `${host}\n${normalizedRouteAuthGroups(groups).join("\n")}`;
+}
+
+function routeAuthProfileSuffix(host: string, groups: string[]): string {
+  const policy = groups.length > 0 ? groups.join("-") : "authenticated";
+  const base = slugify(`${host}-${policy}`);
+  const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
+  const hash = createHash("sha256").update(routeAuthProfileKey(host, groups)).digest("hex").slice(0, 10);
+  return `${trimmed || "route"}-${hash}`;
+}
+
+function routeAuthList(values: string[]): string {
+  return `[ ${values.map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(", ")} ]`;
+}
+
+export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record<string, unknown>): { profiles: RouteAuthProfile[]; errors: string[] } {
   const rootDomain = configString(config, "terrarium_root_domain");
   const manageDomain = configString(config, "terrarium_manage_domain");
-  const profileGroups = new Map<string, string[]>();
+  const profilePolicies = new Map<string, { host: string; groups: string[] }>();
   const errors: string[] = [];
 
   for (const container of containers) {
@@ -354,51 +716,61 @@ function buildRouteAuthProfiles(containers: LxcInstance[], config: Record<string
         continue;
       }
 
-      const key = parsed.auth.groups.join(",");
-      profileGroups.set(key, parsed.auth.groups);
+      const groups = normalizedRouteAuthGroups(parsed.auth.groups);
+      profilePolicies.set(routeAuthProfileKey(parsed.host, groups), { host: parsed.host, groups });
     }
   }
 
-  const profiles: RouteAuthProfile[] = profileGroups.size > 0
-    ? [
-        {
-          key: "",
-          groups: [],
-          port: ROUTE_AUTH_BASE_PORT,
-          callbackPath: "/oauth2/app/callback",
-          middlewareName: "lxc-auth-default",
-          serviceName: "oauth2-proxy-route-app",
-          containerName: "app"
-        }
-      ]
-    : [];
-
-  for (const [index, [key, groups]] of [...profileGroups.entries()].filter(([key]) => key).sort(([a], [b]) => a.localeCompare(b)).entries()) {
-    const suffix = slugify(key);
+  const profiles: RouteAuthProfile[] = [];
+  const sortedPolicies = [...profilePolicies.values()].sort(
+    (left, right) => left.host.localeCompare(right.host) || left.groups.join(",").localeCompare(right.groups.join(","))
+  );
+  for (const [index, policy] of sortedPolicies.entries()) {
+    const suffix = routeAuthProfileSuffix(policy.host, policy.groups);
+    const proxyPrefix = `/oauth2/route/${suffix}`;
     profiles.push({
-      key,
-      groups,
-      port: ROUTE_AUTH_GROUP_BASE_PORT + index,
-      callbackPath: "/oauth2/app/callback",
+      key: routeAuthProfileKey(policy.host, policy.groups),
+      host: policy.host,
+      groups: policy.groups,
+      port: ROUTE_AUTH_BASE_PORT + index,
+      proxyPrefix,
+      callbackPath: `${proxyPrefix}/callback`,
       middlewareName: `lxc-auth-${suffix}`,
       serviceName: `oauth2-proxy-route-${suffix}`,
-      containerName: `groups-${suffix}`
+      containerName: `route-${suffix}`
     });
   }
 
   return { profiles, errors };
 }
 
-function buildRouteAuthCompose(
+export function buildRouteAuthRedirectUris(routeLabels: string[], config: Record<string, unknown>): { redirectUris: string[]; errors: string[] } {
+  const containers = routeLabels.map((label, index) => ({
+    name: `route-auth-${index}`,
+    config: {
+      "user.proxy": label
+    }
+  }));
+  const { profiles, errors } = buildRouteAuthProfiles(containers, config);
+  return {
+    redirectUris: profiles.map((profile) => `https://${profile.host}${profile.callbackPath}`),
+    errors
+  };
+}
+
+export function buildRouteAuthComposeArtifacts(
   config: Record<string, unknown>,
   profiles: RouteAuthProfile[],
   clientId: string,
   clientSecret: string,
   cookieSecret: string
-): string {
+): RouteAuthComposeArtifacts {
   const issuer = configString(config, "terrarium_oidc_issuer");
   const manageDomain = configString(config, "terrarium_manage_domain");
-  const rootDomain = configString(config, "terrarium_root_domain") || manageDomain;
+  const rootDomain = deriveSharedCookieDomain(config) || manageDomain;
+  const sharedCookieDomain = normalizeCookieDomain(rootDomain);
+  const localIdp = configString(config, "terrarium_idp_mode") === "local";
+  const profileConfigs: Record<string, string> = {};
 
   const services = Object.fromEntries(
     profiles.map((profile) => {
@@ -406,15 +778,17 @@ function buildRouteAuthCompose(
         'provider = "oidc"',
         'provider_display_name = "Terrarium"',
         `http_address = "127.0.0.1:${profile.port}"`,
-        `redirect_url = "https://${manageDomain}${profile.callbackPath}"`,
+        `proxy_prefix = "${profile.proxyPrefix}"`,
+        `redirect_url = "https://${profile.host}${profile.callbackPath}"`,
         `oidc_issuer_url = "${issuer}"`,
         'oidc_groups_claim = "groups"',
         `client_id = "${clientId}"`,
         `client_secret = "${clientSecret}"`,
         `cookie_secret = "${cookieSecret}"`,
+        'cookie_name = "_terrarium_route_oauth2_proxy"',
         "cookie_secure = true",
-        `cookie_domains = [ "${rootDomain}" ]`,
-        `whitelist_domains = [ "${rootDomain}", "${manageDomain}" ]`,
+        `cookie_domains = [ "${sharedCookieDomain}" ]`,
+        `whitelist_domains = [ "${sharedCookieDomain}", "${manageDomain}", "${profile.host}" ]`,
         'email_domains = [ "*" ]',
         'upstreams = [ "static://202" ]',
         'scope = "openid profile email"',
@@ -429,8 +803,9 @@ function buildRouteAuthCompose(
         "ssl_insecure_skip_verify = false"
       ];
       if (profile.groups.length > 0) {
-        cfgLines.push(`allowed_groups = [ ${profile.groups.map((group) => `"${group}"`).join(", ")} ]`);
+        cfgLines.push(`allowed_groups = ${routeAuthList(profile.groups)}`);
       }
+      profileConfigs[profile.containerName] = `${cfgLines.join("\n")}\n`;
 
       return [
         profile.containerName,
@@ -440,21 +815,70 @@ function buildRouteAuthCompose(
           network_mode: "host",
           restart: "unless-stopped",
           command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"],
-          volumes: [`${ROUTE_AUTH_DIR}/${profile.containerName}.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro`],
-          environment: {
-            TERRARIUM_ROUTE_AUTH_CONFIG: cfgLines.join("\n")
-          }
+          volumes: [
+            `${ROUTE_AUTH_DIR}/${profile.containerName}.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro`,
+            ...(localIdp
+              ? ["/etc/traefik/bootstrap-certs/terrarium-bootstrap.crt:/etc/ssl/certs/terrarium-bootstrap.crt:ro"]
+              : [])
+          ],
+          ...(localIdp ? { environment: { SSL_CERT_FILE: "/etc/ssl/certs/terrarium-bootstrap.crt" } } : {})
         }
       ];
     })
   );
 
-  for (const profile of profiles) {
-    writeIfChanged(`${ROUTE_AUTH_DIR}/${profile.containerName}.cfg`, `${(services[profile.containerName] as { environment: { TERRARIUM_ROUTE_AUTH_CONFIG: string } }).environment.TERRARIUM_ROUTE_AUTH_CONFIG}\n`);
-    delete (services[profile.containerName] as { environment?: unknown }).environment;
+  return { composeYaml: yamlStringify({ services }), profileConfigs };
+}
+
+function buildRouteAuthCompose(
+  config: Record<string, unknown>,
+  profiles: RouteAuthProfile[],
+  clientId: string,
+  clientSecret: string,
+  cookieSecret: string
+): string {
+  const { composeYaml, profileConfigs } = buildRouteAuthComposeArtifacts(config, profiles, clientId, clientSecret, cookieSecret);
+  for (const [containerName, content] of Object.entries(profileConfigs)) {
+    writeIfChanged(`${ROUTE_AUTH_DIR}/${containerName}.cfg`, content);
+  }
+  return composeYaml;
+}
+
+async function probeRouteAuthListener(profile: RouteAuthProfile): Promise<string | null> {
+  const endpoint = `http://127.0.0.1:${profile.port}/ping`;
+  let lastResult: Pick<CommandResult, "stdout" | "stderr"> = {
+    stdout: "",
+    stderr: "probe was not attempted"
+  };
+
+  for (let attempt = 0; attempt < ROUTE_AUTH_READY_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure([
+      "curl",
+      "-fsS",
+      "--noproxy",
+      "*",
+      "--connect-timeout",
+      "2",
+      "--max-time",
+      "3",
+      endpoint
+    ]);
+    if (result.exitCode === 0) {
+      return null;
+    }
+
+    lastResult = result;
+    if (attempt < ROUTE_AUTH_READY_ATTEMPTS - 1) {
+      await Bun.sleep(ROUTE_AUTH_READY_INTERVAL_MS);
+    }
   }
 
-  return yamlStringify({ services });
+  return formatRouteAuthReadinessError(profile, endpoint, lastResult);
+}
+
+async function probeRouteAuthListeners(profiles: RouteAuthProfile[]): Promise<string[]> {
+  const results = await Promise.all(profiles.map((profile) => probeRouteAuthListener(profile)));
+  return results.filter((error): error is string => error !== null);
 }
 
 async function syncRouteAuthStack(config: Record<string, unknown>, profiles: RouteAuthProfile[]): Promise<string[]> {
@@ -467,6 +891,10 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
     return errors;
   }
 
+  if (!existsSync(OAUTH2_PROXY_COOKIE_SECRET_PATH)) {
+    errors.push(`route auth cookie secret is missing: ${OAUTH2_PROXY_COOKIE_SECRET_PATH}`);
+    return errors;
+  }
   const cookieSecret = readFileSync(OAUTH2_PROXY_COOKIE_SECRET_PATH, "utf8").trim();
   const idpMode = configString(config, "terrarium_idp_mode");
   const outputs = idpMode === "local" ? readJsonFile<Record<string, { value?: string }>>("/etc/terrarium/zitadel-apps.json", {}) : {};
@@ -480,7 +908,7 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
     return errors;
   }
   if (!clientId || !clientSecret) {
-    errors.push("route auth requires an OIDC client with redirect URI https://manage.<domain>/oauth2/app/callback");
+    errors.push("route auth requires an OIDC client for published route callbacks");
     return errors;
   }
   if (![16, 24, 32].includes(cookieSecret.length)) {
@@ -492,9 +920,11 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
   writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, composeYaml);
   const result = await runAllowFailure(["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "up", "-d", "--remove-orphans"]);
   if (result.exitCode !== 0) {
-    errors.push(result.stderr.trim() || result.stdout.trim() || "failed to reconcile route auth stack");
+    errors.push(formatRouteAuthCommandFailure("failed to reconcile route auth stack", result));
+    return errors;
   }
 
+  errors.push(...(await probeRouteAuthListeners(profiles)));
   return errors;
 }
 
@@ -504,6 +934,7 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
     entryPoints: {
       web: { address: ":80" },
       websecure: { address: ":443" },
+      bootstrapweb: { address: ":18080" },
       ...extraEntrypoints
     },
     providers: {
@@ -527,7 +958,7 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
   });
 }
 
-function buildDynamicConfig(containers: LxcInstance[], config: Record<string, unknown>): {
+export function buildDynamicConfig(containers: LxcInstance[], config: Record<string, unknown>): {
   dynamicYaml: string;
   extraEntrypoints: Record<string, { address: string }>;
   ufwPorts: DesiredPort[];
@@ -566,6 +997,7 @@ function buildDynamicConfig(containers: LxcInstance[], config: Record<string, un
   const extraEntrypoints: Record<string, { address: string }> = {};
   const ufwPorts: DesiredPort[] = [];
   const httpClaims = new Set<string>();
+  const oauthProfileSchemes = new Map<string, "http" | "https">();
   const portClaims = new Set<string>();
   const errors: string[] = [];
   const { profiles: authProfiles, errors: authProfileErrors } = buildRouteAuthProfiles(containers, config);
@@ -573,35 +1005,62 @@ function buildDynamicConfig(containers: LxcInstance[], config: Record<string, un
   const authProfileByKey = new Map(authProfiles.map((profile) => [profile.key, profile]));
 
   if (authProfiles.length > 0) {
-    httpRouters["lxc-oauth2-app"] = {
-      entryPoints: ["websecure"],
-      rule: `Host(\`${configString(config, "terrarium_manage_domain")}\`) && PathPrefix(\`/oauth2/app/\`)`,
-      service: "oauth2-proxy-route-app",
-      priority: 600,
-      tls: { certResolver: "letsencrypt" }
-    };
-    httpServices["oauth2-proxy-route-app"] = {
-      loadBalancer: {
-        servers: [{ url: `http://127.0.0.1:${ROUTE_AUTH_BASE_PORT}` }]
-      }
-    };
-    httpMiddlewares["lxc-auth-default"] = {
-      forwardAuth: {
-        address: `http://127.0.0.1:${ROUTE_AUTH_BASE_PORT}/`,
-        trustForwardHeader: true,
-        authResponseHeaders: ["X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Groups"]
-      }
-    };
-    for (const profile of authProfiles.filter((profile) => profile.groups.length > 0)) {
-      httpMiddlewares[profile.middlewareName] = {
-        forwardAuth: {
-          address: `http://127.0.0.1:${profile.port}/`,
-          trustForwardHeader: true,
-          authResponseHeaders: ["X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Groups"]
+    for (const profile of authProfiles) {
+      httpServices[profile.serviceName] = {
+        loadBalancer: {
+          servers: [{ url: `http://127.0.0.1:${profile.port}` }]
         }
       };
     }
   }
+
+  const ensureRouteAuthRouters = (profile: RouteAuthProfile, scheme: "http" | "https"): void => {
+    const existingScheme = oauthProfileSchemes.get(profile.key);
+    if (existingScheme === "https" || existingScheme === scheme) {
+      return;
+    }
+
+    oauthProfileSchemes.set(profile.key, scheme);
+    const rule = `Host(\`${profile.host}\`) && PathPrefix(\`${profile.proxyPrefix}/\`)`;
+    const httpRouterName = `${profile.serviceName}-oauth2-http`;
+    if (scheme === "https") {
+      httpRouters[httpRouterName] = {
+        entryPoints: ["web"],
+        rule,
+        service: profile.serviceName,
+        middlewares: ["terrarium-redirect-to-https"],
+        priority: 550
+      };
+      httpRouters[`${profile.serviceName}-oauth2-https`] = {
+        entryPoints: ["websecure"],
+        rule,
+        service: profile.serviceName,
+        tls: { certResolver: "letsencrypt" },
+        priority: 550
+      };
+      return;
+    }
+
+    httpRouters[httpRouterName] = {
+      entryPoints: ["web"],
+      rule,
+      service: profile.serviceName,
+      priority: 550
+    };
+  };
+
+  const ensureRouteAuthMiddleware = (profile: RouteAuthProfile): void => {
+    if (httpMiddlewares[profile.middlewareName]) {
+      return;
+    }
+    httpMiddlewares[profile.middlewareName] = {
+      forwardAuth: {
+        address: `http://127.0.0.1:${profile.port}/`,
+        trustForwardHeader: true,
+        authResponseHeaders: ["X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Groups"]
+      }
+    };
+  };
 
   for (const container of containers) {
     const name = container.name ?? "unknown";
@@ -626,6 +1085,11 @@ function buildDynamicConfig(containers: LxcInstance[], config: Record<string, un
       }
 
       if (item.kind === "http") {
+        const authProfile = item.auth.enabled ? authProfileByKey.get(routeAuthProfileKey(item.host, item.auth.groups)) : undefined;
+        if (item.auth.enabled && !authProfile) {
+          continue;
+        }
+
         const claim = `${item.scheme}:${item.host}:${item.path}`;
         if (httpClaims.has(claim)) {
           errors.push(`${name}: duplicate HTTP route ${rawItem}`);
@@ -660,9 +1124,7 @@ function buildDynamicConfig(containers: LxcInstance[], config: Record<string, un
             tls: { certResolver: "letsencrypt" },
             ...(item.auth.enabled
               ? {
-                  middlewares: [
-                    authProfileByKey.get(item.auth.groups.join(","))?.middlewareName ?? "lxc-auth-default"
-                  ]
+                  middlewares: [authProfile!.middlewareName]
                 }
               : {})
           };
@@ -673,12 +1135,15 @@ function buildDynamicConfig(containers: LxcInstance[], config: Record<string, un
             service: serviceName,
             ...(item.auth.enabled
               ? {
-                  middlewares: [
-                    authProfileByKey.get(item.auth.groups.join(","))?.middlewareName ?? "lxc-auth-default"
-                  ]
+                  middlewares: [authProfile!.middlewareName]
                 }
               : {})
           };
+        }
+
+        if (authProfile) {
+          ensureRouteAuthRouters(authProfile, item.scheme);
+          ensureRouteAuthMiddleware(authProfile);
         }
         continue;
       }
@@ -754,13 +1219,17 @@ export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<vo
   const staticChanged = writeIfChanged(STATIC_CONFIG_PATH, staticYaml);
   writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml);
   const ufwErrors = await syncUfw(ufwPorts);
+  const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
   const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
 
   if (staticChanged) {
     await runText(["systemctl", "restart", "traefik"], PREFIX);
   }
 
-  for (const error of [...errors, ...ufwErrors, ...routeAuthErrors]) {
-    console.error(`${PREFIX}: ${error}`);
-  }
+  assertProxySyncSucceeded({
+    dynamicErrors: errors,
+    ufwErrors,
+    localRouteClientErrors,
+    routeAuthErrors
+  });
 }

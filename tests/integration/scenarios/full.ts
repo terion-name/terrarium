@@ -1,4 +1,5 @@
 import { IntegrationContext } from "../context";
+import { buildRouteAuthRedirectUris } from "../../../scripts/terrarium-traefik-sync";
 import { captureFailureArtifacts, createHttpFixtureContainer, installTerrarium, preparePartitionTarget, provisionHost } from "./common";
 import { runSmokeSuite } from "./smoke";
 
@@ -15,12 +16,25 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
   const partitionHost = await provisionHost(context, { label: "full-partition", domains: context.domainBundle("full-partition"), withVolume: true }, sshKeyId);
   const fileSsh = context.ssh(fileHost);
   const partitionSsh = context.ssh(partitionHost);
+  const rootDomain = context.duckdns.rootDomain();
 
   try {
-    const externalFixture = await context.zitadelCloud.provisionFixture(`${context.config.slug}-full`, fileHost.domains, "terrarium-admins");
-    context.registerCleanup(async () => {
-      await context.zitadelCloud.cleanupFixture(externalFixture);
+    const composeRouteLabels = [`https://compose-${context.config.slug}.${rootDomain}@auth:agents,admins`];
+    const { redirectUris: routeCallbackUris, errors: routeCallbackErrors } = buildRouteAuthRedirectUris(composeRouteLabels, {
+      terrarium_root_domain: rootDomain,
+      terrarium_manage_domain: fileHost.domains.manage,
+      terrarium_proxy_domain: fileHost.domains.proxy,
+      terrarium_auth_domain: fileHost.domains.auth
     });
+    if (routeCallbackErrors.length > 0) {
+      throw new Error(`failed to build route auth callback URIs: ${routeCallbackErrors.join("; ")}`);
+    }
+    const externalFixture = await context.provisionZitadelFixture(
+      `${context.config.slug}-full`,
+      fileHost.domains,
+      "terrarium-admins",
+      routeCallbackUris
+    );
 
     await context.duckdns.update(fileHost.server.ipv4);
     await context.duckdns.waitForHosts(
@@ -65,7 +79,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     await fileSsh.exec("terrariumctl mount list");
     await fileSsh.exec(`mkdir -p /srv/shared/${context.config.slug}/${context.config.cifsHostPathBase}/${context.config.slug}`);
     await fileSsh.exec(`echo shared > /srv/shared/${context.config.slug}/${context.config.cifsHostPathBase}/${context.config.slug}/note.txt`);
-    await fileSsh.exec(`lxc launch images:ubuntu/24.04 shared-${context.config.slug} --profile terrarium`);
+    await fileSsh.exec(`lxc launch ubuntu:24.04 shared-${context.config.slug} --profile terrarium`);
     await fileSsh.exec(
       `lxc config device add shared-${context.config.slug} shared disk source=/srv/shared/${context.config.slug}/${context.config.cifsHostPathBase}/${context.config.slug} path=/mnt/shared`
     );
@@ -74,7 +88,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     await createHttpFixtureContainer(
       fileSsh,
       `compose-${context.config.slug}`,
-      [`https://compose-${context.config.slug}.${context.duckdns.rootDomain()}@auth:agents,admins`],
+      composeRouteLabels,
       "compose-ok"
     );
 

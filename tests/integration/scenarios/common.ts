@@ -5,7 +5,7 @@ import { IntegrationContext } from "../context";
 import type { DomainBundle, ExternalOidcFixture, ManagedHost, ServerRecord, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
 import { expectHttpBodyContains, waitForHttpStatus, waitForHttpStatusInsecure } from "../assertions/http";
-import { expectCockpitLogin, expectProtectedRoute, expectTraefikDashboard } from "../assertions/browser";
+import { expectManagementUi, expectProtectedRoute } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
 
@@ -50,6 +50,10 @@ function binaryRemotePath(): string {
   return "/root/terrarium-bundle/dist/terrariumctl";
 }
 
+function remoteCtl(command: string): string {
+  return `${binaryRemotePath()} ${command}`;
+}
+
 function dashedIp(ip: string): string {
   return ip.replaceAll(".", "-");
 }
@@ -71,31 +75,25 @@ export function arbitraryPublicHost(ip: string, prefix: string): string {
 /** Creates a Hetzner host and optionally attaches a raw block volume for Terrarium. */
 export async function provisionHost(context: IntegrationContext, options: HostProvisionOptions, sshKeyId: number): Promise<ManagedHost> {
   const labels = { terrarium: "integration", run: context.config.slug, role: options.label };
-  const server = await context.hetzner.createServer(
+  const server = await context.createHetznerServer(
+    options.label,
     `terrarium-${context.config.slug}-${options.label}`,
     context.config.hcloudServerType,
     context.config.hcloudLocation,
     [sshKeyId],
     labels
   );
-  context.registerCleanup(async () => {
-    await context.hetzner.deleteServer(server.id);
-  });
 
   let volume: VolumeRecord | undefined;
   if (options.withVolume) {
-    volume = await context.hetzner.createVolume(
+    volume = await context.createHetznerVolume(
+      options.label,
       `terrarium-${context.config.slug}-${options.label}`,
       context.config.hcloudVolumeSizeGb,
       context.config.hcloudLocation,
       labels
     );
-    context.registerCleanup(async () => {
-      if (volume) {
-        await context.hetzner.deleteVolume(volume.id);
-      }
-    });
-    volume = await context.hetzner.attachVolume(volume.id, server.id);
+    volume = await context.attachHetznerVolume(options.label, volume.id, server.id);
   }
 
   const host = context.host(options.label, server, options.domains, volume);
@@ -128,6 +126,7 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
 
   const args = [
     `${binaryRemotePath()} install --non-interactive --yes`,
+    `--domain ${shellArg(context.duckdns.rootDomain())}`,
     `--email ${shellArg(options.email || baseEmail(context))}`,
     `--acme-email ${shellArg(options.acmeEmail || baseEmail(context))}`,
     `--root-pwd ${shellArg(`Terrarium!${context.config.slug}`)}`,
@@ -200,11 +199,14 @@ export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: str
 
 /** Waits for the primary Terrarium public endpoints to be online. */
 export async function waitForTerrariumPublicEndpoints(host: ManagedHost, includeAuth: boolean): Promise<void> {
-  await waitForHttpStatus(`https://${host.domains.manage}`, [302, 303]);
-  await waitForHttpStatus(`https://${host.domains.proxy}`, [302, 303]);
-  await waitForHttpStatusInsecure(`https://${host.domains.lxd}`, [200, 302]);
+  await waitForHttpStatusInsecure(`https://${host.domains.manage}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusInsecure(`https://${host.domains.proxy}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusInsecure(`https://${host.domains.lxd}`, [200, 302], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
   if (includeAuth) {
-    await waitForHttpStatus(`https://${host.domains.auth}/.well-known/openid-configuration`, [200]);
+    await waitForHttpStatusInsecure(`https://${host.domains.auth}/.well-known/openid-configuration`, [200], {
+      timeoutMs: 300000,
+      resolveIp: host.server.ipv4
+    });
   }
 }
 
@@ -216,8 +218,12 @@ export async function verifyManagementUi(
 ): Promise<void> {
   const outputDir = join(context.localArtifactsDir, host.label, "browser");
   mkdirSync(outputDir, { recursive: true });
-  await expectCockpitLogin(`https://${host.domains.manage}`, user as never, outputDir);
-  await expectTraefikDashboard(`https://${host.domains.proxy}`, user as never, outputDir);
+  await expectManagementUi(`https://${host.domains.manage}`, `https://${host.domains.proxy}`, user as never, outputDir, {
+    resolveIp: host.server.ipv4,
+    resolveHosts: {
+      [host.domains.auth]: host.server.ipv4
+    }
+  });
 }
 
 /** Creates a small HTTP server inside an LXC and publishes the requested proxy labels. */
@@ -227,32 +233,81 @@ export async function createHttpFixtureContainer(
   labels: string[],
   bodyText: string
 ): Promise<void> {
-  await host.exec(`lxc delete ${shellArg(containerName)} --force || true`);
-  await host.exec(`lxc launch images:ubuntu/24.04 ${shellArg(containerName)} --profile terrarium`);
-  await host.exec(
-    `lxc exec ${shellArg(containerName)} -- bash -lc ${shellArg(
-      `apt-get update && apt-get install -y python3 && mkdir -p /srv/www && printf '%s\\n' ${shellArg(bodyText)} > /srv/www/index.html && nohup python3 -m http.server 8080 --directory /srv/www >/tmp/http.log 2>&1 &`
-    )}`
+  const setupLogPath = `/root/${containerName}-setup.log`;
+  const setupScriptPath = `/root/${containerName}-setup.sh`;
+  const setupCommand = [
+    `echo '[fixture] launch ${containerName}'`,
+    `timeout 300s lxc launch ubuntu:24.04 ${shellArg(containerName)} --profile terrarium`,
+    `echo '[fixture] wait-running ${containerName}'`,
+    `timeout 300s bash -lc ${shellArg(
+      `until lxc info ${shellArg(containerName)} | grep -F 'Status: RUNNING' >/dev/null 2>&1; do sleep 2; done`
+    )}`,
+    `echo '[fixture] wait-ipv4 ${containerName}'`,
+    `timeout 300s bash -lc ${shellArg(
+      `until lxc query /1.0/instances/${containerName}/state | jq -e '(.network // {} | to_entries | any((.value.addresses // []) | any(.family == "inet" and .scope == "global" and (.address | length > 0))))' >/dev/null 2>&1; do sleep 2; done`
+    )}`,
+    `echo '[fixture] install-httpd ${containerName}'`,
+    `timeout 600s lxc exec ${shellArg(containerName)} -- bash -lc ${shellArg(
+      `export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y python3 && mkdir -p /srv/www && printf '%s\\n' ${shellArg(
+        bodyText
+      )} > /srv/www/index.html && cat >/etc/systemd/system/terrarium-fixture-http.service <<'EOF'
+[Unit]
+Description=Terrarium integration HTTP fixture
+After=network-online.target
+
+[Service]
+WorkingDirectory=/srv/www
+ExecStart=/usr/bin/python3 -m http.server 8080 --directory /srv/www
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl enable --now terrarium-fixture-http.service`
+    )}`,
+    `echo '[fixture] set-proxy-labels ${containerName}'`,
+    `lxc config set ${shellArg(containerName)} user.proxy ${shellArg(labels.join(","))}`,
+    `echo '[fixture] proxy-sync ${containerName}'`,
+    `timeout 300s ${remoteCtl("proxy sync")}`,
+    `echo '[fixture] done ${containerName}'`
+  ].join(" && ");
+
+  await deleteContainerIfPresent(host, containerName);
+  await host.exec(`rm -f ${shellArg(setupLogPath)} ${shellArg(setupScriptPath)}`);
+  await host.write(
+    setupScriptPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+${setupCommand}
+`,
+    "700"
   );
-  await host.exec(`lxc config set ${shellArg(containerName)} user.proxy ${shellArg(labels.join(","))}`);
-  await host.exec("terrariumctl proxy sync");
+  const result = await host.execAllowFailure(`${shellArg(setupScriptPath)} >${shellArg(setupLogPath)} 2>&1`, {
+    timeoutMs: 20 * 60 * 1000
+  });
+  if (result.exitCode !== 0) {
+    const log = await host.execAllowFailure(`tail -n 200 ${shellArg(setupLogPath)} || true`, { timeoutMs: 20000 });
+    throw new Error(`fixture setup failed for ${containerName}\n${log.stdout || log.stderr || result.stderr || result.stdout}`);
+  }
 }
 
 /** Forces local snapshots, mutates container state, and verifies in-place restore. */
 export async function verifyLocalBackupRestore(host: SshHost, containerName: string): Promise<void> {
+  const dataset = `terrarium/containers/${containerName}`;
+  const snapshotName = `smoke-local-restore-${Date.now()}`;
   await host.exec(`lxc exec ${shellArg(containerName)} -- bash -lc "echo v1 > /srv/www/state.txt"`);
-  await host.exec("systemctl start sanoid.service || true");
+  await host.exec(`zfs snapshot -r ${shellArg(`${dataset}@${snapshotName}`)}`);
   await host.exec(`lxc exec ${shellArg(containerName)} -- bash -lc "echo v2 > /srv/www/state.txt"`);
-  await host.exec(`printf 'y\\n' | terrariumctl backup restore --instance ${shellArg(containerName)}`);
+  await host.exec(`printf 'y\\n' | ${remoteCtl(`backup restore --instance ${shellArg(containerName)} --at ${shellArg(snapshotName)}`)}`);
   await host.exec(`lxc start ${shellArg(containerName)} || true`);
   await expectRemoteContains(host, `lxc exec ${shellArg(containerName)} -- cat /srv/www/state.txt`, "v1");
 }
 
 /** Verifies the S3 export and restore path against the configured real bucket. */
 export async function verifyS3BackupRestore(host: SshHost, containerName: string): Promise<void> {
-  await host.exec("terrariumctl backup export");
+  await host.exec(remoteCtl("backup export"));
   await host.exec(`lxc exec ${shellArg(containerName)} -- bash -lc "echo v3 > /srv/www/state.txt"`);
-  await host.exec(`printf 'y\\n' | terrariumctl backup restore --source s3 --instance ${shellArg(containerName)}`);
+  await host.exec(`printf 'y\\n' | ${remoteCtl(`backup restore --source s3 --instance ${shellArg(containerName)}`)}`);
   await host.exec(`lxc start ${shellArg(containerName)} || true`);
   await expectRemoteContains(host, `lxc exec ${shellArg(containerName)} -- cat /srv/www/state.txt`, "v1");
 }
@@ -270,14 +325,17 @@ export async function switchToExternalOidc(
   fixture: ExternalOidcFixture
 ): Promise<void> {
   const ssh = context.ssh(host);
-  await ssh.exec(
-    [
-      "terrariumctl set idp oidc",
-      `--oidc ${shellArg(context.config.zitadelCloudIssuer)}`,
-      `--oidc-client ${shellArg(fixture.clientId)}`,
-      `--oidc-secret ${shellArg(fixture.clientSecret)}`,
-      `--admin-group ${shellArg(fixture.adminGroup)}`
-    ].join(" ")
+  const scriptPath = `/root/terrarium-switch-oidc-${randomUUID()}.sh`;
+  await ssh.execScript(
+    `#!/usr/bin/env bash
+set -euo pipefail
+${remoteCtl("set idp oidc")} \\
+  --oidc ${shellArg(context.config.zitadelCloudIssuer)} \\
+  --oidc-client ${shellArg(fixture.clientId)} \\
+  --oidc-secret ${shellArg(fixture.clientSecret)} \\
+  --admin-group ${shellArg(fixture.adminGroup)}
+`,
+    scriptPath
   );
   await verifyManagementUi(context, host, fixture.adminUser);
 }
@@ -285,7 +343,14 @@ export async function switchToExternalOidc(
 /** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
 export async function switchBackToLocalIdp(context: IntegrationContext, host: ManagedHost): Promise<void> {
   const ssh = context.ssh(host);
-  await ssh.exec("terrariumctl set idp local");
+  const scriptPath = `/root/terrarium-switch-local-idp-${randomUUID()}.sh`;
+  await ssh.execScript(
+    `#!/usr/bin/env bash
+set -euo pipefail
+${remoteCtl("set idp local")}
+`,
+    scriptPath
+  );
   const admin = await readLocalZitadelAdmin(ssh);
   await verifyManagementUi(context, host, admin);
 }
@@ -300,13 +365,13 @@ export async function verifyProtectedRoutes(
   groupedHost: string,
   bodyText: string
 ): Promise<void> {
-  await waitForHttpStatus(`https://${plainHost}`, [200, 302]);
+  await waitForHttpStatusInsecure(`https://${plainHost}`, [200, 302], { resolveIp: host.server.ipv4 });
   const outputDir = join(context.localArtifactsDir, host.label, "routes");
   mkdirSync(outputDir, { recursive: true });
-  await expectHttpBodyContains(`https://${plainHost}`, bodyText);
-  await expectProtectedRoute(`https://${authHost}`, fixture.routeUser, "allow", outputDir, bodyText);
-  await expectProtectedRoute(`https://${groupedHost}`, fixture.routeUser, "allow", outputDir, bodyText);
-  await expectProtectedRoute(`https://${groupedHost}`, fixture.deniedUser, "deny", outputDir);
+  await expectHttpBodyContains(`https://${plainHost}`, bodyText, { resolveIp: host.server.ipv4 });
+  await expectProtectedRoute(`https://${authHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
+  await expectProtectedRoute(`https://${groupedHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
+  await expectProtectedRoute(`https://${groupedHost}`, fixture.deniedUser, "deny", outputDir, "", { resolveIp: host.server.ipv4 });
 }
 
 /** Applies a handful of `terrariumctl set ...` operations and validates convergence. */
@@ -317,20 +382,20 @@ export async function exerciseReconfiguration(context: IntegrationContext, host:
   const altLxd = context.duckdns.serviceHost("lxd-alt", context.config.slug);
   const altAuth = context.duckdns.serviceHost("auth-alt", context.config.slug);
   await ssh.exec(
-    `terrariumctl set domains ${shellArg(context.duckdns.rootDomain())} --manage-domain ${shellArg(altManage)} --proxy-domain ${shellArg(
+    `printf 'y\\n' | ${remoteCtl(`set domains ${shellArg(context.duckdns.rootDomain())}`)} --manage-domain ${shellArg(altManage)} --proxy-domain ${shellArg(
       altProxy
     )} --lxd-domain ${shellArg(altLxd)} --auth-domain ${shellArg(altAuth)}`
   );
-  await ssh.exec(`terrariumctl set emails --email ${shellArg(baseEmail(context))} --acme-email ${shellArg(baseEmail(context))}`);
+  await ssh.exec(`${remoteCtl("set emails")} --email ${shellArg(baseEmail(context))} --acme-email ${shellArg(baseEmail(context))}`);
   await ssh.exec(
-    `terrariumctl set s3 --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
+    `${remoteCtl("set s3")} --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
       context.config.s3Bucket
     )} --s3-region ${shellArg(context.config.s3Region)} --s3-prefix ${shellArg(`terrarium/${context.config.slug}/reconfigured`)} --s3-access-key ${shellArg(
       context.config.s3AccessKey
     )} --s3-secret-key ${shellArg(context.config.s3SecretKey)}`
   );
-  await ssh.exec("terrariumctl set syncoid --disable");
-  await ssh.exec("terrariumctl set syncoid --enable --syncoid-target root@127.0.0.1 --syncoid-target-dataset terrarium/containers --syncoid-ssh-key /root/.ssh/id_ed25519").catch(() => {
+  await ssh.exec(remoteCtl("set syncoid --disable"));
+  await ssh.exec(`${remoteCtl("set syncoid --enable")} --syncoid-target root@127.0.0.1 --syncoid-target-dataset terrarium/containers --syncoid-ssh-key /root/.ssh/id_ed25519`).catch(() => {
     // The loopback re-enable intentionally only exercises validation/wiring and is allowed to fail remotely.
   });
 }
@@ -348,7 +413,7 @@ export async function captureFailureArtifacts(context: IntegrationContext, hosts
 
 /** Verifies the installed host’s service/timer health via CLI and systemd. */
 export async function assertInstalledHost(host: SshHost): Promise<void> {
-  await expectRemoteContains(host, "terrariumctl status", "terrarium-oauth2-proxy.service");
+  await expectRemoteContains(host, remoteCtl("status"), "terrarium-oauth2-proxy.service");
   await expectSystemdActive(host, "traefik");
   await expectSystemdActive(host, "terrarium-traefik-sync.timer");
 }
@@ -360,9 +425,20 @@ export async function preparePartitionTarget(host: SshHost, devicePath: string):
 }
 
 /** Uploads the runner SSH key onto the primary host so syncoid can reach the replica. */
-export async function installSyncoidKey(primary: SshHost, privateKeyPath: string, publicKeyPath: string): Promise<void> {
+export async function installSyncoidKey(
+  primary: SshHost,
+  privateKeyPath: string,
+  publicKeyPath: string,
+  replicaHost: string
+): Promise<void> {
   await primary.exec("mkdir -p /root/.ssh");
   await primary.uploadKeypair(privateKeyPath, publicKeyPath, "/root/.ssh/id_ed25519");
+  await primary.exec("touch /root/.ssh/known_hosts && chmod 600 /root/.ssh/known_hosts");
+  await primary.exec(
+    `ssh-keygen -R ${shellArg(replicaHost)} -f /root/.ssh/known_hosts >/dev/null 2>&1 || true && ssh-keyscan -H ${shellArg(
+      replicaHost
+    )} >> /root/.ssh/known_hosts`
+  );
 }
 
 function shellArg(value: string): string {
@@ -372,11 +448,11 @@ function shellArg(value: string): string {
 async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await host.execAllowFailure(`test -f ${shellArg(statusPath)} && cat ${shellArg(statusPath)}`);
+    const result = await host.execAllowFailure(`test -f ${shellArg(statusPath)} && cat ${shellArg(statusPath)}`, { timeoutMs: 20000 });
     if (result.exitCode === 0) {
       const exitCode = Number(result.stdout.trim() || "1");
       if (exitCode !== 0) {
-        const log = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`);
+        const log = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`, { timeoutMs: 20000 });
         throw new Error(`remote command failed with exit ${exitCode}\n${log.stdout || log.stderr}`);
       }
       return;
@@ -390,6 +466,43 @@ async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath
     await Bun.sleep(5000);
   }
 
-  const tail = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`);
+  const tail = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`, { timeoutMs: 20000 });
   throw new Error(`timed out waiting for remote command to finish\n${tail.stdout || tail.stderr}`);
+}
+
+async function waitForRemoteCommandSuccess(
+  host: SshHost,
+  command: string,
+  description: string,
+  timeoutMs: number
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await host.execAllowFailure(command);
+    if (result.exitCode === 0) {
+      return;
+    }
+    await Bun.sleep(5000);
+  }
+
+  throw new Error(`timed out waiting for ${description}`);
+}
+
+async function deleteContainerIfPresent(host: SshHost, containerName: string): Promise<void> {
+  const exists = await host.execAllowFailure(`timeout 30s lxc info ${shellArg(containerName)} >/dev/null 2>&1`);
+  if (exists.exitCode !== 0) {
+    return;
+  }
+
+  const deletion = await host.execAllowFailure(`timeout 120s lxc delete ${shellArg(containerName)} --force`);
+  if (deletion.exitCode !== 0 && deletion.exitCode !== 124) {
+    throw new Error(deletion.stderr.trim() || deletion.stdout.trim() || `failed to delete existing container ${containerName}`);
+  }
+
+  await waitForRemoteCommandSuccess(
+    host,
+    `! lxc info ${shellArg(containerName)} >/dev/null 2>&1`,
+    `container ${containerName} to be deleted`,
+    2 * 60 * 1000
+  );
 }

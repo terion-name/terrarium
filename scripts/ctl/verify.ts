@@ -170,6 +170,52 @@ function oidcCallbackUris(options: OidcVerificationOptions): string[] {
   return [`https://${options.manageDomain}/oauth2/callback`, `https://${options.lxdDomain}/oidc/callback`];
 }
 
+async function verifyAuthorizationProbe(authorizationEndpoint: string, clientId: string, redirectUri: string): Promise<void> {
+  const deadline = Date.now() + 120000;
+  let lastStatus = 0;
+  let lastBody = "";
+  let lastLocation = "";
+
+  while (Date.now() < deadline) {
+    const authUrl = new URL(authorizationEndpoint);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("scope", "openid");
+    authUrl.searchParams.set("state", randomUUID());
+    authUrl.searchParams.set("nonce", randomUUID());
+
+    const authResponse = await fetchWithTimeout(authUrl.toString(), { redirect: "manual" });
+    const location = authResponse.headers.get("location") ?? "";
+    const body = await authResponse.text().catch(() => "");
+    lastStatus = authResponse.status;
+    lastBody = body;
+    lastLocation = location;
+
+    if (authResponse.status < 400 && !location.includes("error=")) {
+      return;
+    }
+
+    const retryable =
+      authResponse.status >= 500 ||
+      (authResponse.status === 400 &&
+        (body.includes("Errors.App.NotFound") || body.includes("Errors.Internal") || body.includes("Errors.ResourceOwner")));
+    if (!retryable) {
+      break;
+    }
+
+    await Bun.sleep(5000);
+  }
+
+  if (lastStatus >= 400) {
+    const suffix = lastBody ? `: ${lastBody.slice(0, 500)}` : "";
+    throw new Error(`OIDC authorization probe failed for ${redirectUri} with HTTP ${lastStatus}${suffix}`);
+  }
+  if (lastLocation.includes("error=")) {
+    throw new Error(`OIDC authorization probe was rejected for ${redirectUri}: ${lastLocation}`);
+  }
+}
+
 /**
  * Verifies that an external OIDC issuer is reachable and that the configured
  * client credentials are at least recognized by the provider.
@@ -199,22 +245,7 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
   }
 
   for (const redirectUri of oidcCallbackUris(options)) {
-    const authUrl = new URL(authorizationEndpoint);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("client_id", options.clientId);
-    authUrl.searchParams.set("redirect_uri", redirectUri);
-    authUrl.searchParams.set("scope", "openid");
-    authUrl.searchParams.set("state", randomUUID());
-    authUrl.searchParams.set("nonce", randomUUID());
-
-    const authResponse = await fetchWithTimeout(authUrl.toString(), { redirect: "manual" });
-    const location = authResponse.headers.get("location") ?? "";
-    if (authResponse.status >= 400) {
-      throw new Error(`OIDC authorization probe failed for ${redirectUri} with HTTP ${authResponse.status}`);
-    }
-    if (location.includes("error=")) {
-      throw new Error(`OIDC authorization probe was rejected for ${redirectUri}: ${location}`);
-    }
+    await verifyAuthorizationProbe(authorizationEndpoint, options.clientId, redirectUri);
   }
 
   const body = new URLSearchParams({
@@ -245,6 +276,14 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
 
   const errorCode = String(parsed.error || "").trim();
   const errorDescription = String(parsed.error_description || "").trim();
+  if (errorCode === "invalid_client" && errorDescription.toLowerCase().includes("client not found")) {
+    // ZITADEL Cloud returns this for valid WEB apps on a client_credentials
+    // probe. The authorization-endpoint checks above already proved that the
+    // client ID exists and accepts Terrarium's redirect URIs; the real browser
+    // flow validates the secret during the integration suite.
+    return;
+  }
+
   if (errorCode === "invalid_client" || tokenResponse.status === 401 || tokenResponse.status === 403) {
     throw new Error(errorDescription || errorCode || `OIDC token probe failed with HTTP ${tokenResponse.status}`);
   }

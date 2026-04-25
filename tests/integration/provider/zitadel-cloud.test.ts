@@ -1,0 +1,195 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import type { IntegrationLogger } from "../lib/logger";
+import type { ExternalOidcFixture, IntegrationConfig } from "../types";
+import { ZitadelCloudProvider } from "./zitadel-cloud";
+
+const originalFetch = globalThis.fetch;
+const originalSleep = Bun.sleep;
+
+type FetchCall = {
+  input: Parameters<typeof fetch>[0];
+  init?: Parameters<typeof fetch>[1];
+};
+
+const logger = {
+  path: "",
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return logger;
+  }
+} as unknown as IntegrationLogger;
+
+function createProvider(): ZitadelCloudProvider {
+  return new ZitadelCloudProvider(
+    {
+      zitadelCloudIssuer: "https://zitadel.example.test/",
+      zitadelCloudPat: "pat-1",
+      zitadelCloudOrgId: "org-1"
+    } as IntegrationConfig,
+    logger
+  );
+}
+
+function setMaxAttempts(provider: ZitadelCloudProvider, maxAttempts: number): void {
+  (provider as unknown as { maxAttempts: number }).maxAttempts = maxAttempts;
+}
+
+function setSleepMock(handler: (ms: number) => Promise<void>): void {
+  (Bun as unknown as { sleep: typeof Bun.sleep }).sleep = handler as typeof Bun.sleep;
+}
+
+function installFetchMock(respond: (call: FetchCall, index: number) => Response): FetchCall[] {
+  const calls: FetchCall[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const call = { input, init };
+    calls.push(call);
+    return respond(call, calls.length - 1);
+  }) as typeof fetch;
+  return calls;
+}
+
+function callPath(call: FetchCall): string {
+  return new URL(String(call.input)).pathname;
+}
+
+function expectScopedZitadelDelete(call: FetchCall): void {
+  const headers = new Headers(call.init?.headers);
+  expect(call.init?.method).toBe("DELETE");
+  expect(headers.get("authorization")).toBe("Bearer pat-1");
+  expect(headers.get("x-zitadel-orgid")).toBe("org-1");
+}
+
+function jsonBody(call: FetchCall): Record<string, unknown> {
+  return JSON.parse(String(call.init?.body ?? "{}")) as Record<string, unknown>;
+}
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  (Bun as unknown as { sleep: typeof Bun.sleep }).sleep = originalSleep;
+});
+
+describe("ZITADEL Cloud provider", () => {
+  test("cleanupFixture uses scoped delete helpers for users and project", async () => {
+    const calls = installFetchMock(() => new Response(null, { status: 204 }));
+    const provider = createProvider();
+    const fixture = {
+      projectId: "project-1",
+      appId: "app-1",
+      adminUser: { userId: "admin-user" },
+      routeUser: { userId: "route-user" },
+      deniedUser: { userId: "denied-user" }
+    } as ExternalOidcFixture;
+
+    await provider.cleanupFixture(fixture);
+
+    expect(calls.map(callPath)).toEqual([
+      "/management/v1/users/admin-user",
+      "/management/v1/users/route-user",
+      "/management/v1/users/denied-user",
+      "/management/v1/projects/project-1"
+    ]);
+    for (const call of calls) {
+      expectScopedZitadelDelete(call);
+    }
+  });
+
+  test("delete helpers retry transient ZITADEL responses with the org header", async () => {
+    const calls = installFetchMock((_call, index) => (index === 0 ? new Response("busy", { status: 429 }) : new Response(null, { status: 204 })));
+    const sleeps: number[] = [];
+    setSleepMock(async (ms) => {
+      sleeps.push(ms);
+    });
+    const provider = createProvider();
+    setMaxAttempts(provider, 2);
+
+    await provider.deleteProject("project-1");
+
+    expect(calls.map(callPath)).toEqual(["/management/v1/projects/project-1", "/management/v1/projects/project-1"]);
+    expect(sleeps).toEqual([2000]);
+    for (const call of calls) {
+      expectScopedZitadelDelete(call);
+    }
+  });
+
+  test("management preflight fails permission errors without retrying", async () => {
+    const calls = installFetchMock(() => new Response("AUTHZ-cdgFk", { status: 404 }));
+    const sleeps: number[] = [];
+    setSleepMock(async (ms) => {
+      sleeps.push(ms);
+    });
+    const provider = createProvider();
+    setMaxAttempts(provider, 3);
+
+    await expect(provider.verifyManagementAccess()).rejects.toThrow("PAT does not have membership in org org-1");
+
+    expect(calls).toHaveLength(1);
+    expect(sleeps).toEqual([]);
+    const headers = new Headers(calls[0].init?.headers);
+    expect(calls[0].init?.method).toBe("POST");
+    expect(callPath(calls[0])).toBe("/management/v1/projects/_search");
+    expect(headers.get("authorization")).toBe("Bearer pat-1");
+    expect(headers.get("x-zitadel-orgid")).toBe("org-1");
+  });
+
+  test("provisionFixture grants the denied user a project role outside route allowed groups", async () => {
+    const userIds = ["admin-user", "route-user", "denied-user"];
+    const calls = installFetchMock((call) => {
+      const method = call.init?.method;
+      const path = callPath(call);
+      if (method === "POST" && path === "/management/v1/actions/_search") {
+        return Response.json({ result: [] });
+      }
+      if (method === "POST" && path === "/management/v1/actions") {
+        return Response.json({ id: "action-1" });
+      }
+      if (method === "GET" && path === "/management/v1/flows/2") {
+        return Response.json({ flow: { triggerActions: [] } });
+      }
+      if (method === "POST" && path.startsWith("/management/v1/flows/2/trigger/")) {
+        return Response.json({});
+      }
+      if (method === "POST" && path === "/management/v1/projects") {
+        return Response.json({ id: "project-1" });
+      }
+      if (method === "POST" && path === "/management/v1/projects/project-1/roles") {
+        return Response.json({});
+      }
+      if (method === "POST" && path === "/management/v1/projects/project-1/apps/oidc") {
+        return Response.json({ appId: "app-1", clientId: "client-1", clientSecret: "secret-1" });
+      }
+      if (method === "POST" && path === "/management/v1/users/human/_import") {
+        return Response.json({ userId: userIds.shift() });
+      }
+      if (method === "POST" && path.startsWith("/management/v1/users/") && path.endsWith("/grants")) {
+        return Response.json({});
+      }
+      throw new Error(`unexpected ${method} ${path}`);
+    });
+    const provider = createProvider();
+
+    const fixture = await provider.provisionFixture(
+      "run-d",
+      {
+        manage: "manage.example.test",
+        proxy: "proxy.example.test",
+        lxd: "lxd.example.test",
+        auth: "auth.example.test"
+      },
+      "terrarium-admins"
+    );
+
+    const roleKeys = calls
+      .filter((call) => call.init?.method === "POST" && callPath(call) === "/management/v1/projects/project-1/roles")
+      .map((call) => jsonBody(call).roleKey);
+    const grants = calls
+      .filter((call) => call.init?.method === "POST" && callPath(call).endsWith("/grants"))
+      .map((call) => jsonBody(call));
+
+    expect(fixture.routeGroups).toEqual(["agents", "admins"]);
+    expect(fixture.deniedUser.roles).toEqual(["bystanders"]);
+    expect(roleKeys).toEqual(["terrarium-admins", "agents", "admins", "bystanders"]);
+    expect(grants).toContainEqual({ projectId: "project-1", roleKeys: ["bystanders"] });
+  });
+});

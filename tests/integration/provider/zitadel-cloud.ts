@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { DomainBundle, ExternalOidcFixture, IntegrationConfig, OidcTestUser } from "../types";
 import { IntegrationLogger } from "../lib/logger";
+import type { ZitadelFixtureUserKind } from "../resources";
 
 type ProjectResponse = { id?: string };
 type UserResponse = { userId?: string };
@@ -9,8 +10,34 @@ type SearchProjectResult = { result?: Array<{ id?: string; name?: string }> };
 type SearchAppResult = { result?: Array<{ id?: string; name?: string }> };
 type ActionResult = { result?: Array<{ id?: string; name?: string; script?: string }> };
 type Flow = { flow?: { triggerActions?: Array<{ triggerType?: { id?: string }; actions?: Array<{ id?: string }> }> } };
+export type ZitadelFixtureProgress =
+  | {
+      type: "project";
+      fixtureSlug: string;
+      projectId: string;
+      projectName: string;
+      adminGroup: string;
+      routeGroups: string[];
+    }
+  | {
+      type: "app";
+      fixtureSlug: string;
+      projectId: string;
+      appId: string;
+      appName: string;
+    }
+  | {
+      type: "user";
+      fixtureSlug: string;
+      kind: ZitadelFixtureUserKind;
+      userId: string;
+      email: string;
+      roles: string[];
+    };
+export type ZitadelFixtureProgressHandler = (progress: ZitadelFixtureProgress) => void | Promise<void>;
 
 const GROUPS_ACTION_NAME = "terrariumGroups";
+const DENIED_ROUTE_ROLE = "bystanders";
 const GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
   var groups = [];
   if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
@@ -32,6 +59,46 @@ const GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
   api.v1.claims.setClaim('groups', groups);
 }`;
 
+function generateComplexPassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let suffix = "";
+  const bytes = randomBytes(12);
+  for (const byte of bytes) {
+    suffix += alphabet[byte % alphabet.length];
+  }
+  return `Aa1!${suffix}`;
+}
+
+function normalizeRouteCallbackUri(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^https:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}/oauth2/callback`;
+}
+
+export function buildZitadelCloudRedirectUris(domains: DomainBundle, routeCallbackUris: string[] = []): string[] {
+  const redirectUris = new Set([
+    `https://${domains.manage}/oauth2/callback`,
+    `https://${domains.manage}/oauth2/app/callback`,
+    `https://${domains.lxd}/oidc/callback`
+  ]);
+  for (const callbackUri of routeCallbackUris) {
+    const normalized = normalizeRouteCallbackUri(callbackUri);
+    if (normalized) {
+      redirectUris.add(normalized);
+    }
+  }
+  return [...redirectUris];
+}
+
+function isRetryableZitadelStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
 /**
  * Creates per-run ZITADEL Cloud fixtures for Terrarium external OIDC tests.
  *
@@ -42,11 +109,15 @@ const GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
 export class ZitadelCloudProvider {
   private readonly issuer: string;
   private readonly pat: string;
+  private readonly orgId: string;
   private readonly logger: IntegrationLogger;
+  private readonly requestTimeoutMs = 45000;
+  private readonly maxAttempts = 8;
 
   constructor(config: IntegrationConfig, logger: IntegrationLogger) {
     this.issuer = config.zitadelCloudIssuer.replace(/\/$/, "");
     this.pat = config.zitadelCloudPat;
+    this.orgId = config.zitadelCloudOrgId;
     this.logger = logger;
   }
 
@@ -55,22 +126,90 @@ export class ZitadelCloudProvider {
     for (const [key, value] of Object.entries(query ?? {})) {
       url.searchParams.set(key, value);
     }
-    this.logger.info(`zitadel ${method} ${url.pathname}`);
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.pat}`,
-        "Content-Type": "application/json"
-      },
-      body: body === undefined || method === "GET" ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) {
-      throw new Error(`ZITADEL ${method} ${url.pathname} failed with HTTP ${response.status}: ${await response.text()}`);
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      this.logger.info(`zitadel ${method} ${url.pathname}${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${this.pat}`,
+            "Content-Type": "application/json",
+            ...(this.orgId ? { "x-zitadel-orgid": this.orgId } : {})
+          },
+          body: body === undefined || method === "GET" ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(this.requestTimeoutMs)
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt >= this.maxAttempts) {
+          break;
+        }
+        await Bun.sleep(attempt * 2000);
+        continue;
+      }
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        if (response.status === 404 && responseText.includes("AUTHZ-cdgFk")) {
+          const orgHint = this.orgId
+            ? `The configured PAT does not have membership in org ${this.orgId}.`
+            : "No ZITADEL_CLOUD_ORG_ID is configured, and the PAT does not have a default org membership for management APIs.";
+          throw new Error(`${orgHint} Use a PAT for a user/service account that is a member of the target org with management API rights.`);
+        }
+        if (attempt < this.maxAttempts && isRetryableZitadelStatus(response.status)) {
+          await Bun.sleep(attempt * 2000);
+          continue;
+        }
+        throw new Error(`ZITADEL ${method} ${url.pathname} failed with HTTP ${response.status}: ${responseText}`);
+      }
+      if (response.status === 204) {
+        return {} as T;
+      }
+      return (await response.json()) as T;
     }
-    if (response.status === 204) {
-      return {} as T;
+    throw new Error(`ZITADEL ${method} ${url.pathname} failed after retries: ${String(lastError)}`);
+  }
+
+  private async deleteResource(path: string): Promise<void> {
+    const url = new URL(`${this.issuer}${path}`);
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      this.logger.info(`zitadel DELETE ${url.pathname}${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${this.pat}`,
+            ...(this.orgId ? { "x-zitadel-orgid": this.orgId } : {})
+          },
+          signal: AbortSignal.timeout(this.requestTimeoutMs)
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt >= this.maxAttempts) {
+          break;
+        }
+        await Bun.sleep(attempt * 2000);
+        continue;
+      }
+
+      if (response.ok || response.status === 404) {
+        return;
+      }
+      if (attempt < this.maxAttempts && isRetryableZitadelStatus(response.status)) {
+        await Bun.sleep(attempt * 2000);
+        continue;
+      }
+      throw new Error(`ZITADEL DELETE ${url.pathname} failed with HTTP ${response.status}: ${await response.text()}`);
     }
-    return (await response.json()) as T;
+    throw new Error(`ZITADEL DELETE ${url.pathname} failed after retries: ${String(lastError)}`);
+  }
+
+  async verifyManagementAccess(): Promise<void> {
+    await this.api("POST", "/management/v1/projects/_search", {});
   }
 
   private async createProject(name: string): Promise<string> {
@@ -125,14 +264,18 @@ export class ZitadelCloudProvider {
     });
   }
 
-  private async createOidcApp(projectId: string, name: string, domains: DomainBundle): Promise<{ appId: string; clientId: string; clientSecret: string }> {
+  private async createOidcApp(
+    projectId: string,
+    name: string,
+    domains: DomainBundle,
+    routeCallbackUris: string[] = [],
+    onCreated?: (app: { appId: string; clientId: string }) => void | Promise<void>
+  ): Promise<{ appId: string; clientId: string; clientSecret: string }> {
+    const redirectUris = buildZitadelCloudRedirectUris(domains, routeCallbackUris);
+
     const result = await this.api<AppResponse>("POST", `/management/v1/projects/${projectId}/apps/oidc`, {
       name,
-      redirectUris: [
-        `https://${domains.manage}/oauth2/callback`,
-        `https://${domains.manage}/oauth2/app/callback`,
-        `https://${domains.lxd}/oidc/callback`
-      ],
+      redirectUris,
       responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
       grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
       appType: "OIDC_APP_TYPE_WEB",
@@ -148,6 +291,7 @@ export class ZitadelCloudProvider {
     if (!result.appId || !result.clientId) {
       throw new Error("failed to create ZITADEL OIDC application");
     }
+    await onCreated?.({ appId: result.appId, clientId: result.clientId });
 
     let clientSecret = result.clientSecret ?? "";
     if (!clientSecret) {
@@ -199,40 +343,62 @@ export class ZitadelCloudProvider {
     }
   }
 
-  async provisionFixture(slug: string, domains: DomainBundle, adminGroup: string): Promise<ExternalOidcFixture> {
+  async provisionFixture(
+    slug: string,
+    domains: DomainBundle,
+    adminGroup: string,
+    routeCallbackUris: string[] = [],
+    onProgress?: ZitadelFixtureProgressHandler
+  ): Promise<ExternalOidcFixture> {
     await this.ensureGroupsAction();
 
     const projectName = `terrarium-${slug}`;
     const appName = `terrarium-${slug}-external`;
-    const projectId = await this.createProject(projectName);
     const routeGroups = ["agents", "admins"];
+    const projectId = await this.createProject(projectName);
+    await onProgress?.({ type: "project", fixtureSlug: slug, projectId, projectName, adminGroup, routeGroups });
     await this.createRole(projectId, adminGroup, "Terrarium Management Admin");
     for (const routeGroup of routeGroups) {
       await this.createRole(projectId, routeGroup, `Route group ${routeGroup}`);
     }
+    await this.createRole(projectId, DENIED_ROUTE_ROLE, "Route denied fixture user");
 
-    const app = await this.createOidcApp(projectId, appName, domains);
+    const app = await this.createOidcApp(projectId, appName, domains, routeCallbackUris, async (created) => {
+      await onProgress?.({ type: "app", fixtureSlug: slug, projectId, appId: created.appId, appName });
+    });
 
-    const adminPassword = randomUUID();
+    const adminPassword = generateComplexPassword();
+    const adminEmail = `admin+${slug}@example.net`;
+    const adminRoles = [adminGroup, "admins"];
+    const adminUserId = await this.createHumanUser(adminEmail, adminPassword);
+    await onProgress?.({ type: "user", fixtureSlug: slug, kind: "adminUser", userId: adminUserId, email: adminEmail, roles: adminRoles });
     const adminUser: OidcTestUser = {
-      email: `admin+${slug}@example.net`,
+      email: adminEmail,
       password: adminPassword,
-      userId: await this.createHumanUser(`admin+${slug}@example.net`, adminPassword),
-      roles: [adminGroup, "admins"]
+      userId: adminUserId,
+      roles: adminRoles
     };
-    const routePassword = randomUUID();
+    const routePassword = generateComplexPassword();
+    const routeEmail = `agent+${slug}@example.net`;
+    const routeRoles = ["agents"];
+    const routeUserId = await this.createHumanUser(routeEmail, routePassword);
+    await onProgress?.({ type: "user", fixtureSlug: slug, kind: "routeUser", userId: routeUserId, email: routeEmail, roles: routeRoles });
     const routeUser: OidcTestUser = {
-      email: `agent+${slug}@example.net`,
+      email: routeEmail,
       password: routePassword,
-      userId: await this.createHumanUser(`agent+${slug}@example.net`, routePassword),
-      roles: ["agents"]
+      userId: routeUserId,
+      roles: routeRoles
     };
-    const deniedPassword = randomUUID();
+    const deniedPassword = generateComplexPassword();
+    const deniedEmail = `denied+${slug}@example.net`;
+    const deniedRoles = [DENIED_ROUTE_ROLE];
+    const deniedUserId = await this.createHumanUser(deniedEmail, deniedPassword);
+    await onProgress?.({ type: "user", fixtureSlug: slug, kind: "deniedUser", userId: deniedUserId, email: deniedEmail, roles: deniedRoles });
     const deniedUser: OidcTestUser = {
-      email: `denied+${slug}@example.net`,
+      email: deniedEmail,
       password: deniedPassword,
-      userId: await this.createHumanUser(`denied+${slug}@example.net`, deniedPassword),
-      roles: []
+      userId: deniedUserId,
+      roles: deniedRoles
     };
 
     await this.grantRoles(adminUser.userId, projectId, adminUser.roles);
@@ -256,19 +422,21 @@ export class ZitadelCloudProvider {
 
   async cleanupFixture(fixture: ExternalOidcFixture): Promise<void> {
     for (const user of [fixture.adminUser, fixture.routeUser, fixture.deniedUser]) {
-      await fetch(`${this.issuer}/management/v1/users/${user.userId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${this.pat}` }
-      });
+      await this.deleteUser(user.userId);
     }
-    await fetch(`${this.issuer}/management/v1/projects/${fixture.projectId}/apps/${fixture.appId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.pat}` }
-    });
-    await fetch(`${this.issuer}/management/v1/projects/${fixture.projectId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.pat}` }
-    });
+    await this.deleteProject(fixture.projectId);
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await this.deleteResource(`/management/v1/users/${userId}`);
+  }
+
+  async deleteApp(projectId: string, appId: string): Promise<void> {
+    await this.deleteResource(`/management/v1/projects/${projectId}/apps/${appId}`);
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await this.deleteResource(`/management/v1/projects/${projectId}`);
   }
 
   async lookupProject(projectName: string): Promise<string> {

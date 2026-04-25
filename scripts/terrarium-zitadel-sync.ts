@@ -9,6 +9,7 @@ const DEFAULT_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
 const DEFAULT_TF_DIR = "/var/lib/terrarium/zitadel/terraform";
 const DEFAULT_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
 const DEFAULT_TOFU_IMAGE = "ghcr.io/opentofu/opentofu:1.10.6";
+const DEFAULT_BOOTSTRAP_CERT_PATH = "/etc/traefik/bootstrap-certs/terrarium-bootstrap.crt";
 const WAIT_INTERVAL_MS = 5000;
 const WAIT_ATTEMPTS = 36;
 
@@ -44,7 +45,7 @@ async function dockerRunWithRetry(args: string[], label: string): Promise<string
     const stdout = result.stdout.trim();
     lastError = stderr || stdout || `${label} failed`;
     const combined = `${stdout}\n${stderr}`;
-    if (!combined.includes("issuer does not match")) {
+    if (!combined.includes("issuer does not match") && !isRetriableZitadelApiError(combined)) {
       throw new Error(lastError);
     }
     await Bun.sleep(WAIT_INTERVAL_MS);
@@ -90,18 +91,24 @@ async function waitForApiReady(stackDir: string): Promise<void> {
   throw new Error(`timed out waiting for ZITADEL API readiness: ${lastError}`);
 }
 
-async function waitForHttpsDiscovery(authDomain: string): Promise<void> {
+async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
   let lastError = "";
   for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
-    const result = await runAllowFailure([
+    const cmd = [
       "curl",
       "-fsS",
+      "--resolve",
+      `${authDomain}:443:127.0.0.1`,
       "--connect-timeout",
       "10",
       "--max-time",
       "20",
       `https://${authDomain}/.well-known/openid-configuration`
-    ]);
+    ];
+    if (existsSync(DEFAULT_BOOTSTRAP_CERT_PATH)) {
+      cmd.splice(2, 0, "--cacert", DEFAULT_BOOTSTRAP_CERT_PATH);
+    }
+    const result = await runAllowFailure(cmd);
     if (result.exitCode === 0) {
       return;
     }
@@ -130,6 +137,27 @@ async function runCurlAllowFailureWithRetry(
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
   return lastResult;
+}
+
+function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string): string[] {
+  return [
+    "curl",
+    "-fsS",
+    "-k",
+    "--resolve",
+    `${authDomain}:443:127.0.0.1`,
+    "--connect-timeout",
+    "10",
+    "--max-time",
+    "20",
+    "-X",
+    method,
+    "-H",
+    `Authorization: Bearer ${pat}`,
+    "-H",
+    "Content-Type: application/json",
+    url
+  ];
 }
 
 function terraformResourceCount(tfDir: string): number {
@@ -204,7 +232,7 @@ async function zitadelApi<T>(
   for (const [key, value] of Object.entries(query ?? {})) {
     url.searchParams.set(key, value);
   }
-  const cmd = ["curl", "-fsS", "-X", method, "-H", `Authorization: Bearer ${pat}`, "-H", "Content-Type: application/json", url.toString()];
+  const cmd = zitadelCurlBase(authDomain, pat, method, url.toString());
   if (body !== undefined && method !== "GET") {
     cmd.push("-d", JSON.stringify(body));
   }
@@ -238,19 +266,12 @@ async function lookupProjectId(authDomain: string, pat: string): Promise<string>
 async function ensureProjectRole(authDomain: string, pat: string, projectId: string, adminGroup: string): Promise<void> {
   const updateResult = await runCurlAllowFailureWithRetry(
     [
-      "curl",
-      "-fsS",
-      "-X",
-      "PUT",
-      "-H",
-      `Authorization: Bearer ${pat}`,
-      "-H",
-      "Content-Type: application/json",
-      "--connect-timeout",
-      "10",
-      "--max-time",
-      "20",
+      ...zitadelCurlBase(
+        authDomain,
+        pat,
+        "PUT",
       `https://${authDomain}/management/v1/projects/${projectId}/roles/${encodeURIComponent(adminGroup)}`,
+      ),
       "-d",
       JSON.stringify({ displayName: "Terrarium Management Admin", group: "Terrarium" })
     ],
@@ -261,19 +282,12 @@ async function ensureProjectRole(authDomain: string, pat: string, projectId: str
   }
   const createResult = await runCurlAllowFailureWithRetry(
     [
-      "curl",
-      "-fsS",
-      "-X",
-      "POST",
-      "-H",
-      `Authorization: Bearer ${pat}`,
-      "-H",
-      "Content-Type: application/json",
-      "--connect-timeout",
-      "10",
-      "--max-time",
-      "20",
+      ...zitadelCurlBase(
+        authDomain,
+        pat,
+        "POST",
       `https://${authDomain}/management/v1/projects/${projectId}/roles`,
+      ),
       "-d",
       JSON.stringify({ roleKey: adminGroup, displayName: "Terrarium Management Admin", group: "Terrarium" })
     ],
@@ -429,7 +443,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   await waitForFile(`${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
   await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
   await waitForApiReady(zitadelDir);
-  await waitForHttpsDiscovery(authDomain);
+  await waitForTrustedHttpsDiscovery(authDomain);
   recoverTerraformState(tfDir);
 
   const commonArgs = [
@@ -445,6 +459,9 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
     `${bootstrapDir}:/secrets:ro`,
     "-w",
     "/workspace",
+    ...(existsSync(DEFAULT_BOOTSTRAP_CERT_PATH)
+      ? ["-v", `${DEFAULT_BOOTSTRAP_CERT_PATH}:/bootstrap/terrarium-bootstrap.crt:ro`, "-e", "SSL_CERT_FILE=/bootstrap/terrarium-bootstrap.crt"]
+      : []),
     tofuImage
   ];
 

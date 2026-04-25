@@ -9,6 +9,15 @@ export type SshExecResult = {
   exitCode: number;
 };
 
+const REMOTE_READ_ATTEMPTS = 5;
+const REMOTE_READ_TIMEOUT_MS = 20000;
+
+/** Converts an absolute remote path or glob into a tar include relative to `/`. */
+export function remoteTarRootPattern(remotePath: string): string {
+  const relativePath = remotePath.replace(/^\/+/, "");
+  return relativePath || ".";
+}
+
 /**
  * Thin SSH client for driving ephemeral Terrarium test hosts.
  *
@@ -28,33 +37,53 @@ export class SshHost {
     this.logger = logger;
   }
 
-  private baseArgs(): string[] {
+  private connectionArgs(): string[] {
     return [
       "-i",
       this.keyPath,
       "-o",
       "BatchMode=yes",
       "-o",
+      "LogLevel=ERROR",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "ServerAliveCountMax=20",
+      "-o",
+      "TCPKeepAlive=yes",
+      "-o",
       "StrictHostKeyChecking=no",
       "-o",
-      "UserKnownHostsFile=/dev/null",
+      "UserKnownHostsFile=/dev/null"
+    ];
+  }
+
+  private baseArgs(): string[] {
+    return [
+      ...this.connectionArgs(),
       `${this.user}@${this.host}`
     ];
   }
 
-  async waitForSsh(timeoutMs = 180000): Promise<void> {
+  async waitForSsh(timeoutMs = 420000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    let lastFailure = "";
     while (Date.now() < deadline) {
-      const result = await runAllowFailure(["ssh", ...this.baseArgs(), "true"]);
+      const perAttemptTimeoutMs = Math.min(15000, Math.max(5000, deadline - Date.now()));
+      const result = await runAllowFailure(["ssh", ...this.baseArgs(), "true"], { timeoutMs: perAttemptTimeoutMs });
       if (result.exitCode === 0) {
         return;
       }
+      lastFailure = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
       await Bun.sleep(5000);
     }
-    throw new Error(`timed out waiting for SSH on ${this.host}`);
+    const suffix = lastFailure ? `; last failure: ${lastFailure}` : "";
+    throw new Error(`timed out waiting for SSH on ${this.host}${suffix}`);
   }
 
-  async exec(command: string, options: { env?: Record<string, string> } = {}): Promise<string> {
+  async exec(command: string, options: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<string> {
     const envPrefix =
       options.env && Object.keys(options.env).length > 0
         ? `${Object.entries(options.env)
@@ -62,10 +91,10 @@ export class SshHost {
             .join(" ")} `
         : "";
     this.logger.info(`ssh ${this.host}: ${command}`);
-    return await run(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`]);
+    return await run(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`], { timeoutMs: options.timeoutMs });
   }
 
-  async execAllowFailure(command: string, options: { env?: Record<string, string> } = {}): Promise<SshExecResult> {
+  async execAllowFailure(command: string, options: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<SshExecResult> {
     const envPrefix =
       options.env && Object.keys(options.env).length > 0
         ? `${Object.entries(options.env)
@@ -73,7 +102,9 @@ export class SshHost {
             .join(" ")} `
         : "";
     this.logger.info(`ssh ${this.host}: ${command}`);
-    const result = await runAllowFailure(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`]);
+    const result = await runAllowFailure(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`], {
+      timeoutMs: options.timeoutMs
+    });
     return result;
   }
 
@@ -89,21 +120,26 @@ export class SshHost {
     this.logger.info(`scp ${localPath} -> ${this.host}:${remotePath}`);
     await run([
       "scp",
-      "-i",
-      this.keyPath,
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "StrictHostKeyChecking=no",
-      "-o",
-      "UserKnownHostsFile=/dev/null",
+      ...this.connectionArgs(),
       localPath,
       `${this.user}@${this.host}:${remotePath}`
     ]);
   }
 
   async read(remotePath: string): Promise<string> {
-    return await this.exec(`cat ${shellEscape(remotePath)}`);
+    let lastFailure = "";
+    for (let attempt = 1; attempt <= REMOTE_READ_ATTEMPTS; attempt += 1) {
+      const result = await this.execAllowFailure(`cat ${shellEscape(remotePath)}`, { timeoutMs: REMOTE_READ_TIMEOUT_MS });
+      if (result.exitCode === 0) {
+        return result.stdout;
+      }
+      lastFailure = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
+      if (attempt < REMOTE_READ_ATTEMPTS) {
+        await Bun.sleep(attempt * 1000);
+      }
+    }
+
+    throw new Error(`failed to read ${remotePath} from ${this.host}: ${lastFailure}`);
   }
 
   async write(remotePath: string, content: string, mode = "600"): Promise<void> {
@@ -122,9 +158,11 @@ export class SshHost {
 
   async archive(remotePaths: string[], localPath: string): Promise<void> {
     const remoteTar = `/tmp/${basename(localPath)}.tar.gz`;
-    await this.exec(`
-      patterns=(${remotePaths.map((path) => shellEscape(path)).join(" ")})
+    const archivePatterns = remotePaths.map(remoteTarRootPattern);
+    const archiveResult = await this.execAllowFailure(`
+      patterns=(${archivePatterns.map((path) => shellEscape(path)).join(" ")})
       paths=()
+      cd /
       for pattern in "\${patterns[@]}"; do
         if [ -e "$pattern" ]; then
           paths+=("$pattern")
@@ -137,19 +175,21 @@ export class SshHost {
       if [ "\${#paths[@]}" -eq 0 ]; then
         tar -czf ${shellEscape(remoteTar)} --files-from /dev/null
       else
-        tar -czf ${shellEscape(remoteTar)} "\${paths[@]}"
+        timeout 120s tar \
+          --warning=no-file-changed \
+          --ignore-failed-read \
+          --exclude='var/lib/terrarium/zitadel/postgres/pg_wal' \
+          --exclude='var/lib/terrarium/zitadel/postgres/pg_wal/*' \
+          -C / \
+          -czf ${shellEscape(remoteTar)} -- "\${paths[@]}"
       fi
     `);
+    if (archiveResult.exitCode !== 0) {
+      throw new Error(archiveResult.stderr.trim() || archiveResult.stdout.trim() || `failed to archive host paths on ${this.host}`);
+    }
     await run([
       "scp",
-      "-i",
-      this.keyPath,
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "StrictHostKeyChecking=no",
-      "-o",
-      "UserKnownHostsFile=/dev/null",
+      ...this.connectionArgs(),
       `${this.user}@${this.host}:${remoteTar}`,
       localPath
     ]);

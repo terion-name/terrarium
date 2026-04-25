@@ -8,13 +8,14 @@ import {
   readJsonFile,
   removePath,
   runAllowFailure,
-  runShell,
   runText,
   shellEscape
 } from "./lib/common";
 
 const PREFIX = "terrariumctl backup reconstruct";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
+const S3_RESTORE_ATTEMPTS = 3;
+const S3_RESTORE_RETRY_MS = 5000;
 
 type Manifest = {
   snapshot: string;
@@ -63,6 +64,79 @@ function selectChain(directory: string, match = ""): Manifest[] {
   return chain;
 }
 
+export function isRetriableS3RestoreError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return [
+    "incompleteread",
+    "incomplete stream",
+    "premature end",
+    "connection broken",
+    "connection reset",
+    "read error",
+    "broken pipe",
+    "timeout",
+    "timed out",
+    "slowdown",
+    "http 503",
+    "http 504",
+    "service unavailable",
+    "gateway timeout"
+  ].some((needle) => lowered.includes(needle));
+}
+
+function formatPipelineFailure(result: Awaited<ReturnType<typeof runAllowFailure>>): string {
+  const parts = [`exit code ${result.exitCode}`];
+  const stdout = result.stdout.trim();
+  const stderr = result.stderr.trim();
+  if (stdout) {
+    parts.push(`stdout:\n${stdout}`);
+  }
+  if (stderr) {
+    parts.push(`stderr:\n${stderr}`);
+  }
+  return parts.join("\n\n");
+}
+
+async function destroyDatasetIfExists(targetDataset: string): Promise<void> {
+  const datasetCheck = await runAllowFailure(["zfs", "list", "-H", targetDataset]);
+  if (datasetCheck.exitCode === 0) {
+    await runText(["zfs", "destroy", "-r", targetDataset], PREFIX);
+  }
+}
+
+async function receiveS3Chain(
+  chain: Manifest[],
+  awsBase: string[],
+  bucket: string,
+  targetDataset: string,
+  awsEnv: Record<string, string>
+): Promise<void> {
+  let lastError = "";
+  for (let attempt = 1; attempt <= S3_RESTORE_ATTEMPTS; attempt += 1) {
+    await destroyDatasetIfExists(targetDataset);
+
+    try {
+      for (const manifest of chain) {
+        const command = `set -o pipefail; ${awsBase.map(shellEscape).join(" ")} s3 cp ${shellEscape(`s3://${bucket}/${manifest.object_key}`)} - | zstd -d | zfs receive -F ${shellEscape(targetDataset)}`;
+        const result = await runAllowFailure(["bash", "-lc", command], { env: awsEnv });
+        if (result.exitCode !== 0) {
+          throw new Error(formatPipelineFailure(result));
+        }
+      }
+      return;
+    } catch (error) {
+      lastError = String(error).replace(/^Error: /, "");
+      if (attempt >= S3_RESTORE_ATTEMPTS || !isRetriableS3RestoreError(lastError)) {
+        throw new Error(lastError);
+      }
+      console.warn(`${PREFIX}: S3 restore stream failed on attempt ${attempt}; retrying: ${lastError}`);
+      await Bun.sleep(S3_RESTORE_RETRY_MS);
+    }
+  }
+
+  throw new Error(lastError || "S3 restore failed");
+}
+
 export async function reconstructFromS3(instance: string, at: string, targetDataset: string, configPath = DEFAULT_CONFIG_PATH): Promise<void> {
   const config = loadConfig(configPath, PREFIX);
   const bucket = configString(config, "terrarium_s3_bucket");
@@ -81,18 +155,7 @@ export async function reconstructFromS3(instance: string, at: string, targetData
     });
     const chain = selectChain(tempDir, at);
 
-    const datasetCheck = await runAllowFailure(["zfs", "list", "-H", targetDataset]);
-    if (datasetCheck.exitCode === 0) {
-      await runText(["zfs", "destroy", "-r", targetDataset], PREFIX);
-    }
-
-    for (const manifest of chain) {
-      await runShell(
-        `${awsBase.map(shellEscape).join(" ")} s3 cp ${shellEscape(`s3://${bucket}/${manifest.object_key}`)} - | zstd -d | zfs receive -F ${shellEscape(targetDataset)}`,
-        PREFIX,
-        { env: awsEnv }
-      );
-    }
+    await receiveS3Chain(chain, awsBase, bucket, targetDataset, awsEnv);
   } finally {
     if (existsSync(tempDir)) {
       removePath(tempDir);

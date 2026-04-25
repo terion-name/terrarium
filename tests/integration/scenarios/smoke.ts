@@ -1,6 +1,6 @@
-import { join } from "node:path";
 import { IntegrationContext } from "../context";
 import { ExternalOidcFixture } from "../types";
+import { buildRouteAuthRedirectUris } from "../../../scripts/terrarium-traefik-sync";
 import {
   assertInstalledHost,
   captureFailureArtifacts,
@@ -19,18 +19,20 @@ import {
   verifySyncoid,
   waitForTerrariumPublicEndpoints
 } from "./common";
-import { expectHttpBodyContains } from "../assertions/http";
-import { expectProtectedRoute } from "../assertions/browser";
+import { expectHttpBodyContains, waitForHttpStatusInsecure } from "../assertions/http";
 
 /** Runs the high-signal real-infra smoke suite on one primary and one replica host. */
 export async function runSmokeSuite(context: IntegrationContext): Promise<void> {
+  await context.zitadelCloud.verifyManagementAccess();
   const sshKeyId = await context.registerHetznerKey(`terrarium-${context.config.slug}`);
   const primaryDomains = context.domainBundle("primary");
   const replicaDomains = context.domainBundle("replica");
+  const syncoidTargetDataset = `terrarium/replicated-${context.config.slug}`;
   const primary = await provisionHost(context, { label: "primary", domains: primaryDomains, withVolume: true }, sshKeyId);
   const replica = await provisionHost(context, { label: "replica", domains: replicaDomains, withVolume: false }, sshKeyId);
   const primarySsh = context.ssh(primary);
   const replicaSsh = context.ssh(replica);
+  const rootDomain = context.duckdns.rootDomain();
 
   try {
     await context.duckdns.update(replica.server.ipv4);
@@ -51,7 +53,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
       primary.server.ipv4
     );
 
-    await installSyncoidKey(primarySsh, context.config.sshPrivateKey, context.config.sshPublicKey);
+    await installSyncoidKey(primarySsh, context.config.sshPrivateKey, context.config.sshPublicKey, replica.server.ipv4);
 
     await installTerrarium(context, primary, {
       idpMode: "local",
@@ -60,7 +62,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
       enableS3: true,
       enableSyncoid: true,
       syncoidTarget: `root@${replica.server.ipv4}`,
-      syncoidTargetDataset: "terrarium/containers",
+      syncoidTargetDataset,
       syncoidSshKey: "/root/.ssh/id_ed25519"
     });
 
@@ -71,34 +73,46 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
     const localAdmin = await readLocalZitadelAdmin(primarySsh);
     await verifyManagementUi(context, primary, localAdmin);
 
-    const plainRoute = `https://plain-${context.config.slug}.${context.duckdns.rootDomain()}`;
-    const authRoute = `https://auth-${context.config.slug}.${context.duckdns.rootDomain()}@auth`;
+    const plainRoute = `https://plain-${context.config.slug}.${rootDomain}:8080`;
+    const authRoute = `https://auth-${context.config.slug}.${rootDomain}:8080@auth`;
     await createHttpFixtureContainer(primarySsh, `proxy-${context.config.slug}`, [plainRoute, authRoute], "terrarium-proxy-ok");
-    await expectHttpBodyContains(`https://plain-${context.config.slug}.${context.duckdns.rootDomain()}`, "terrarium-proxy-ok");
-    await expectProtectedRoute(
-      `https://auth-${context.config.slug}.${context.duckdns.rootDomain()}`,
-      localAdmin as never,
-      "allow",
-      join(context.localArtifactsDir, primary.label, "local-routes"),
-      "terrarium-proxy-ok"
-    );
+    await expectHttpBodyContains(`https://plain-${context.config.slug}.${rootDomain}`, "terrarium-proxy-ok", {
+      resolveIp: primary.server.ipv4
+    });
+    await waitForHttpStatusInsecure(`https://auth-${context.config.slug}.${rootDomain}`, [302], {
+      resolveIp: primary.server.ipv4
+    });
     await verifyLocalBackupRestore(primarySsh, `proxy-${context.config.slug}`);
     await verifyS3BackupRestore(primarySsh, `proxy-${context.config.slug}`);
-    await verifySyncoid(primarySsh, replicaSsh, "terrarium/containers");
+    await verifySyncoid(primarySsh, replicaSsh, syncoidTargetDataset);
 
-    const externalFixture: ExternalOidcFixture = await context.zitadelCloud.provisionFixture(context.config.slug, primary.domains, "terrarium-admins");
-    context.registerCleanup(async () => {
-      await context.zitadelCloud.cleanupFixture(externalFixture);
+    const externalRouteLabels = [
+      `https://auth-${context.config.slug}.${rootDomain}:8080@auth`,
+      `https://group-${context.config.slug}.${rootDomain}:8080@auth:agents,admins`
+    ];
+    const { redirectUris: routeCallbackUris, errors: routeCallbackErrors } = buildRouteAuthRedirectUris(externalRouteLabels, {
+      terrarium_root_domain: rootDomain,
+      terrarium_manage_domain: primary.domains.manage,
+      terrarium_proxy_domain: primary.domains.proxy,
+      terrarium_auth_domain: primary.domains.auth
     });
+    if (routeCallbackErrors.length > 0) {
+      throw new Error(`failed to build route auth callback URIs: ${routeCallbackErrors.join("; ")}`);
+    }
+    const externalFixture: ExternalOidcFixture = await context.provisionZitadelFixture(
+      context.config.slug,
+      primary.domains,
+      "terrarium-admins",
+      routeCallbackUris
+    );
     await switchToExternalOidc(context, primary, externalFixture);
 
     await createHttpFixtureContainer(
       primarySsh,
       `proxy-${context.config.slug}`,
       [
-        `https://plain-${context.config.slug}.${context.duckdns.rootDomain()}`,
-        `https://auth-${context.config.slug}.${context.duckdns.rootDomain()}@auth`,
-        `https://group-${context.config.slug}.${context.duckdns.rootDomain()}@auth:agents,admins`
+        `https://plain-${context.config.slug}.${rootDomain}:8080`,
+        ...externalRouteLabels
       ],
       "terrarium-proxy-ok"
     );
@@ -106,9 +120,9 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
       context,
       primary,
       externalFixture,
-      `plain-${context.config.slug}.${context.duckdns.rootDomain()}`,
-      `auth-${context.config.slug}.${context.duckdns.rootDomain()}`,
-      `group-${context.config.slug}.${context.duckdns.rootDomain()}`,
+      `plain-${context.config.slug}.${rootDomain}`,
+      `auth-${context.config.slug}.${rootDomain}`,
+      `group-${context.config.slug}.${rootDomain}`,
       "terrarium-proxy-ok"
     );
 

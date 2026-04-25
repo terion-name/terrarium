@@ -42,7 +42,114 @@
   loop:
     - "{{ terrarium_traefik_config_dir }}"
     - "{{ terrarium_traefik_config_dir }}/dynamic"
+    - "{{ terrarium_traefik_config_dir }}/bootstrap-certs"
     - /var/lib/traefik
+
+- name: Derive bootstrap certificate root domain
+  ansible.builtin.set_fact:
+    terrarium_bootstrap_tls_root_domain: >-
+      {{
+        terrarium_root_domain
+        if (terrarium_root_domain | default('') | length > 0)
+        else (
+          terrarium_manage_domain.split('.', 1)[1]
+          if ('.' in terrarium_manage_domain)
+          else ''
+        )
+      }}
+
+- name: Build bootstrap certificate SAN list
+  ansible.builtin.set_fact:
+    terrarium_bootstrap_tls_domains: >-
+      {{
+        (
+          [
+            terrarium_manage_domain,
+            terrarium_proxy_domain
+          ]
+          + (
+            [terrarium_auth_domain]
+            if (
+              (terrarium_auth_domain | default('') | length > 0)
+              and not (
+                (terrarium_bootstrap_tls_root_domain | default('') | length > 0)
+                and (
+                  terrarium_auth_domain == terrarium_bootstrap_tls_root_domain
+                  or terrarium_auth_domain.endswith('.' ~ terrarium_bootstrap_tls_root_domain)
+                )
+              )
+            )
+            else []
+          )
+          + (
+            ['*.' ~ terrarium_bootstrap_tls_root_domain, terrarium_bootstrap_tls_root_domain]
+            if (terrarium_bootstrap_tls_root_domain | default('') | length > 0)
+            else []
+          )
+        )
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+
+- name: Render Traefik bootstrap certificate OpenSSL config
+  ansible.builtin.template:
+    src: bootstrap-cert-openssl.cnf.j2
+    dest: "{{ terrarium_traefik_config_dir }}/bootstrap-certs/openssl.cnf"
+    mode: "0644"
+  register: terrarium_bootstrap_tls_openssl_config
+
+- name: Check whether Traefik bootstrap certificate exists
+  ansible.builtin.stat:
+    path: "{{ terrarium_traefik_config_dir }}/bootstrap-certs/terrarium-bootstrap.crt"
+  register: terrarium_bootstrap_tls_cert_stat
+
+- name: Generate Traefik bootstrap certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -days
+      - "7"
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - "{{ terrarium_traefik_config_dir }}/bootstrap-certs/terrarium-bootstrap.key"
+      - -out
+      - "{{ terrarium_traefik_config_dir }}/bootstrap-certs/terrarium-bootstrap.crt"
+      - -config
+      - "{{ terrarium_traefik_config_dir }}/bootstrap-certs/openssl.cnf"
+  when:
+    - terrarium_bootstrap_tls_openssl_config.changed or not terrarium_bootstrap_tls_cert_stat.stat.exists
+  notify: restart traefik
+
+- name: Render Traefik bootstrap certificate config
+  ansible.builtin.template:
+    src: bootstrap-cert.yml.j2
+    dest: "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"
+    mode: "0644"
+  notify: restart traefik
+
+- name: Install Traefik bootstrap certificate into system trust store
+  ansible.builtin.copy:
+    src: "{{ terrarium_traefik_config_dir }}/bootstrap-certs/terrarium-bootstrap.crt"
+    dest: /usr/local/share/ca-certificates/terrarium-bootstrap.crt
+    mode: "0644"
+    remote_src: true
+  register: terrarium_bootstrap_tls_system_ca
+
+- name: Refresh system CA certificates for bootstrap trust
+  ansible.builtin.command: update-ca-certificates
+  when: terrarium_bootstrap_tls_system_ca.changed
+  changed_when: terrarium_bootstrap_tls_system_ca.changed
+
+- name: Restart LXD after bootstrap trust changes
+  ansible.builtin.command: systemctl try-restart snap.lxd.daemon.service
+  when: terrarium_bootstrap_tls_system_ca.changed
+  changed_when: false
+  failed_when: false
 
 - name: Create ACME storage file
   ansible.builtin.file:
@@ -69,7 +176,7 @@
     src: terrarium-traefik-sync.service.j2
     dest: /etc/systemd/system/terrarium-traefik-sync.service
     mode: "0644"
-  notify: reload traefik sync timer
+  notify: reload traefik sync systemd
 
 - name: Install Traefik sync timer
   ansible.builtin.copy:
@@ -86,13 +193,7 @@
 
       [Install]
       WantedBy=timers.target
-  notify: reload traefik sync timer
-
-- name: Enable Traefik sync timer
-  ansible.builtin.systemd:
-    name: terrarium-traefik-sync.timer
-    state: started
-    enabled: true
+  notify: reload traefik sync systemd
 
 - name: Enable Traefik
   ansible.builtin.systemd:

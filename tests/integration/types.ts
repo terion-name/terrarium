@@ -6,6 +6,7 @@ export type IntegrationCliOptions = {
   keepOnFailure: boolean;
   reuseInfra: boolean;
   releasePreflight: boolean;
+  cleanupOnly: boolean;
 };
 
 export type IntegrationConfig = {

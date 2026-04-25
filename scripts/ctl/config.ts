@@ -12,14 +12,17 @@ import {
   success
 } from "./context";
 import { configBoolean, configString, normalizeS3Endpoint } from "../lib/common";
-import { writeFileSync } from "node:fs";
-import { verifyOidcConfig, verifyS3Config } from "./verify";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { verifyOidcConfig, verifyS3Config, type OidcVerificationOptions } from "./verify";
+
+const LOCAL_IDP_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
 
 /** Callback bundle used after any persisted config change that affects the running host. */
 export type ReconcileActions = {
   reconfigure: () => Promise<void>;
   syncProxy: () => Promise<void>;
   syncIdp: () => Promise<void>;
+  readLocalIdpOutputs?: () => Promise<string> | string;
 };
 
 /** Reusable option bag for `set domains`. */
@@ -69,19 +72,43 @@ export type SetSyncoidOptions = {
   syncoidSshKey?: string;
 };
 
+type SetIdpPlan = {
+  summary: string;
+  verifyOidc?: OidcVerificationOptions;
+};
+
 /**
  * Writes a config document and converges the live host to match it.
  *
  * Every `set ...` command should go through this helper so the persisted config
  * and the actual host state never drift for long.
  */
+async function readLocalIdpOutputs(actions: ReconcileActions): Promise<string> {
+  if (actions.readLocalIdpOutputs) {
+    return await actions.readLocalIdpOutputs();
+  }
+  if (!existsSync(LOCAL_IDP_OUTPUTS_PATH)) {
+    return "";
+  }
+  return readFileSync(LOCAL_IDP_OUTPUTS_PATH, "utf8");
+}
+
+export async function runReconcileActions(config: MutableConfig, actions: ReconcileActions): Promise<void> {
+  await actions.reconfigure();
+  if (localIdpEnabled(config)) {
+    const outputsBeforeSync = await readLocalIdpOutputs(actions);
+    await actions.syncIdp();
+    const outputsAfterSync = await readLocalIdpOutputs(actions);
+    if (outputsAfterSync !== outputsBeforeSync) {
+      await actions.reconfigure();
+    }
+  }
+  await actions.syncProxy();
+}
+
 async function persistAndReconcile(config: MutableConfig, summary: string, actions: ReconcileActions): Promise<void> {
   writeFileSync(CONFIG_PATH, stringify(config), "utf8");
-  await actions.reconfigure();
-  await actions.syncProxy();
-  if (localIdpEnabled(config)) {
-    await actions.syncIdp();
-  }
+  await runReconcileActions(config, actions);
   console.log(success(summary));
 }
 
@@ -153,8 +180,7 @@ export async function setEmailsCmd(options: SetEmailsOptions, actions: Reconcile
 }
 
 /** Switches between self-hosted ZITADEL and external OIDC management auth modes. */
-export async function setIdpCmd(options: SetIdpOptions, actions: ReconcileActions): Promise<void> {
-  const config = loadMutableConfig();
+export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions): SetIdpPlan {
   const publicIp = configString(config, "terrarium_public_ip");
   const rootDomain = configString(config, "terrarium_root_domain");
   const nextMode = options.mode.trim().toLowerCase();
@@ -173,6 +199,7 @@ export async function setIdpCmd(options: SetIdpOptions, actions: ReconcileAction
     setConfigValue(config, "terrarium_oidc_client_secret", "");
     const currentAdmin = options.zitadelAdminEmail || configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
     setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(currentAdmin, "--zitadel-admin-email"));
+    return { summary: "Switched IDP mode to local" };
   } else {
     const issuer = options.oidc || configString(config, "terrarium_oidc_issuer");
     const nextAdminGroup = options.adminGroup || configString(config, "terrarium_admin_group");
@@ -190,21 +217,33 @@ export async function setIdpCmd(options: SetIdpOptions, actions: ReconcileAction
     if (!clientSecret) {
       throw new Error("--oidc-secret is required when mode is oidc");
     }
-    setConfigValue(config, "terrarium_auth_domain", "");
+    if (options.authDomain) {
+      setConfigValue(config, "terrarium_auth_domain", options.authDomain);
+    }
     setConfigValue(config, "terrarium_admin_group", nextAdminGroup);
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", clientId);
     setConfigValue(config, "terrarium_oidc_client_secret", clientSecret);
-    await verifyOidcConfig({
-      issuer: configString(config, "terrarium_oidc_issuer"),
-      clientId: configString(config, "terrarium_oidc_client_id"),
-      clientSecret: configString(config, "terrarium_oidc_client_secret"),
-      manageDomain: configString(config, "terrarium_manage_domain"),
-      lxdDomain: configString(config, "terrarium_lxd_domain")
-    });
+    return {
+      summary: "Switched IDP mode to oidc",
+      verifyOidc: {
+        issuer: configString(config, "terrarium_oidc_issuer"),
+        clientId: configString(config, "terrarium_oidc_client_id"),
+        clientSecret: configString(config, "terrarium_oidc_client_secret"),
+        manageDomain: configString(config, "terrarium_manage_domain"),
+        lxdDomain: configString(config, "terrarium_lxd_domain")
+      }
+    };
   }
+}
 
-  await persistAndReconcile(config, nextMode === "local" ? "Switched IDP mode to local" : "Switched IDP mode to oidc", actions);
+export async function setIdpCmd(options: SetIdpOptions, actions: ReconcileActions): Promise<void> {
+  const config = loadMutableConfig();
+  const plan = applySetIdpConfig(config, options);
+  if (plan.verifyOidc) {
+    await verifyOidcConfig(plan.verifyOidc);
+  }
+  await persistAndReconcile(config, plan.summary, actions);
 }
 
 /** Updates or disables S3 backup export settings. */
@@ -274,23 +313,23 @@ export async function setSyncoidCmd(options: SetSyncoidOptions, actions: Reconci
 export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
   return {
     domains: {
-      manageDomain: cliOption(rawOptions, "manageDomain"),
-      proxyDomain: cliOption(rawOptions, "proxyDomain"),
-      lxdDomain: cliOption(rawOptions, "lxdDomain"),
-      authDomain: cliOption(rawOptions, "authDomain")
+      manageDomain: cliOption(rawOptions, "manageDomain", ["manage-domain"]),
+      proxyDomain: cliOption(rawOptions, "proxyDomain", ["proxy-domain"]),
+      lxdDomain: cliOption(rawOptions, "lxdDomain", ["lxd-domain"]),
+      authDomain: cliOption(rawOptions, "authDomain", ["auth-domain"])
     },
     emails: {
       email: cliOption(rawOptions, "email"),
-      acmeEmail: cliOption(rawOptions, "acmeEmail"),
-      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail")
+      acmeEmail: cliOption(rawOptions, "acmeEmail", ["acme-email"]),
+      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
     },
     idp: {
-      adminGroup: cliOption(rawOptions, "adminGroup"),
-      authDomain: cliOption(rawOptions, "authDomain"),
+      adminGroup: cliOption(rawOptions, "adminGroup", ["admin-group"]),
+      authDomain: cliOption(rawOptions, "authDomain", ["auth-domain"]),
       oidc: cliOption(rawOptions, "oidc"),
-      oidcClient: cliOption(rawOptions, "oidcClient"),
-      oidcSecret: cliOption(rawOptions, "oidcSecret"),
-      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail")
+      oidcClient: cliOption(rawOptions, "oidcClient", ["oidc-client"]),
+      oidcSecret: cliOption(rawOptions, "oidcSecret", ["oidc-secret"]),
+      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
     },
     s3: {
       enable: Boolean(rawOptions.enable),
@@ -305,9 +344,9 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
     syncoid: {
       enable: Boolean(rawOptions.enable),
       disable: Boolean(rawOptions.disable),
-      syncoidTarget: cliOption(rawOptions, "syncoidTarget"),
-      syncoidTargetDataset: cliOption(rawOptions, "syncoidTargetDataset"),
-      syncoidSshKey: cliOption(rawOptions, "syncoidSshKey")
+      syncoidTarget: cliOption(rawOptions, "syncoidTarget", ["syncoid-target"]),
+      syncoidTargetDataset: cliOption(rawOptions, "syncoidTargetDataset", ["syncoid-target-dataset"]),
+      syncoidSshKey: cliOption(rawOptions, "syncoidSshKey", ["syncoid-ssh-key"])
     }
   };
 }

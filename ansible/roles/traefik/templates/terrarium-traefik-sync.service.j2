@@ -1,8 +1,19 @@
 [Unit]
 Description=Sync LXC proxy labels into Traefik configuration
-After=traefik.service snap.lxd.daemon.service network-online.target
-Wants=network-online.target
+Wants=network-online.target traefik.service snap.lxd.daemon.service
+After=network-online.target traefik.service snap.lxd.daemon.service terrarium-zitadel.service terrarium-oauth2-proxy.service
+ConditionPathExists=/usr/local/bin/terrariumctl
+ConditionPathExists={{ terrarium_config_path }}
+ConditionPathExists=/snap/bin/lxd
+ConditionPathExists=/snap/bin/lxc
+ConditionPathExists=/usr/bin/timeout
+ConditionPathExists=/usr/bin/test
+ConditionPathExists=/var/snap/lxd/common/lxd/unix.socket
 
 [Service]
 Type=oneshot
+TimeoutStartSec=120
+ExecCondition=/usr/bin/test -S /var/snap/lxd/common/lxd/unix.socket
+ExecCondition=/usr/bin/timeout 60s /snap/bin/lxd waitready
+ExecCondition=/snap/bin/lxc info
 ExecStart=/usr/local/bin/terrariumctl proxy sync

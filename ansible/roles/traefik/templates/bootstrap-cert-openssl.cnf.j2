@@ -1,0 +1,18 @@
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+
+[dn]
+CN = {{ terrarium_bootstrap_tls_domains[0] }}
+
+[v3_req]
+basicConstraints = critical, CA:true, pathlen:0
+keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign, cRLSign
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+{% for domain in terrarium_bootstrap_tls_domains %}
+DNS.{{ loop.index }} = {{ domain }}
+{% endfor %}
