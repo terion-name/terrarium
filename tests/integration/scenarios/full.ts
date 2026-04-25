@@ -1,6 +1,12 @@
 import { IntegrationContext } from "../context";
-import { buildRouteAuthRedirectUris } from "../../../scripts/terrarium-traefik-sync";
-import { captureFailureArtifacts, createHttpFixtureContainer, installTerrarium, preparePartitionTarget, provisionHost } from "./common";
+import {
+  captureFailureArtifacts,
+  createHttpFixtureContainer,
+  expectedRouteAuthRedirectUris,
+  installTerrarium,
+  preparePartitionTarget,
+  provisionHost
+} from "./common";
 import { runSmokeSuite } from "./smoke";
 
 function shellArg(value: string): string {
@@ -12,23 +18,15 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
   await runSmokeSuite(context);
 
   const sshKeyId = await context.registerHetznerKey(`terrarium-full-${context.config.slug}`);
-  const fileHost = await provisionHost(context, { label: "full-file", domains: context.domainBundle("full-file"), withVolume: false }, sshKeyId);
-  const partitionHost = await provisionHost(context, { label: "full-partition", domains: context.domainBundle("full-partition"), withVolume: true }, sshKeyId);
+  const fileHost = await provisionHost(context, { label: "full-file", withVolume: false }, sshKeyId);
+  const partitionHost = await provisionHost(context, { label: "full-partition", withVolume: true }, sshKeyId);
   const fileSsh = context.ssh(fileHost);
   const partitionSsh = context.ssh(partitionHost);
-  const rootDomain = context.duckdns.rootDomain();
+  const rootDomain = context.publicDns.rootDomain(fileHost.server.ipv4);
 
   try {
     const composeRouteLabels = [`https://compose-${context.config.slug}.${rootDomain}@auth:agents,admins`];
-    const { redirectUris: routeCallbackUris, errors: routeCallbackErrors } = buildRouteAuthRedirectUris(composeRouteLabels, {
-      terrarium_root_domain: rootDomain,
-      terrarium_manage_domain: fileHost.domains.manage,
-      terrarium_proxy_domain: fileHost.domains.proxy,
-      terrarium_auth_domain: fileHost.domains.auth
-    });
-    if (routeCallbackErrors.length > 0) {
-      throw new Error(`failed to build route auth callback URIs: ${routeCallbackErrors.join("; ")}`);
-    }
+    const routeCallbackUris = expectedRouteAuthRedirectUris(composeRouteLabels);
     const externalFixture = await context.provisionZitadelFixture(
       `${context.config.slug}-full`,
       fileHost.domains,
@@ -36,8 +34,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       routeCallbackUris
     );
 
-    await context.duckdns.update(fileHost.server.ipv4);
-    await context.duckdns.waitForHosts(
+    await context.publicDns.waitForHosts(
       [fileHost.domains.manage, fileHost.domains.proxy, fileHost.domains.lxd, fileHost.domains.auth],
       fileHost.server.ipv4
     );
@@ -52,8 +49,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       adminGroup: externalFixture.adminGroup
     });
 
-    await context.duckdns.update(partitionHost.server.ipv4);
-    await context.duckdns.waitForHosts(
+    await context.publicDns.waitForHosts(
       [partitionHost.domains.manage, partitionHost.domains.proxy, partitionHost.domains.lxd, partitionHost.domains.auth],
       partitionHost.server.ipv4
     );
@@ -65,8 +61,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       storageSource: "auto"
     });
 
-    await context.duckdns.update(fileHost.server.ipv4);
-    await context.duckdns.waitForHosts(
+    await context.publicDns.waitForHosts(
       [fileHost.domains.manage, fileHost.domains.proxy, fileHost.domains.lxd, fileHost.domains.auth],
       fileHost.server.ipv4
     );
@@ -95,9 +90,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     await fileSsh.exec("apt-get update && apt-get install -y expect");
     await fileSsh.exec(
       `expect -c 'set timeout 120; spawn bash -lc "terrariumctl backup restore --instance compose-${context.config.slug} --as-new compose-${context.config.slug}-restored"; expect { -re {Select.*pool} { send "terrarium\\r"; exp_continue } eof {} }'`
-    ).catch(() => {
-      // The prompt shape varies across LXD versions; the helper is intentionally best-effort in CI.
-    });
+    );
 
     await fileSsh.exec(
       `terrariumctl set s3 --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(

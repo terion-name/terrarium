@@ -10,12 +10,30 @@ type LoginOptions = {
   outputDir: string;
   resolveHosts?: Record<string, string>;
   expected?: LoginExpectation;
+  ignoreHTTPSErrors?: boolean;
 };
 
 const BROWSER_WAIT_TIMEOUT_MS = 120000;
 const BROWSER_CLOSE_TIMEOUT_MS = 10000;
 const BODY_SNIPPET_LENGTH = 4000;
 const DENIAL_TEXT_MARKERS = ["403", "forbidden", "access denied", "not authorized", "permission denied"] as const;
+const ERROR_TEXT_MARKERS = [
+  "400 bad request",
+  "401 unauthorized",
+  "403 forbidden",
+  "404 page not found",
+  "500 internal server error",
+  "502 bad gateway",
+  "503 service unavailable",
+  "504 gateway timeout",
+  "bad gateway",
+  "service unavailable",
+  "gateway timeout"
+] as const;
+const COCKPIT_TEXT_MARKERS = ["Cockpit", "Log in", "Username", "Password"] as const;
+const TRAEFIK_TEXT_MARKERS = ["Traefik", "Dashboard", "HTTP", "Routers", "Services"] as const;
+const USERNAME_SUBMIT_SELECTORS = submitControlSelectors(["Next", "Continue", "Sign in"]);
+const PASSWORD_SUBMIT_SELECTORS = submitControlSelectors(["Sign in", "Login", "Continue"]);
 
 async function firstVisible(page: Page, selectors: string[]): Promise<string> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
@@ -56,7 +74,8 @@ async function typeInto(page: Page, selector: string, value: string): Promise<vo
   const locator = page.locator(selector).first();
   await locator.waitFor({ state: "visible" });
   await locator.click({ force: true });
-  await locator.fill(value);
+  await locator.fill("");
+  await locator.type(value, { delay: 5 });
 
   let actual = await locator.inputValue().catch(() => "");
   if (actual !== value) {
@@ -86,6 +105,24 @@ async function typeInto(page: Page, selector: string, value: string): Promise<vo
   await locator.press("Tab").catch(() => undefined);
 }
 
+function submitControlSelectors(labels: string[]): string[] {
+  const escapedLabels = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const labelPattern = escapedLabels.join("|");
+  return [
+    '[data-testid="submit-button"]',
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'input[type="button"]',
+    ...labels.flatMap((label) => [
+      `button:has-text("${label}")`,
+      `[role="button"]:has-text("${label}")`,
+      `input[type="submit"][value="${label}"]`,
+      `input[type="button"][value="${label}"]`
+    ]),
+    `text=/^\\s*(${labelPattern})\\s*$/i`
+  ];
+}
+
 async function waitForEnabled(page: Page, selectors: string[]): Promise<void> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
 
@@ -109,13 +146,11 @@ async function submitForm(page: Page, buttonSelectors: string[]): Promise<void> 
 
 async function waitForReturnToTargetHost(
   page: Page,
-  targetUrl: string,
   targetHost: string,
   userEmail: string,
   expected: LoginExpectation
 ): Promise<void> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
-  let lastTargetNavigation = 0;
   let lastResubmit = 0;
   let lastAccountSelectionClick = 0;
 
@@ -167,16 +202,9 @@ async function waitForReturnToTargetHost(
       const passwordInput = page.locator('[data-testid="password-text-input"], input[name="password"], input[type="password"]').first();
       if (await passwordInput.isVisible().catch(() => false)) {
         await passwordInput.press("Enter").catch(() => undefined);
-        await clickFirst(page, ['[data-testid="submit-button"]', 'button:has-text("Sign in")', 'button:has-text("Login")', 'button:has-text("Continue")']).catch(
-          () => undefined
-        );
+        await clickFirst(page, PASSWORD_SUBMIT_SELECTORS).catch(() => undefined);
         lastResubmit = Date.now();
       }
-    }
-
-    if (Date.now() - lastTargetNavigation > 10000 && remainingMs < BROWSER_WAIT_TIMEOUT_MS - 15000) {
-      await page.goto(targetUrl, { waitUntil: "commit", timeout: 30000 }).catch(() => undefined);
-      lastTargetNavigation = Date.now();
     }
 
     await page.waitForTimeout(500);
@@ -257,61 +285,7 @@ async function clickAccountSelection(page: Page, userEmail: string): Promise<boo
     }
   }
 
-  return await page
-    .evaluate((email) => {
-      const isVisible = (element: Element) => {
-        const style = window.getComputedStyle(element);
-        const box = element.getBoundingClientRect();
-        return style.visibility !== "hidden" && style.display !== "none" && box.width > 0 && box.height > 0;
-      };
-
-      const score = (element: Element) => {
-        let value = 0;
-        const href = element instanceof HTMLAnchorElement ? element.href : "";
-        const textLength = (element.textContent ?? "").trim().length;
-        if (href.includes("loginName=")) {
-          value += 1000;
-        }
-        if (href.includes(encodeURIComponent(email))) {
-          value += 500;
-        }
-        if (element instanceof HTMLAnchorElement || element instanceof HTMLButtonElement) {
-          value += 250;
-        }
-        if (element.getAttribute("role") === "button") {
-          value += 125;
-        }
-        if (element.hasAttribute("tabindex")) {
-          value += 50;
-        }
-        return value - textLength;
-      };
-
-      const clickableAncestors = [...document.querySelectorAll("*")]
-        .filter((element) => isVisible(element) && (element.textContent ?? "").includes(email))
-        .map((element) =>
-          element.closest("a[href],button,[role='button'],[tabindex]") ??
-          (element.querySelector("a[href],button,[role='button'],[tabindex]") as Element | null) ??
-          element
-        )
-        .filter((element): element is Element => Boolean(element) && isVisible(element));
-
-      const uniqueCandidates = [...new Set(clickableAncestors)].sort((left, right) => score(right) - score(left));
-      const target = uniqueCandidates[0] as HTMLElement | undefined;
-      if (!target) {
-        const url = new URL(window.location.href);
-        url.searchParams.set("loginName", email);
-        window.location.assign(url.toString());
-        return false;
-      }
-
-      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      return true;
-    }, userEmail)
-    .catch(() => false);
+  return false;
 }
 
 async function accountSelectionClickPoint(page: Page, userEmail: string): Promise<{ x: number; y: number } | undefined> {
@@ -379,7 +353,7 @@ async function accountSelectionClickPoint(page: Page, userEmail: string): Promis
 export async function withBrowser<T>(
   outputDir: string,
   runFlow: (browser: Browser) => Promise<T>,
-  options: { resolveHosts?: Record<string, string> } = {}
+  options: { resolveHosts?: Record<string, string>; ignoreHTTPSErrors?: boolean } = {}
 ): Promise<T> {
   mkdirSync(outputDir, { recursive: true });
   const browser = await chromium.launch({
@@ -405,7 +379,7 @@ async function loginThroughZitadelWithBrowser(
   url: string,
   user: OidcTestUser,
   options: LoginOptions
-): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string }> {
+): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
   const expected = options.expected ?? "allow";
   const screenshotPath = browserScreenshotPath(options.outputDir, url, user.email, expected, "success");
   const targetHost = new URL(url).host;
@@ -414,7 +388,7 @@ async function loginThroughZitadelWithBrowser(
   let stage = "creating browser context";
 
   try {
-    context = await browser.newContext({ ignoreHTTPSErrors: true });
+    context = await browser.newContext({ ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false });
     stage = "opening browser page";
     page = await context.newPage();
     page.setDefaultTimeout(BROWSER_WAIT_TIMEOUT_MS);
@@ -434,9 +408,9 @@ async function loginThroughZitadelWithBrowser(
     stage = "entering username";
     await typeInto(page, emailSelector, user.email);
     stage = "waiting for username submit";
-    await waitForEnabled(page, ['[data-testid="submit-button"]', 'button:has-text("Next")', 'button:has-text("Continue")', 'button:has-text("Sign in")']);
+    await waitForEnabled(page, USERNAME_SUBMIT_SELECTORS);
     stage = "submitting username";
-    await submitForm(page, ['[data-testid="submit-button"]', 'button:has-text("Next")', 'button:has-text("Continue")', 'button:has-text("Sign in")']);
+    await submitForm(page, USERNAME_SUBMIT_SELECTORS);
 
     stage = "waiting for password input";
     const passwordSelector = await firstVisible(page, [
@@ -449,19 +423,20 @@ async function loginThroughZitadelWithBrowser(
     stage = "entering password";
     await typeInto(page, passwordSelector, user.password);
     stage = "waiting for password submit";
-    await waitForEnabled(page, ['[data-testid="submit-button"]', 'button:has-text("Sign in")', 'button:has-text("Login")', 'button:has-text("Continue")']);
+    await waitForEnabled(page, PASSWORD_SUBMIT_SELECTORS);
     stage = "submitting password";
-    await submitForm(page, ['[data-testid="submit-button"]', 'button:has-text("Sign in")', 'button:has-text("Login")', 'button:has-text("Continue")']);
+    await submitForm(page, PASSWORD_SUBMIT_SELECTORS);
 
     stage = `waiting for ${expected} return to target host`;
-    await waitForReturnToTargetHost(page, url, targetHost, user.email, expected);
+    await waitForReturnToTargetHost(page, targetHost, user.email, expected);
     stage = "waiting for post-login document";
     await page.waitForLoadState("domcontentloaded", { timeout: BROWSER_WAIT_TIMEOUT_MS }).catch(() => undefined);
     stage = "capturing success screenshot";
     await page.screenshot({ path: screenshotPath, fullPage: true });
     const finalUrl = page.url();
+    const title = await page.title().catch(() => "");
     const bodyText = await page.locator("body").innerText().catch(() => "");
-    return { finalUrl, screenshotPath, bodyText };
+    return { finalUrl, screenshotPath, bodyText, title };
   } catch (error) {
     const failurePath = browserScreenshotPath(options.outputDir, url, user.email, expected, "failure");
     let failureScreenshot: string | undefined;
@@ -490,11 +465,11 @@ export async function loginThroughZitadel(
   url: string,
   user: OidcTestUser,
   options: LoginOptions
-): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string }> {
+): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
   return await withBrowser(
     options.outputDir,
     async (browser) => await loginThroughZitadelWithBrowser(browser, url, user, options),
-    { resolveHosts: options.resolveHosts }
+    { resolveHosts: options.resolveHosts, ignoreHTTPSErrors: options.ignoreHTTPSErrors }
   );
 }
 
@@ -542,11 +517,13 @@ export async function expectManagementUi(
     if (cockpitFinal.host !== cockpitTarget.host) {
       throw new Error(`unexpected post-login cockpit host: ${cockpit.finalUrl}`);
     }
+    assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
     const proxy = await loginThroughZitadelWithBrowser(browser, proxyUrl, user, { outputDir });
     if (!proxy.finalUrl.includes("/dashboard")) {
       throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
     }
+    assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
   }, { resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined });
 }
 
@@ -591,6 +568,25 @@ export function browserScreenshotPath(
 export function bodyContainsDenialText(body: string): boolean {
   const normalized = body.toLowerCase();
   return DENIAL_TEXT_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+export function bodyContainsHttpErrorText(body: string): boolean {
+  const normalized = body.toLowerCase();
+  return ERROR_TEXT_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+export function bodyContainsAnyMarker(body: string, markers: readonly string[]): boolean {
+  const normalized = body.toLowerCase();
+  return markers.some((marker) => normalized.includes(marker.toLowerCase()));
+}
+
+function assertUserFacingPageBody(body: string, markers: readonly string[], label: string): void {
+  if (bodyContainsHttpErrorText(body)) {
+    throw new Error(`${label} rendered an HTTP error page:\n${bodySnippetForError(body)}`);
+  }
+  if (!bodyContainsAnyMarker(body, markers)) {
+    throw new Error(`${label} did not render expected UI markers; body:\n${bodySnippetForError(body) || "<empty>"}`);
+  }
 }
 
 export function isLoginOrOauthCallbackPlumbingPath(pathname: string): boolean {

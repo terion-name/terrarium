@@ -110,6 +110,38 @@ done
 `.trim();
 }
 
+function tlsProbeCommand(host: ManagedHost): string {
+  return `
+set +e
+domains=(
+  ${shellEscape(host.domains.manage)}
+  ${shellEscape(host.domains.proxy)}
+  ${shellEscape(host.domains.lxd)}
+  ${shellEscape(host.domains.auth)}
+)
+
+for domain in "\${domains[@]}"; do
+  if [ -z "$domain" ]; then
+    continue
+  fi
+  echo
+  echo "== $domain =="
+  echo "-- presented certificate --"
+  cert_pem=$(timeout 15s openssl s_client -connect 127.0.0.1:443 -servername "$domain" -showcerts </dev/null 2>/dev/null)
+  cert_exit=$?
+  if [ "$cert_exit" -eq 0 ] && [ -n "$cert_pem" ]; then
+    printf '%s\\n' "$cert_pem" | openssl x509 -noout -subject -issuer -dates -ext subjectAltName 2>&1
+  else
+    echo "<no certificate>"
+  fi
+  echo "openssl_exit=$?"
+  echo "-- strict curl --"
+  timeout 15s curl -4sS --noproxy "*" --connect-timeout 2 --max-time 10 --resolve "$domain:443:127.0.0.1" -o /dev/null -w "%{http_code}\\n" "https://$domain" 2>&1
+  echo "curl_exit=$?"
+done
+`.trim();
+}
+
 function proxySyncCommand(): string {
   return `
 set +e
@@ -148,6 +180,11 @@ function hostDiagnostics(host: ManagedHost): HostDiagnostic[] {
     {
       name: "traefik-api-rawdata",
       command: traefikRawdataCommand(host),
+      timeoutMs: 80000
+    },
+    {
+      name: "tls-probes",
+      command: tlsProbeCommand(host),
       timeoutMs: 80000
     },
     {

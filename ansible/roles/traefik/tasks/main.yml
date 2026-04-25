@@ -45,51 +45,15 @@
     - "{{ terrarium_traefik_config_dir }}/bootstrap-certs"
     - /var/lib/traefik
 
-- name: Derive bootstrap certificate root domain
+- name: Determine whether bootstrap TLS is required
   ansible.builtin.set_fact:
-    terrarium_bootstrap_tls_root_domain: >-
-      {{
-        terrarium_root_domain
-        if (terrarium_root_domain | default('') | length > 0)
-        else (
-          terrarium_manage_domain.split('.', 1)[1]
-          if ('.' in terrarium_manage_domain)
-          else ''
-        )
-      }}
+    terrarium_bootstrap_tls_enabled: "{{ terrarium_idp_mode == 'local' and (terrarium_auth_domain | default('') | length > 0) }}"
 
 - name: Build bootstrap certificate SAN list
   ansible.builtin.set_fact:
     terrarium_bootstrap_tls_domains: >-
       {{
-        (
-          [
-            terrarium_manage_domain,
-            terrarium_proxy_domain
-          ]
-          + (
-            [terrarium_auth_domain]
-            if (
-              (terrarium_auth_domain | default('') | length > 0)
-              and not (
-                (terrarium_bootstrap_tls_root_domain | default('') | length > 0)
-                and (
-                  terrarium_auth_domain == terrarium_bootstrap_tls_root_domain
-                  or terrarium_auth_domain.endswith('.' ~ terrarium_bootstrap_tls_root_domain)
-                )
-              )
-            )
-            else []
-          )
-          + (
-            ['*.' ~ terrarium_bootstrap_tls_root_domain, terrarium_bootstrap_tls_root_domain]
-            if (terrarium_bootstrap_tls_root_domain | default('') | length > 0)
-            else []
-          )
-        )
-        | reject('equalto', '')
-        | unique
-        | list
+        [terrarium_auth_domain] if terrarium_bootstrap_tls_enabled else []
       }}
 
 - name: Render Traefik bootstrap certificate OpenSSL config
@@ -98,11 +62,13 @@
     dest: "{{ terrarium_traefik_config_dir }}/bootstrap-certs/openssl.cnf"
     mode: "0644"
   register: terrarium_bootstrap_tls_openssl_config
+  when: terrarium_bootstrap_tls_enabled
 
 - name: Check whether Traefik bootstrap certificate exists
   ansible.builtin.stat:
     path: "{{ terrarium_traefik_config_dir }}/bootstrap-certs/terrarium-bootstrap.crt"
   register: terrarium_bootstrap_tls_cert_stat
+  when: terrarium_bootstrap_tls_enabled
 
 - name: Generate Traefik bootstrap certificate
   ansible.builtin.command:
@@ -122,6 +88,7 @@
       - -config
       - "{{ terrarium_traefik_config_dir }}/bootstrap-certs/openssl.cnf"
   when:
+    - terrarium_bootstrap_tls_enabled
     - terrarium_bootstrap_tls_openssl_config.changed or not terrarium_bootstrap_tls_cert_stat.stat.exists
   notify: restart traefik
 
@@ -131,6 +98,14 @@
     dest: "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"
     mode: "0644"
   notify: restart traefik
+  when: terrarium_bootstrap_tls_enabled
+
+- name: Remove Traefik bootstrap certificate config when bootstrap TLS is not required
+  ansible.builtin.file:
+    path: "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"
+    state: absent
+  notify: restart traefik
+  when: not terrarium_bootstrap_tls_enabled
 
 - name: Install Traefik bootstrap certificate into system trust store
   ansible.builtin.copy:
@@ -139,15 +114,20 @@
     mode: "0644"
     remote_src: true
   register: terrarium_bootstrap_tls_system_ca
+  when: terrarium_bootstrap_tls_enabled
 
 - name: Refresh system CA certificates for bootstrap trust
   ansible.builtin.command: update-ca-certificates
-  when: terrarium_bootstrap_tls_system_ca.changed
+  when:
+    - terrarium_bootstrap_tls_enabled
+    - terrarium_bootstrap_tls_system_ca.changed
   changed_when: terrarium_bootstrap_tls_system_ca.changed
 
 - name: Restart LXD after bootstrap trust changes
   ansible.builtin.command: systemctl try-restart snap.lxd.daemon.service
-  when: terrarium_bootstrap_tls_system_ca.changed
+  when:
+    - terrarium_bootstrap_tls_enabled
+    - terrarium_bootstrap_tls_system_ca.changed
   changed_when: false
   failed_when: false
 

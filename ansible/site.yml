@@ -108,6 +108,52 @@
       until: terrarium_post_proxy_sync.rc == 0
       changed_when: false
 
+    - name: Remove local auth bootstrap TLS material before requesting public TLS
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"
+        - "{{ terrarium_traefik_config_dir }}/bootstrap-certs"
+        - /usr/local/share/ca-certificates/terrarium-bootstrap.crt
+      register: terrarium_bootstrap_tls_removed
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_auth_domain | default('') | length > 0
+
+    - name: Refresh system CA certificates after retiring bootstrap TLS
+      ansible.builtin.command: update-ca-certificates
+      when: terrarium_bootstrap_tls_removed is changed
+
+    - name: Restart Traefik after retiring bootstrap TLS
+      ansible.builtin.systemd:
+        name: traefik
+        state: restarted
+      when: terrarium_bootstrap_tls_removed is changed
+
+    - name: Wait for local auth domain to serve public TLS
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -fsS
+          - --noproxy
+          - "*"
+          - --resolve
+          - "{{ terrarium_auth_domain }}:443:127.0.0.1"
+          - --connect-timeout
+          - "10"
+          - --max-time
+          - "20"
+          - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
+      register: terrarium_auth_public_tls
+      retries: 36
+      delay: 10
+      until: terrarium_auth_public_tls.rc == 0
+      changed_when: false
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_auth_domain | default('') | length > 0
+
     - name: Enable Traefik sync timer after dependent services are configured
       ansible.builtin.systemd:
         name: terrarium-traefik-sync.timer

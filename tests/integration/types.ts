@@ -26,8 +26,7 @@ export type IntegrationConfig = {
   sshPrivateKey: string;
   sshPublicKey: string;
   sshUser: string;
-  duckdnsDomain: string;
-  duckdnsToken: string;
+  ipDnsDomain: string;
   zitadelCloudIssuer: string;
   zitadelCloudPat: string;
   zitadelCloudOrgId: string;

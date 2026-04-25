@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parse, stringify } from "yaml";
@@ -33,22 +33,42 @@ export function readYamlFile<T>(path: string, prefix: string): T {
  * This keeps configuration updates idempotent and avoids unnecessary service
  * restarts triggered by no-op file rewrites.
  */
-export function writeIfChanged(path: string, content: string): boolean {
+type WriteIfChangedOptions = {
+  mode?: number;
+  directoryMode?: number;
+};
+
+function applyMode(path: string, mode: number | undefined): void {
+  if (mode !== undefined) {
+    chmodSync(path, mode);
+  }
+}
+
+export function writeIfChanged(path: string, content: string, options: WriteIfChangedOptions = {}): boolean {
+  const targetDir = dirname(path);
+  if (options.directoryMode !== undefined) {
+    mkdirSync(targetDir, { recursive: true, mode: options.directoryMode });
+    applyMode(targetDir, options.directoryMode);
+  }
+
   const current = existsSync(path) ? readFileSync(path, "utf8") : null;
   if (current === content) {
+    applyMode(path, options.mode);
     return false;
   }
-  const targetDir = dirname(path);
-  mkdirSync(targetDir, { recursive: true });
+  mkdirSync(targetDir, { recursive: true, mode: options.directoryMode });
+  applyMode(targetDir, options.directoryMode);
 
   // Write into a sibling temp directory outside the watched target directory so
   // file watchers such as Traefik do not try to parse half-written temp files.
   const parentDir = dirname(targetDir);
   const tempRoot = join(parentDir === targetDir ? targetDir : parentDir, ".codex-tmp");
-  mkdirSync(tempRoot, { recursive: true });
+  mkdirSync(tempRoot, { recursive: true, mode: options.directoryMode });
+  applyMode(tempRoot, options.directoryMode);
   const tempPath = join(tempRoot, `.${basename(path)}.${process.pid}.tmp`);
-  writeFileSync(tempPath, content, "utf8");
+  writeFileSync(tempPath, content, options.mode === undefined ? "utf8" : { encoding: "utf8", mode: options.mode });
   renameSync(tempPath, path);
+  applyMode(path, options.mode);
   return true;
 }
 

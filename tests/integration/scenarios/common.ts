@@ -1,17 +1,16 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
-import type { DomainBundle, ExternalOidcFixture, ManagedHost, ServerRecord, VolumeRecord } from "../types";
+import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
-import { expectHttpBodyContains, waitForHttpStatus, waitForHttpStatusInsecure } from "../assertions/http";
+import { expectHttpBodyContains, waitForHttpStatusResolved } from "../assertions/http";
 import { expectManagementUi, expectProtectedRoute } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
 
 type HostProvisionOptions = {
   label: string;
-  domains: DomainBundle;
   withVolume: boolean;
 };
 
@@ -39,7 +38,7 @@ type InstallOptions = {
 };
 
 function baseEmail(ctx: IntegrationContext): string {
-  return `terrarium+${ctx.config.slug}@duckdns.org`;
+  return `terrarium+${ctx.config.slug}@${ctx.config.ipDnsDomain}`;
 }
 
 function repoArchiveRemotePath(localArchivePath: string): string {
@@ -51,25 +50,49 @@ function binaryRemotePath(): string {
 }
 
 function remoteCtl(command: string): string {
-  return `${binaryRemotePath()} ${command}`;
+  return `/usr/local/bin/terrariumctl ${command}`;
 }
 
-function dashedIp(ip: string): string {
-  return ip.replaceAll(".", "-");
-}
+export function expectedRouteAuthRedirectUris(routeLabels: string[]): string[] {
+  const profiles = new Set<string>();
+  const redirectUris: string[] = [];
+  for (const label of routeLabels) {
+    const authIndex = label.lastIndexOf("@auth");
+    if (authIndex === -1) {
+      continue;
+    }
 
-export function defaultPublicDomains(ip: string): DomainBundle {
-  const dashed = dashedIp(ip);
-  return {
-    manage: `manage.${dashed}.traefik.me`,
-    proxy: `proxy.${dashed}.traefik.me`,
-    lxd: `lxd.${dashed}.traefik.me`,
-    auth: `auth.${dashed}.traefik.me`
-  };
-}
+    const route = label.slice(0, authIndex);
+    const suffix = label.slice(authIndex);
+    if (!/^@auth(?::[A-Za-z0-9._,-]+)?$/.test(suffix)) {
+      throw new Error(`unsupported auth suffix: ${suffix}`);
+    }
 
-export function arbitraryPublicHost(ip: string, prefix: string): string {
-  return `${prefix}.${dashedIp(ip)}.traefik.me`;
+    const parsed = new URL(route);
+    const groups = [
+      ...new Set(
+        suffix.includes(":")
+          ? suffix
+              .slice(suffix.indexOf(":") + 1)
+              .split(",")
+              .map((group) => group.trim())
+              .filter(Boolean)
+          : []
+      )
+    ].sort();
+    const key = `${parsed.hostname}\n${groups.join("\n")}`;
+    if (profiles.has(key)) {
+      continue;
+    }
+    profiles.add(key);
+
+    const policy = groups.length > 0 ? groups.join("-") : "authenticated";
+    const base = slugify(`${parsed.hostname}-${policy}`);
+    const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
+    const hash = createHash("sha256").update(key).digest("hex").slice(0, 10);
+    redirectUris.push(`https://${parsed.hostname}/oauth2/route/${trimmed || "route"}-${hash}/callback`);
+  }
+  return redirectUris.sort();
 }
 
 /** Creates a Hetzner host and optionally attaches a raw block volume for Terrarium. */
@@ -96,7 +119,7 @@ export async function provisionHost(context: IntegrationContext, options: HostPr
     volume = await context.attachHetznerVolume(options.label, volume.id, server.id);
   }
 
-  const host = context.host(options.label, server, options.domains, volume);
+  const host = context.host(options.label, server, context.domainBundle(options.label, server.ipv4), volume);
   const ssh = context.ssh(host);
   await ssh.waitForSsh();
   return host;
@@ -126,7 +149,7 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
 
   const args = [
     `${binaryRemotePath()} install --non-interactive --yes`,
-    `--domain ${shellArg(context.duckdns.rootDomain())}`,
+    `--domain ${shellArg(context.publicDns.rootDomain(host.server.ipv4))}`,
     `--email ${shellArg(options.email || baseEmail(context))}`,
     `--acme-email ${shellArg(options.acmeEmail || baseEmail(context))}`,
     `--root-pwd ${shellArg(`Terrarium!${context.config.slug}`)}`,
@@ -199,11 +222,11 @@ export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: str
 
 /** Waits for the primary Terrarium public endpoints to be online. */
 export async function waitForTerrariumPublicEndpoints(host: ManagedHost, includeAuth: boolean): Promise<void> {
-  await waitForHttpStatusInsecure(`https://${host.domains.manage}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
-  await waitForHttpStatusInsecure(`https://${host.domains.proxy}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
-  await waitForHttpStatusInsecure(`https://${host.domains.lxd}`, [200, 302], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusResolved(`https://${host.domains.manage}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusResolved(`https://${host.domains.proxy}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusResolved(`https://${host.domains.lxd}`, [200, 302], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
   if (includeAuth) {
-    await waitForHttpStatusInsecure(`https://${host.domains.auth}/.well-known/openid-configuration`, [200], {
+    await waitForHttpStatusResolved(`https://${host.domains.auth}/.well-known/openid-configuration`, [200], {
       timeoutMs: 300000,
       resolveIp: host.server.ipv4
     });
@@ -365,10 +388,14 @@ export async function verifyProtectedRoutes(
   groupedHost: string,
   bodyText: string
 ): Promise<void> {
-  await waitForHttpStatusInsecure(`https://${plainHost}`, [200, 302], { resolveIp: host.server.ipv4 });
+  const readiness = { timeoutMs: 300000, resolveIp: host.server.ipv4 };
+  await waitForHttpStatusResolved(`https://${plainHost}`, [200, 302], readiness);
+  await waitForHttpStatusResolved(`https://${authHost}`, [302, 303], readiness);
+  await waitForHttpStatusResolved(`https://${groupedHost}`, [302, 303], readiness);
+
   const outputDir = join(context.localArtifactsDir, host.label, "routes");
   mkdirSync(outputDir, { recursive: true });
-  await expectHttpBodyContains(`https://${plainHost}`, bodyText, { resolveIp: host.server.ipv4 });
+  await expectHttpBodyContains(`https://${plainHost}`, bodyText, readiness);
   await expectProtectedRoute(`https://${authHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
   await expectProtectedRoute(`https://${groupedHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
   await expectProtectedRoute(`https://${groupedHost}`, fixture.deniedUser, "deny", outputDir, "", { resolveIp: host.server.ipv4 });
@@ -377,12 +404,13 @@ export async function verifyProtectedRoutes(
 /** Applies a handful of `terrariumctl set ...` operations and validates convergence. */
 export async function exerciseReconfiguration(context: IntegrationContext, host: ManagedHost): Promise<void> {
   const ssh = context.ssh(host);
-  const altManage = context.duckdns.serviceHost("manage-alt", context.config.slug);
-  const altProxy = context.duckdns.serviceHost("proxy-alt", context.config.slug);
-  const altLxd = context.duckdns.serviceHost("lxd-alt", context.config.slug);
-  const altAuth = context.duckdns.serviceHost("auth-alt", context.config.slug);
+  const rootDomain = context.publicDns.rootDomain(host.server.ipv4);
+  const altManage = context.publicDns.serviceHost("manage-alt", context.config.slug, host.server.ipv4);
+  const altProxy = context.publicDns.serviceHost("proxy-alt", context.config.slug, host.server.ipv4);
+  const altLxd = context.publicDns.serviceHost("lxd-alt", context.config.slug, host.server.ipv4);
+  const altAuth = context.publicDns.serviceHost("auth-alt", context.config.slug, host.server.ipv4);
   await ssh.exec(
-    `printf 'y\\n' | ${remoteCtl(`set domains ${shellArg(context.duckdns.rootDomain())}`)} --manage-domain ${shellArg(altManage)} --proxy-domain ${shellArg(
+    `printf 'y\\n' | ${remoteCtl(`set domains ${shellArg(rootDomain)}`)} --manage-domain ${shellArg(altManage)} --proxy-domain ${shellArg(
       altProxy
     )} --lxd-domain ${shellArg(altLxd)} --auth-domain ${shellArg(altAuth)}`
   );
@@ -443,6 +471,10 @@ export async function installSyncoidKey(
 
 function shellArg(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function slugify(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "route";
 }
 
 async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath: string, timeoutMs: number): Promise<void> {

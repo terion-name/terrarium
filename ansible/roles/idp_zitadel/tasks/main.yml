@@ -35,7 +35,6 @@
         - "{{ terrarium_zitadel_dir }}"
         - "{{ terrarium_zitadel_postgres_dir }}"
         - "{{ terrarium_zitadel_bootstrap_dir }}"
-        - "{{ terrarium_zitadel_tf_dir }}"
 
     - name: Generate ZITADEL master key
       ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 > /etc/terrarium/secrets/zitadel_masterkey"
@@ -80,19 +79,6 @@
         terrarium_zitadel_postgres_password: "{{ terrarium_zitadel_postgres_password_raw.stdout }}"
         terrarium_zitadel_admin_password: "{{ terrarium_zitadel_admin_password_raw.stdout }}"
       notify: restart terrarium zitadel
-
-    - name: Render ZITADEL Terraform config
-      ansible.builtin.template:
-        src: terraform-main.tf.j2
-        dest: "{{ terrarium_zitadel_tf_dir }}/main.tf"
-        mode: "0600"
-      notify: restart terrarium zitadel
-
-    - name: Render ZITADEL Terraform outputs
-      ansible.builtin.template:
-        src: terraform-outputs.tf.j2
-        dest: "{{ terrarium_zitadel_tf_dir }}/outputs.tf"
-        mode: "0600"
 
     - name: Render ZITADEL systemd unit
       ansible.builtin.template:

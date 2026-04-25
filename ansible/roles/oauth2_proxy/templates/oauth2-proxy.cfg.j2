@@ -1,6 +1,6 @@
 provider = "oidc"
 provider_display_name = "Terrarium"
-http_address = "0.0.0.0:{{ terrarium_oauth2_proxy_port }}"
+http_address = "127.0.0.1:{{ terrarium_oauth2_proxy_port }}"
 redirect_url = "https://{{ terrarium_manage_domain }}/oauth2/callback"
 oidc_issuer_url = "{{ terrarium_oauth2_proxy_oidc_issuer }}"
 oidc_groups_claim = "groups"

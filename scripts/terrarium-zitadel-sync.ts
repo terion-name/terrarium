@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged } from "./lib/common";
 
@@ -6,14 +6,13 @@ const PREFIX = "terrariumctl idp sync";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
 const DEFAULT_ZITADEL_DIR = "/var/lib/terrarium/zitadel";
 const DEFAULT_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
-const DEFAULT_TF_DIR = "/var/lib/terrarium/zitadel/terraform";
 const DEFAULT_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
-const DEFAULT_TOFU_IMAGE = "ghcr.io/opentofu/opentofu:1.10.6";
-const DEFAULT_BOOTSTRAP_CERT_PATH = "/etc/traefik/bootstrap-certs/terrarium-bootstrap.crt";
+const DEFAULT_SYSTEM_CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const WAIT_INTERVAL_MS = 5000;
 const WAIT_ATTEMPTS = 36;
+const ZITADEL_HTTP_STATUS_MARKER = "__terrarium_http_status__:";
 
-function isRetriableZitadelApiError(message: string): boolean {
+export function isRetriableZitadelApiError(message: string): boolean {
   const lowered = message.toLowerCase();
   return [
     "failed to connect",
@@ -24,33 +23,11 @@ function isRetriableZitadelApiError(message: string): boolean {
     "bad gateway",
     "service unavailable",
     "gateway timeout",
+    "errors.project.role.notfound",
     "http 502",
     "http 503",
     "http 504"
   ].some((needle) => lowered.includes(needle));
-}
-
-async function dockerRun(args: string[]): Promise<string> {
-  return await runText(["docker", ...args], PREFIX);
-}
-
-async function dockerRunWithRetry(args: string[], label: string): Promise<string> {
-  let lastError = "";
-  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
-    const result = await runAllowFailure(["docker", ...args]);
-    if (result.exitCode === 0) {
-      return result.stdout;
-    }
-    const stderr = result.stderr.trim();
-    const stdout = result.stdout.trim();
-    lastError = stderr || stdout || `${label} failed`;
-    const combined = `${stdout}\n${stderr}`;
-    if (!combined.includes("issuer does not match") && !isRetriableZitadelApiError(combined)) {
-      throw new Error(lastError);
-    }
-    await Bun.sleep(WAIT_INTERVAL_MS);
-  }
-  throw new Error(`timed out waiting for ${label}: ${lastError}`);
 }
 
 async function waitForFile(path: string, label: string): Promise<void> {
@@ -61,6 +38,10 @@ async function waitForFile(path: string, label: string): Promise<void> {
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
   throw new Error(`timed out waiting for ${label}: ${path}`);
+}
+
+function trustedCaArgs(): string[] {
+  return existsSync(DEFAULT_SYSTEM_CA_BUNDLE_PATH) ? ["--cacert", DEFAULT_SYSTEM_CA_BUNDLE_PATH] : [];
 }
 
 async function waitForApiReady(stackDir: string): Promise<void> {
@@ -97,6 +78,9 @@ async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
     const cmd = [
       "curl",
       "-fsS",
+      "--noproxy",
+      "*",
+      ...trustedCaArgs(),
       "--resolve",
       `${authDomain}:443:127.0.0.1`,
       "--connect-timeout",
@@ -105,9 +89,6 @@ async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
       "20",
       `https://${authDomain}/.well-known/openid-configuration`
     ];
-    if (existsSync(DEFAULT_BOOTSTRAP_CERT_PATH)) {
-      cmd.splice(2, 0, "--cacert", DEFAULT_BOOTSTRAP_CERT_PATH);
-    }
     const result = await runAllowFailure(cmd);
     if (result.exitCode === 0) {
       return;
@@ -118,38 +99,17 @@ async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
   throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
 }
 
-async function runCurlAllowFailureWithRetry(
-  cmd: string[],
-  label: string
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  let lastResult = { exitCode: 1, stdout: "", stderr: `${label} failed` };
-  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
-    const result = await runAllowFailure(cmd);
-    if (result.exitCode === 0) {
-      return result;
-    }
-
-    lastResult = result;
-    const combined = `${result.stdout}\n${result.stderr}`.trim();
-    if (!isRetriableZitadelApiError(combined)) {
-      return result;
-    }
-    await Bun.sleep(WAIT_INTERVAL_MS);
-  }
-  return lastResult;
-}
-
 function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string): string[] {
-  return [
-    "curl",
-    "-fsS",
-    "-k",
+  const cmd = ["curl", "-sS", "--noproxy", "*", ...trustedCaArgs()];
+  cmd.push(
     "--resolve",
     `${authDomain}:443:127.0.0.1`,
     "--connect-timeout",
     "10",
     "--max-time",
     "20",
+    "--write-out",
+    `\n${ZITADEL_HTTP_STATUS_MARKER}%{http_code}`,
     "-X",
     method,
     "-H",
@@ -157,36 +117,59 @@ function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST"
     "-H",
     "Content-Type: application/json",
     url
-  ];
+  );
+  return cmd;
 }
 
-function terraformResourceCount(tfDir: string): number {
-  const statePath = join(tfDir, "terraform.tfstate");
-  if (!existsSync(statePath)) {
-    return 0;
+export function parseZitadelHttpOutput(raw: string): { status: number; body: string } {
+  const markerIndex = raw.lastIndexOf(ZITADEL_HTTP_STATUS_MARKER);
+  if (markerIndex === -1) {
+    throw new Error("ZITADEL API response did not include an HTTP status marker");
   }
-  const state = readJsonFile<Record<string, unknown>>(statePath, {});
-  return Array.isArray(state.resources) ? state.resources.length : 0;
+
+  const body = raw.slice(0, markerIndex).replace(/\n$/, "");
+  const statusRaw = raw.slice(markerIndex + ZITADEL_HTTP_STATUS_MARKER.length).trim();
+  const status = Number(statusRaw);
+  if (!Number.isInteger(status) || status < 100 || status > 599) {
+    throw new Error(`ZITADEL API response included invalid HTTP status: ${statusRaw || "<empty>"}`);
+  }
+  return { status, body };
 }
 
-function recoverTerraformState(tfDir: string): void {
-  const statePath = join(tfDir, "terraform.tfstate");
-  const backupPath = join(tfDir, "terraform.tfstate.backup");
-  if (!existsSync(statePath) || !existsSync(backupPath)) {
-    return;
+export function isZitadelNoChangesResponse(status: number, body: string): boolean {
+  if (status !== 400) {
+    return false;
   }
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown; message?: unknown };
+    return parsed.code === 9 && typeof parsed.message === "string" && parsed.message.toLowerCase().includes("no changes");
+  } catch {
+    return body.toLowerCase().includes("no changes");
+  }
+}
 
-  const state = readJsonFile<Record<string, unknown>>(statePath, {});
-  const backup = readJsonFile<Record<string, unknown>>(backupPath, {});
-  const stateResources = Array.isArray(state.resources) ? state.resources.length : 0;
-  const backupResources = Array.isArray(backup.resources) ? backup.resources.length : 0;
-  if (stateResources === 0 && backupResources > 0) {
-    copyFileSync(backupPath, statePath);
-  }
+export function isZitadelAlreadyExistsError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return lowered.includes("already") && lowered.includes("exist");
+}
+
+function compactZitadelBody(body: string): string {
+  return body.trim().replace(/\s+/g, " ").slice(0, 2000) || "<empty>";
+}
+
+function formatZitadelHttpFailure(method: string, path: string, status: number, body: string): string {
+  return `ZITADEL API ${method} ${path} returned HTTP ${status}: ${compactZitadelBody(body)}`;
 }
 
 type ZitadelProject = { id: string; name: string };
-type ZitadelApp = { id: string; name: string };
+type ZitadelApp = {
+  id?: string;
+  name?: string;
+  oidcConfig?: { clientId?: string };
+  oidc_config?: { clientId?: string };
+  apiConfig?: { clientId?: string };
+  clientId?: string;
+};
 type ZitadelAction = { id: string; name: string; script?: string };
 type ZitadelFlowTrigger = { triggerType?: { id?: string }; actions?: ZitadelAction[] };
 type ZitadelFlow = { flow?: { triggerActions?: ZitadelFlowTrigger[] } };
@@ -220,6 +203,23 @@ const TERRARIUM_GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
   api.v1.claims.setClaim('groups', groups);
 }`;
 
+type LocalOidcAppSpec = {
+  outputPrefix: "cockpit" | "lxd" | "routes";
+  name: string;
+  redirectUris: string[];
+  postLogoutRedirectUris: string[];
+  appType: "OIDC_APP_TYPE_WEB" | "OIDC_APP_TYPE_NATIVE";
+  authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC" | "OIDC_AUTH_METHOD_TYPE_NONE";
+  grantTypes: string[];
+  includeSecret: boolean;
+};
+
+type LocalOidcApp = {
+  appId: string;
+  clientId: string;
+  clientSecret?: string;
+};
+
 async function zitadelApi<T>(
   authDomain: string,
   pat: string,
@@ -241,10 +241,22 @@ async function zitadelApi<T>(
   for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
     const result = await runAllowFailure(cmd);
     if (result.exitCode === 0) {
-      return JSON.parse(result.stdout) as T;
+      try {
+        const response = parseZitadelHttpOutput(result.stdout);
+        if (response.status >= 200 && response.status < 300) {
+          return JSON.parse(response.body || "null") as T;
+        }
+        if (isZitadelNoChangesResponse(response.status, response.body)) {
+          return JSON.parse(response.body || "null") as T;
+        }
+        lastError = formatZitadelHttpFailure(method, path, response.status, response.body);
+      } catch (error) {
+        lastError = String(error).replace(/^Error: /, "");
+      }
+    } else {
+      lastError = result.stderr.trim() || result.stdout.trim() || `ZITADEL API ${method} ${path} failed`;
     }
 
-    lastError = result.stderr.trim() || result.stdout.trim() || `ZITADEL API ${method} ${path} failed`;
     if (!isRetriableZitadelApiError(lastError)) {
       throw new Error(lastError);
     }
@@ -264,38 +276,18 @@ async function lookupProjectId(authDomain: string, pat: string): Promise<string>
 }
 
 async function ensureProjectRole(authDomain: string, pat: string, projectId: string, adminGroup: string): Promise<void> {
-  const updateResult = await runCurlAllowFailureWithRetry(
-    [
-      ...zitadelCurlBase(
-        authDomain,
-        pat,
-        "PUT",
-      `https://${authDomain}/management/v1/projects/${projectId}/roles/${encodeURIComponent(adminGroup)}`,
-      ),
-      "-d",
-      JSON.stringify({ displayName: "Terrarium Management Admin", group: "Terrarium" })
-    ],
-    "update Terrarium project role"
-  );
-  if (updateResult.exitCode === 0) {
-    return;
+  const roleBody = { roleKey: adminGroup, displayName: "Terrarium Management Admin", group: "Terrarium" };
+  try {
+    await zitadelApi(authDomain, pat, "POST", `/management/v1/projects/${projectId}/roles`, roleBody);
+  } catch (error) {
+    if (!isZitadelAlreadyExistsError(String(error))) {
+      throw error;
+    }
   }
-  const createResult = await runCurlAllowFailureWithRetry(
-    [
-      ...zitadelCurlBase(
-        authDomain,
-        pat,
-        "POST",
-      `https://${authDomain}/management/v1/projects/${projectId}/roles`,
-      ),
-      "-d",
-      JSON.stringify({ roleKey: adminGroup, displayName: "Terrarium Management Admin", group: "Terrarium" })
-    ],
-    "create Terrarium project role"
-  );
-  if (createResult.exitCode !== 0) {
-    throw new Error(createResult.stderr.trim() || createResult.stdout.trim() || "failed to ensure Terrarium project role");
-  }
+  await zitadelApi(authDomain, pat, "PUT", `/management/v1/projects/${projectId}/roles/${encodeURIComponent(adminGroup)}`, {
+    displayName: roleBody.displayName,
+    group: roleBody.group
+  });
 }
 
 async function lookupUserId(authDomain: string, pat: string, loginName: string): Promise<string> {
@@ -367,6 +359,206 @@ async function ensureFlowTrigger(authDomain: string, pat: string, flowType: stri
   await zitadelApi(authDomain, pat, "POST", `/management/v1/flows/${flowType}/trigger/${triggerType}`, { actionIds: nextIds });
 }
 
+function oidcAppConfigBody(authDomain: string, spec: LocalOidcAppSpec): Record<string, unknown> {
+  return {
+    redirectUris: spec.redirectUris,
+    responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+    grantTypes: spec.grantTypes,
+    appType: spec.appType,
+    authMethodType: spec.authMethodType,
+    postLogoutRedirectUris: spec.postLogoutRedirectUris,
+    version: "OIDC_VERSION_1_0",
+    devMode: false,
+    accessTokenType: "OIDC_TOKEN_TYPE_BEARER",
+    accessTokenRoleAssertion: true,
+    idTokenRoleAssertion: true,
+    idTokenUserinfoAssertion: true,
+    clockSkew: "0s",
+    additionalOrigins: [],
+    skipNativeAppSuccessPage: false,
+    loginVersion: {
+      loginV2: {
+        baseUri: `https://${authDomain}/ui/v2/login/`
+      }
+    }
+  };
+}
+
+function localOidcAppSpecs(config: Record<string, unknown>, authDomain: string): LocalOidcAppSpec[] {
+  const manageDomain = configString(config, "terrarium_manage_domain");
+  const lxdDomain = configString(config, "terrarium_lxd_domain");
+  return [
+    {
+      outputPrefix: "cockpit",
+      name: "terrarium-cockpit",
+      redirectUris: [`https://${manageDomain}/oauth2/callback`],
+      postLogoutRedirectUris: [`https://${manageDomain}/`],
+      appType: "OIDC_APP_TYPE_WEB",
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+      includeSecret: true
+    },
+    {
+      outputPrefix: "lxd",
+      name: "terrarium-lxd",
+      redirectUris: [`https://${lxdDomain}/oidc/callback`],
+      postLogoutRedirectUris: [`https://${lxdDomain}/`],
+      appType: "OIDC_APP_TYPE_NATIVE",
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN", "OIDC_GRANT_TYPE_DEVICE_CODE"],
+      includeSecret: false
+    },
+    {
+      outputPrefix: "routes",
+      name: "terrarium-routes",
+      redirectUris: [`https://${manageDomain}/oauth2/app/callback`],
+      postLogoutRedirectUris: [`https://${manageDomain}/`],
+      appType: "OIDC_APP_TYPE_WEB",
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+      includeSecret: true
+    }
+  ];
+}
+
+function oidcClientId(app: ZitadelApp): string {
+  return app.oidcConfig?.clientId ?? app.oidc_config?.clientId ?? app.apiConfig?.clientId ?? app.clientId ?? "";
+}
+
+async function getZitadelApp(authDomain: string, pat: string, projectId: string, appId: string): Promise<ZitadelApp> {
+  const response = await zitadelApi<{ app?: ZitadelApp }>(authDomain, pat, "GET", `/management/v1/projects/${projectId}/apps/${appId}`);
+  return response.app ?? {};
+}
+
+async function findZitadelAppByName(
+  authDomain: string,
+  pat: string,
+  projectId: string,
+  name: string,
+  preferredClientId: string
+): Promise<ZitadelApp | null> {
+  const apps = await zitadelApi<{ result?: ZitadelApp[] }>(authDomain, pat, "POST", `/management/v1/projects/${projectId}/apps/_search`, {});
+  const candidates = (apps.result ?? []).filter((entry) => entry.name === name && entry.id).sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const detailed: ZitadelApp[] = [];
+  for (const app of candidates) {
+    const appId = app.id ?? "";
+    if (!appId) {
+      continue;
+    }
+    const details = await getZitadelApp(authDomain, pat, projectId, appId);
+    detailed.push({ ...app, ...details, id: details.id ?? app.id, name: details.name ?? app.name });
+  }
+  return detailed.find((entry) => preferredClientId && oidcClientId(entry) === preferredClientId) ?? detailed[0] ?? candidates[0] ?? null;
+}
+
+async function ensureLocalProject(authDomain: string, pat: string): Promise<string> {
+  const projects = await zitadelApi<{ result?: ZitadelProject[] }>(authDomain, pat, "POST", "/management/v1/projects/_search", {});
+  const existing = (projects.result ?? []).find((entry) => entry.name === "Terrarium");
+  if (existing?.id) {
+    return existing.id;
+  }
+
+  const created = await zitadelApi<{ id?: string }>(authDomain, pat, "POST", "/management/v1/projects", {
+    name: "Terrarium",
+    projectRoleAssertion: true,
+    projectRoleCheck: true,
+    hasProjectCheck: true,
+    privateLabelingSetting: "PRIVATE_LABELING_SETTING_ENFORCE_PROJECT_RESOURCE_OWNER_POLICY"
+  });
+  if (!created.id) {
+    throw new Error("failed to create Terrarium project in ZITADEL");
+  }
+  return created.id;
+}
+
+async function ensureLocalOidcApp(
+  authDomain: string,
+  pat: string,
+  projectId: string,
+  spec: LocalOidcAppSpec,
+  previousOutputs: Record<string, { value?: string }>
+): Promise<LocalOidcApp> {
+  const previousClientId = previousOutputs[`${spec.outputPrefix}_client_id`]?.value?.trim() ?? "";
+  const previousSecret = previousOutputs[`${spec.outputPrefix}_client_secret`]?.value?.trim() ?? "";
+  const existing = await findZitadelAppByName(authDomain, pat, projectId, spec.name, previousClientId);
+  const configBody = oidcAppConfigBody(authDomain, spec);
+
+  let appId = existing?.id ?? "";
+  let clientId = existing ? oidcClientId(existing) : "";
+  let clientSecret = "";
+
+  if (!appId) {
+    const created = await zitadelApi<{ appId?: string; clientId?: string; clientSecret?: string }>(
+      authDomain,
+      pat,
+      "POST",
+      `/management/v1/projects/${projectId}/apps/oidc`,
+      { name: spec.name, ...configBody }
+    );
+    appId = created.appId ?? "";
+    clientId = created.clientId ?? "";
+    clientSecret = created.clientSecret ?? "";
+  } else {
+    await zitadelApi(authDomain, pat, "PUT", `/management/v1/projects/${projectId}/apps/${appId}/oidc_config`, configBody);
+  }
+
+  if (!appId || !clientId) {
+    throw new Error(`failed to ensure ${spec.name} OIDC app`);
+  }
+
+  if (spec.includeSecret) {
+    if (previousClientId === clientId && previousSecret) {
+      clientSecret = previousSecret;
+    } else if (!clientSecret) {
+      const regenerated = await zitadelApi<{ clientSecret?: string }>(
+        authDomain,
+        pat,
+        "PUT",
+        `/management/v1/projects/${projectId}/apps/${appId}/oidc_client_secret`
+      );
+      clientSecret = regenerated.clientSecret ?? "";
+    }
+    if (!clientSecret) {
+      throw new Error(`failed to obtain client secret for ${spec.name}`);
+    }
+  }
+
+  return { appId, clientId, clientSecret };
+}
+
+export function buildLocalIdpOutputs(projectId: string, apps: Record<LocalOidcAppSpec["outputPrefix"], LocalOidcApp>, authDomain: string): string {
+  const output = {
+    cockpit_client_id: { sensitive: true, type: "string", value: apps.cockpit.clientId },
+    cockpit_client_secret: { sensitive: true, type: "string", value: apps.cockpit.clientSecret ?? "" },
+    issuer: { sensitive: false, type: "string", value: `https://${authDomain}/` },
+    lxd_client_id: { sensitive: true, type: "string", value: apps.lxd.clientId },
+    project_id: { sensitive: false, type: "string", value: projectId },
+    routes_client_id: { sensitive: true, type: "string", value: apps.routes.clientId },
+    routes_client_secret: { sensitive: true, type: "string", value: apps.routes.clientSecret ?? "" }
+  };
+  return `${JSON.stringify(output, null, 2)}\n`;
+}
+
+async function ensureLocalIdpApplications(
+  config: Record<string, unknown>,
+  authDomain: string,
+  pat: string,
+  outputsPath: string
+): Promise<Record<LocalOidcAppSpec["outputPrefix"], LocalOidcApp> & { projectId: string }> {
+  const previousOutputs = readJsonFile<Record<string, { value?: string }>>(outputsPath, {});
+  const projectId = await ensureLocalProject(authDomain, pat);
+  const apps = {} as Record<LocalOidcAppSpec["outputPrefix"], LocalOidcApp>;
+  for (const spec of localOidcAppSpecs(config, authDomain)) {
+    apps[spec.outputPrefix] = await ensureLocalOidcApp(authDomain, pat, projectId, spec, previousOutputs);
+  }
+  writeIfChanged(outputsPath, buildLocalIdpOutputs(projectId, apps, authDomain), { mode: 0o600 });
+  return { ...apps, projectId };
+}
+
 async function ensureManagementGroupProvisioning(authDomain: string, pat: string, adminLoginName: string, adminGroup: string): Promise<void> {
   const projectId = await lookupProjectId(authDomain, pat);
   await ensureProjectRole(authDomain, pat, projectId, adminGroup);
@@ -375,49 +567,6 @@ async function ensureManagementGroupProvisioning(authDomain: string, pat: string
   const actionId = await ensureGroupsAction(authDomain, pat);
   await ensureFlowTrigger(authDomain, pat, "2", "4", actionId);
   await ensureFlowTrigger(authDomain, pat, "2", "5", actionId);
-}
-
-async function importExistingResources(commonArgs: string[], authDomain: string, bootstrapDir: string, tfDir: string): Promise<void> {
-  if (terraformResourceCount(tfDir) > 0) {
-    return;
-  }
-
-  const patPath = join(bootstrapDir, "admin-sa.pat");
-  if (!existsSync(patPath)) {
-    return;
-  }
-  const pat = readFileSync(patPath, "utf8").trim();
-  if (!pat) {
-    return;
-  }
-
-  const projects = await zitadelApi<{ result?: ZitadelProject[] }>(authDomain, pat, "POST", "/management/v1/projects/_search", {});
-  const project = (projects.result ?? []).find((entry) => entry.name === "Terrarium");
-  if (!project) {
-    return;
-  }
-
-  await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_project.terrarium", project.id]);
-  const apps = await zitadelApi<{ result?: ZitadelApp[] }>(
-    authDomain,
-    pat,
-    "POST",
-    `/management/v1/projects/${project.id}/apps/_search`,
-    {}
-  );
-  const byName = new Map((apps.result ?? []).map((entry) => [entry.name, entry.id]));
-  const lxdId = byName.get("terrarium-lxd");
-  const cockpitId = byName.get("terrarium-cockpit");
-  const routesId = byName.get("terrarium-routes");
-  if (lxdId) {
-    await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.lxd", `${lxdId}:${project.id}`]);
-  }
-  if (cockpitId) {
-    await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.cockpit", `${cockpitId}:${project.id}`]);
-  }
-  if (routesId) {
-    await dockerRun(["run", ...commonArgs.slice(1), "import", "-input=false", "zitadel_application_oidc.routes", `${routesId}:${project.id}`]);
-  }
 }
 
 export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
@@ -429,50 +578,17 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   const authDomain = configString(config, "terrarium_auth_domain");
   const zitadelDir = configString(config, "terrarium_zitadel_dir") || DEFAULT_ZITADEL_DIR;
   const bootstrapDir = configString(config, "terrarium_zitadel_bootstrap_dir") || DEFAULT_BOOTSTRAP_DIR;
-  const tfDir = configString(config, "terrarium_zitadel_tf_dir") || DEFAULT_TF_DIR;
   const outputsPath = configString(config, "terrarium_zitadel_outputs_path") || DEFAULT_OUTPUTS_PATH;
-  const tofuImage = configString(config, "terrarium_zitadel_tofu_image") || DEFAULT_TOFU_IMAGE;
 
   if (!authDomain) {
     throw new Error("terrarium_auth_domain is empty");
-  }
-  if (!existsSync(tfDir)) {
-    throw new Error(`terraform directory not found: ${tfDir}`);
   }
 
   await waitForFile(`${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
   await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
   await waitForApiReady(zitadelDir);
   await waitForTrustedHttpsDiscovery(authDomain);
-  recoverTerraformState(tfDir);
 
-  const commonArgs = [
-    "run",
-    "--rm",
-    "--network",
-    "host",
-    "--add-host",
-    `${authDomain}:127.0.0.1`,
-    "-v",
-    `${tfDir}:/workspace`,
-    "-v",
-    `${bootstrapDir}:/secrets:ro`,
-    "-w",
-    "/workspace",
-    ...(existsSync(DEFAULT_BOOTSTRAP_CERT_PATH)
-      ? ["-v", `${DEFAULT_BOOTSTRAP_CERT_PATH}:/bootstrap/terrarium-bootstrap.crt:ro`, "-e", "SSL_CERT_FILE=/bootstrap/terrarium-bootstrap.crt"]
-      : []),
-    tofuImage
-  ];
-
-  await dockerRunWithRetry([...commonArgs, "init", "-input=false"], "OpenTofu init");
-  await importExistingResources(commonArgs, authDomain, bootstrapDir, tfDir);
-  await dockerRunWithRetry([...commonArgs, "apply", "-input=false", "-auto-approve"], "OpenTofu apply");
-  const outputsJson = await dockerRun([...commonArgs, "output", "-json"]);
-  writeIfChanged(outputsPath, outputsJson.endsWith("\n") ? outputsJson : `${outputsJson}\n`);
-
-  const outputs = readJsonFile<Record<string, { value?: string }>>(outputsPath, {});
-  const lxdClientId = outputs.lxd_client_id?.value ?? "";
   const adminPat = readFileSync(join(bootstrapDir, "admin-sa.pat"), "utf8").trim();
   const adminLoginName = configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
   const adminGroup = configString(config, "terrarium_admin_group", "terrarium-admins");
@@ -485,6 +601,8 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   if (!adminGroup) {
     throw new Error("terrarium_admin_group is empty");
   }
+  const localApps = await ensureLocalIdpApplications(config, authDomain, adminPat, outputsPath);
+  const lxdClientId = localApps.lxd.clientId;
   await ensureManagementGroupProvisioning(authDomain, adminPat, adminLoginName, adminGroup);
   if (lxdClientId && existsSync("/snap/bin/lxc")) {
     const issuer = configString(config, "terrarium_oidc_issuer") || `https://${authDomain}`;

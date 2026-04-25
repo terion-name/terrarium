@@ -224,11 +224,10 @@ async function verifyAuthorizationProbe(authorizationEndpoint: string, clientId:
  * - discovery plus authorization-endpoint requests for the expected callback URIs
  * - a token-endpoint confidential-client probe
  *
- * Not every provider allows `client_credentials` for the same client Terrarium
- * uses for login. In those cases we still accept responses such as
- * `unauthorized_client` or `unsupported_grant_type`, because they prove the
- * issuer is reachable and the client credentials were recognized far enough to
- * hit grant-policy logic instead of failing as `invalid_client`.
+ * The token probe submits a deliberately invalid authorization code using
+ * client authentication. A response such as `invalid_grant` proves the provider
+ * recognized the client and secret before rejecting the fake code. `invalid_client`
+ * still means the configured client credentials are not proven.
  */
 export async function verifyOidcConfig(options: OidcVerificationOptions): Promise<void> {
   const discoveryUrl = `${options.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
@@ -244,13 +243,16 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
     throw new Error("OIDC discovery document is missing authorization_endpoint or token_endpoint");
   }
 
-  for (const redirectUri of oidcCallbackUris(options)) {
+  const callbackUris = oidcCallbackUris(options);
+  for (const redirectUri of callbackUris) {
     await verifyAuthorizationProbe(authorizationEndpoint, options.clientId, redirectUri);
   }
 
   const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    scope: "openid"
+    grant_type: "authorization_code",
+    code: `terrarium-verification-${randomUUID()}`,
+    redirect_uri: callbackUris[0],
+    code_verifier: randomUUID()
   });
   const basicAuth = Buffer.from(`${options.clientId}:${options.clientSecret}`, "utf8").toString("base64");
   const tokenResponse = await fetchWithTimeout(tokenEndpoint, {
@@ -276,19 +278,14 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
 
   const errorCode = String(parsed.error || "").trim();
   const errorDescription = String(parsed.error_description || "").trim();
-  if (errorCode === "invalid_client" && errorDescription.toLowerCase().includes("client not found")) {
-    // ZITADEL Cloud returns this for valid WEB apps on a client_credentials
-    // probe. The authorization-endpoint checks above already proved that the
-    // client ID exists and accepts Terrarium's redirect URIs; the real browser
-    // flow validates the secret during the integration suite.
-    return;
-  }
-
   if (errorCode === "invalid_client" || tokenResponse.status === 401 || tokenResponse.status === 403) {
     throw new Error(errorDescription || errorCode || `OIDC token probe failed with HTTP ${tokenResponse.status}`);
   }
 
-  if (["unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "invalid_grant"].includes(errorCode)) {
+  if (
+    ["unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "invalid_grant"].includes(errorCode) ||
+    [errorCode, errorDescription].some((value) => value.includes("Errors.User.Code.Invalid"))
+  ) {
     return;
   }
 

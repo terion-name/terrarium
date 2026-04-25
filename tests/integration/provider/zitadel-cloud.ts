@@ -113,6 +113,7 @@ export class ZitadelCloudProvider {
   private readonly logger: IntegrationLogger;
   private readonly requestTimeoutMs = 45000;
   private readonly maxAttempts = 8;
+  private oidcClientReadyAttempts = 24;
 
   constructor(config: IntegrationConfig, logger: IntegrationLogger) {
     this.issuer = config.zitadelCloudIssuer.replace(/\/$/, "");
@@ -301,11 +302,94 @@ export class ZitadelCloudProvider {
     if (!clientSecret) {
       throw new Error("failed to obtain ZITADEL client secret");
     }
+    await this.waitForOidcClientReady(result.clientId, clientSecret, redirectUris[0]);
     return {
       appId: result.appId,
       clientId: result.clientId,
       clientSecret
     };
+  }
+
+  private async waitForOidcClientReady(clientId: string, clientSecret: string, redirectUri: string): Promise<void> {
+    const tokenEndpoint = await this.discoverTokenEndpoint();
+    let lastError = "";
+    for (let attempt = 1; attempt <= this.oidcClientReadyAttempts; attempt += 1) {
+      const probe = await this.probeOidcClient(tokenEndpoint, clientId, clientSecret, redirectUri).catch((error) => ({
+        ready: false,
+        message: error instanceof Error ? error.message : String(error)
+      }));
+      if (probe.ready) {
+        this.logger.info(`ZITADEL OIDC client ${clientId} is visible to the token endpoint`);
+        return;
+      }
+      lastError = probe.message;
+      this.logger.info(`waiting for ZITADEL OIDC client ${clientId} to become usable: ${lastError}`);
+      if (attempt < this.oidcClientReadyAttempts) {
+        await Bun.sleep(5000);
+      }
+    }
+    throw new Error(`ZITADEL OIDC client ${clientId} did not become usable: ${lastError}`);
+  }
+
+  private async discoverTokenEndpoint(): Promise<string> {
+    const response = await fetch(`${this.issuer}/.well-known/openid-configuration`, {
+      signal: AbortSignal.timeout(this.requestTimeoutMs)
+    });
+    if (!response.ok) {
+      throw new Error(`ZITADEL discovery failed with HTTP ${response.status}: ${await response.text()}`);
+    }
+    const discovery = (await response.json()) as { token_endpoint?: unknown };
+    const tokenEndpoint = String(discovery.token_endpoint || "");
+    if (!tokenEndpoint) {
+      throw new Error("ZITADEL discovery document is missing token_endpoint");
+    }
+    return tokenEndpoint;
+  }
+
+  private async probeOidcClient(
+    tokenEndpoint: string,
+    clientId: string,
+    clientSecret: string,
+    redirectUri: string
+  ): Promise<{ ready: boolean; message: string }> {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: `terrarium-verification-${randomBytes(8).toString("hex")}`,
+      redirect_uri: redirectUri,
+      code_verifier: randomBytes(16).toString("hex")
+    });
+    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
+    const response = await fetch(tokenEndpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${basicAuth}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(this.requestTimeoutMs)
+    });
+    const raw = await response.text();
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    } catch {
+      parsed = {};
+    }
+    if (response.ok) {
+      return { ready: true, message: "token probe succeeded" };
+    }
+
+    const errorCode = String(parsed.error || "").trim();
+    const errorDescription = String(parsed.error_description || "").trim();
+    if (
+      ["unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "invalid_grant"].includes(errorCode) ||
+      [errorCode, errorDescription].some((value) => value.includes("Errors.User.Code.Invalid"))
+    ) {
+      return { ready: true, message: errorDescription || errorCode };
+    }
+
+    const message = errorDescription || errorCode || raw || `HTTP ${response.status}`;
+    return { ready: false, message };
   }
 
   private async ensureGroupsAction(): Promise<void> {

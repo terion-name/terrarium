@@ -6,12 +6,12 @@ services:
     restart: unless-stopped
 {% if terrarium_idp_mode == 'local' %}
     environment:
-      SSL_CERT_FILE: /etc/ssl/certs/terrarium-bootstrap.crt
+      SSL_CERT_FILE: /etc/ssl/certs/terrarium-ca-certificates.crt
 {% endif %}
     command:
       - --config=/etc/oauth2-proxy/oauth2-proxy.cfg
     volumes:
       - "{{ terrarium_oauth2_proxy_dir }}/oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro"
 {% if terrarium_idp_mode == 'local' %}
-      - "{{ terrarium_traefik_config_dir }}/bootstrap-certs/terrarium-bootstrap.crt:/etc/ssl/certs/terrarium-bootstrap.crt:ro"
+      - "/etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/terrarium-ca-certificates.crt:ro"
 {% endif %}

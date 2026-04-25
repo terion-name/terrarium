@@ -96,11 +96,19 @@ async function readLocalIdpOutputs(actions: ReconcileActions): Promise<string> {
 export async function runReconcileActions(config: MutableConfig, actions: ReconcileActions): Promise<void> {
   await actions.reconfigure();
   if (localIdpEnabled(config)) {
-    const outputsBeforeSync = await readLocalIdpOutputs(actions);
-    await actions.syncIdp();
-    const outputsAfterSync = await readLocalIdpOutputs(actions);
-    if (outputsAfterSync !== outputsBeforeSync) {
+    let stable = false;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const outputsBeforeSync = await readLocalIdpOutputs(actions);
+      await actions.syncIdp();
+      const outputsAfterSync = await readLocalIdpOutputs(actions);
+      if (outputsAfterSync === outputsBeforeSync) {
+        stable = true;
+        break;
+      }
       await actions.reconfigure();
+    }
+    if (!stable) {
+      throw new Error("local IDP outputs kept changing after reconciliation; refusing to continue with stale OAuth client configuration");
     }
   }
   await actions.syncProxy();

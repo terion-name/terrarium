@@ -1,7 +1,9 @@
 import { basename } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  bodyContainsAnyMarker,
   bodyContainsDenialText,
+  bodyContainsHttpErrorText,
   browserScreenshotPath,
   formatDeniedTargetRouteFailure,
   isLoginOrOauthCallbackPlumbingPath,
@@ -13,6 +15,13 @@ describe("browser assertion helpers", () => {
     expect(bodyContainsDenialText("403 Forbidden")).toBe(true);
     expect(bodyContainsDenialText("Access denied for this user")).toBe(true);
     expect(bodyContainsDenialText("terrarium-proxy-ok")).toBe(false);
+  });
+
+  test("recognizes user-facing error pages and expected UI markers", () => {
+    expect(bodyContainsHttpErrorText("502 Bad Gateway")).toBe(true);
+    expect(bodyContainsHttpErrorText("Cockpit\nUsername\nPassword")).toBe(false);
+    expect(bodyContainsAnyMarker("Traefik Dashboard", ["Traefik", "Routers"])).toBe(true);
+    expect(bodyContainsAnyMarker("blank page", ["Traefik", "Routers"])).toBe(false);
   });
 
   test("keeps oauth and login plumbing separate from target application pages", () => {

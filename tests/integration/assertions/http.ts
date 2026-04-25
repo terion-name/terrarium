@@ -6,6 +6,7 @@ import { runAllowFailure } from "../lib/process";
 type HttpAssertionOptions = {
   resolveIp?: string;
   timeoutMs?: number;
+  insecure?: boolean;
 };
 
 function curlResolveArgs(url: string, resolveIp?: string): string[] {
@@ -45,23 +46,27 @@ export async function waitForHttpStatus(url: string, expectedStatuses: number[],
   throw new Error(`timed out waiting for ${url} to return one of [${expectedStatuses.join(", ")}], last status: ${lastResponse?.status ?? "none"}`);
 }
 
-async function readHttpsBody(url: string, resolveIp?: string): Promise<{ status: number; body: string }> {
+async function readHttpsBody(url: string, options: HttpAssertionOptions = {}): Promise<{ status: number; body: string }> {
   const tempDir = await mkdtemp(join(tmpdir(), "terrarium-http-"));
   const bodyPath = join(tempDir, "body");
   try {
     const result = await runAllowFailure([
       "curl",
       "-4",
-      "-k",
       "-sS",
       "-L",
+      "--noproxy",
+      "*",
       "-o",
       bodyPath,
       "-w",
       "%{http_code}",
+      "--connect-timeout",
+      "5",
       "--max-time",
       "20",
-      ...curlResolveArgs(url, resolveIp),
+      ...(options.insecure ? ["-k"] : []),
+      ...curlResolveArgs(url, options.resolveIp),
       url
     ]);
     if (result.exitCode !== 0) {
@@ -81,28 +86,45 @@ export async function waitForHttpStatusInsecure(
   expectedStatuses: number[],
   timeoutMsOrOptions: number | HttpAssertionOptions = 180000
 ): Promise<number> {
+  const options = typeof timeoutMsOrOptions === "number" ? { timeoutMs: timeoutMsOrOptions } : timeoutMsOrOptions;
+  return await waitForHttpStatusResolved(url, expectedStatuses, { ...options, insecure: true });
+}
+
+/** Polls an HTTP(S) endpoint with optional host resolution until it returns an expected status. */
+export async function waitForHttpStatusResolved(
+  url: string,
+  expectedStatuses: number[],
+  timeoutMsOrOptions: number | HttpAssertionOptions = 180000
+): Promise<number> {
   const timeoutMs = typeof timeoutMsOrOptions === "number" ? timeoutMsOrOptions : timeoutMsOrOptions.timeoutMs ?? 180000;
   const resolveIp = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.resolveIp;
+  const insecure = typeof timeoutMsOrOptions === "number" ? false : timeoutMsOrOptions.insecure ?? false;
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "";
+  let lastError = "";
 
   while (Date.now() < deadline) {
     const result = await runAllowFailure([
       "curl",
       "-4",
-      "-k",
       "-sS",
+      "--noproxy",
+      "*",
       "-o",
       "/dev/null",
       "-w",
       "%{http_code}",
+      "--connect-timeout",
+      "5",
       "--max-time",
       "20",
+      ...(insecure ? ["-k"] : []),
       ...curlResolveArgs(url, resolveIp),
       url
     ]);
     const status = (result.stdout || "").trim();
     lastStatus = status || lastStatus;
+    lastError = result.stderr.trim() || result.stdout.trim() || lastError;
 
     if (result.exitCode === 0) {
       const numericStatus = Number(status);
@@ -114,7 +136,11 @@ export async function waitForHttpStatusInsecure(
     await Bun.sleep(5000);
   }
 
-  throw new Error(`timed out waiting for ${url} to return one of [${expectedStatuses.join(", ")}], last status: ${lastStatus || "none"}`);
+  throw new Error(
+    `timed out waiting for ${url} to return one of [${expectedStatuses.join(", ")}], last status: ${lastStatus || "none"}, last error: ${
+      lastError || "none"
+    }`
+  );
 }
 
 /** Polls an endpoint until its response body contains the expected text. */
@@ -125,6 +151,7 @@ export async function expectHttpBodyContains(
 ): Promise<void> {
   const timeoutMs = typeof timeoutMsOrOptions === "number" ? timeoutMsOrOptions : timeoutMsOrOptions.timeoutMs ?? 180000;
   const resolveIp = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.resolveIp;
+  const insecure = typeof timeoutMsOrOptions === "number" ? false : timeoutMsOrOptions.insecure ?? false;
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "none";
   let lastBody = "";
@@ -132,7 +159,7 @@ export async function expectHttpBodyContains(
   while (Date.now() < deadline) {
     try {
       if (url.startsWith("https://")) {
-        const { status, body } = await readHttpsBody(url, resolveIp);
+        const { status, body } = await readHttpsBody(url, { resolveIp, insecure });
         lastStatus = String(status || 0);
         lastBody = body;
         if (body.includes(needle)) {

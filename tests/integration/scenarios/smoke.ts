@@ -1,11 +1,11 @@
 import { IntegrationContext } from "../context";
-import { ExternalOidcFixture } from "../types";
-import { buildRouteAuthRedirectUris } from "../../../scripts/terrarium-traefik-sync";
+import { ExternalOidcFixture, ManagedHost } from "../types";
 import {
   assertInstalledHost,
   captureFailureArtifacts,
   createHttpFixtureContainer,
   exerciseReconfiguration,
+  expectedRouteAuthRedirectUris,
   installSyncoidKey,
   installTerrarium,
   provisionHost,
@@ -19,24 +19,19 @@ import {
   verifySyncoid,
   waitForTerrariumPublicEndpoints
 } from "./common";
-import { expectHttpBodyContains, waitForHttpStatusInsecure } from "../assertions/http";
+import { expectHttpBodyContains, waitForHttpStatusResolved } from "../assertions/http";
 
 /** Runs the high-signal real-infra smoke suite on one primary and one replica host. */
 export async function runSmokeSuite(context: IntegrationContext): Promise<void> {
   await context.zitadelCloud.verifyManagementAccess();
   const sshKeyId = await context.registerHetznerKey(`terrarium-${context.config.slug}`);
-  const primaryDomains = context.domainBundle("primary");
-  const replicaDomains = context.domainBundle("replica");
   const syncoidTargetDataset = `terrarium/replicated-${context.config.slug}`;
-  const primary = await provisionHost(context, { label: "primary", domains: primaryDomains, withVolume: true }, sshKeyId);
-  const replica = await provisionHost(context, { label: "replica", domains: replicaDomains, withVolume: false }, sshKeyId);
-  const primarySsh = context.ssh(primary);
+  const replica = await provisionHost(context, { label: "replica", withVolume: false }, sshKeyId);
   const replicaSsh = context.ssh(replica);
-  const rootDomain = context.duckdns.rootDomain();
+  let primary: ManagedHost | undefined;
 
   try {
-    await context.duckdns.update(replica.server.ipv4);
-    await context.duckdns.waitForHosts(
+    await context.publicDns.waitForHosts(
       [replica.domains.manage, replica.domains.proxy, replica.domains.lxd, replica.domains.auth],
       replica.server.ipv4
     );
@@ -47,8 +42,11 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
       storageSize: "32G"
     });
 
-    await context.duckdns.update(primary.server.ipv4);
-    await context.duckdns.waitForHosts(
+    primary = await provisionHost(context, { label: "primary", withVolume: true }, sshKeyId);
+    const primarySsh = context.ssh(primary);
+    const rootDomain = context.publicDns.rootDomain(primary.server.ipv4);
+
+    await context.publicDns.waitForHosts(
       [primary.domains.manage, primary.domains.proxy, primary.domains.lxd, primary.domains.auth],
       primary.server.ipv4
     );
@@ -79,7 +77,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
     await expectHttpBodyContains(`https://plain-${context.config.slug}.${rootDomain}`, "terrarium-proxy-ok", {
       resolveIp: primary.server.ipv4
     });
-    await waitForHttpStatusInsecure(`https://auth-${context.config.slug}.${rootDomain}`, [302], {
+    await waitForHttpStatusResolved(`https://auth-${context.config.slug}.${rootDomain}`, [302], {
       resolveIp: primary.server.ipv4
     });
     await verifyLocalBackupRestore(primarySsh, `proxy-${context.config.slug}`);
@@ -90,15 +88,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
       `https://auth-${context.config.slug}.${rootDomain}:8080@auth`,
       `https://group-${context.config.slug}.${rootDomain}:8080@auth:agents,admins`
     ];
-    const { redirectUris: routeCallbackUris, errors: routeCallbackErrors } = buildRouteAuthRedirectUris(externalRouteLabels, {
-      terrarium_root_domain: rootDomain,
-      terrarium_manage_domain: primary.domains.manage,
-      terrarium_proxy_domain: primary.domains.proxy,
-      terrarium_auth_domain: primary.domains.auth
-    });
-    if (routeCallbackErrors.length > 0) {
-      throw new Error(`failed to build route auth callback URIs: ${routeCallbackErrors.join("; ")}`);
-    }
+    const routeCallbackUris = expectedRouteAuthRedirectUris(externalRouteLabels);
     const externalFixture: ExternalOidcFixture = await context.provisionZitadelFixture(
       context.config.slug,
       primary.domains,
@@ -129,7 +119,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
     await switchBackToLocalIdp(context, primary);
     await exerciseReconfiguration(context, primary);
   } catch (error) {
-    await captureFailureArtifacts(context, [primary, replica]);
+    await captureFailureArtifacts(context, [primary, replica].filter((host): host is ManagedHost => Boolean(host)));
     throw error;
   }
 }

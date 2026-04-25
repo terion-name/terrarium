@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/traefik --configFile={{ terrarium_traefik_config_dir }}/traefik.yml --entrypoints.bootstrapweb.address=:18080
+ExecStart=/usr/local/bin/traefik --configFile={{ terrarium_traefik_config_dir }}/traefik.yml --entrypoints.bootstrapweb.address=127.0.0.1:18080
 Restart=on-failure
 RestartSec=5s
 

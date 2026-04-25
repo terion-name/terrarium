@@ -170,18 +170,12 @@
     interface_in: lxdbr0
     interface_out: "{{ ansible_default_ipv4.interface }}"
 
-- name: Configure ACME email when custom domain is used
-  ansible.builtin.command: "/snap/bin/lxc config set acme.email {{ terrarium_acme_email }}"
-  when:
-    - terrarium_acme_email | length > 0
-    - not terrarium_lxd_domain.endswith('.traefik.me')
-  changed_when: false
-
-- name: Configure ACME domain when custom domain is used
-  ansible.builtin.command: "/snap/bin/lxc config set acme.domain {{ terrarium_lxd_domain }}"
-  when:
-    - terrarium_acme_email | length > 0
-    - not terrarium_lxd_domain.endswith('.traefik.me')
+- name: Disable LXD ACME certificate management
+  ansible.builtin.command: "/snap/bin/lxc config unset {{ item }}"
+  loop:
+    - acme.email
+    - acme.domain
+  failed_when: false
   changed_when: false
 
 - name: Configure OIDC issuer when provided

@@ -2,7 +2,7 @@
 
 This directory contains Terrarium’s real-infrastructure integration harness.
 
-It provisions ephemeral Hetzner Cloud servers and volumes, configures real DNS,
+It provisions ephemeral Hetzner Cloud servers and volumes, uses public IP-encoded DNS,
 OIDC, S3, and SMB dependencies, installs Terrarium on those hosts, and then
 exercises the shipped CLI and runtime features end to end.
 
@@ -37,8 +37,7 @@ The harness expects these environment variables:
 - `HCLOUD_BINARY_TARGET` (optional, defaults to `x64`)
 - `HCLOUD_SSH_PRIVATE_KEY`
 - `HCLOUD_SSH_PUBLIC_KEY`
-- `DUCKDNS_DOMAIN`
-- `DUCKDNS_TOKEN`
+- `TERRARIUM_INTEGRATION_IP_DNS_DOMAIN` (optional, defaults to `sslip.io`)
 - `ZITADEL_CLOUD_ISSUER`
 - `ZITADEL_CLOUD_PAT`
 - `ZITADEL_CLOUD_ORG_ID` (optional when the PAT has enough scope without it)

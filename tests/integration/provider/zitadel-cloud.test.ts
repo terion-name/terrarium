@@ -36,6 +36,10 @@ function setMaxAttempts(provider: ZitadelCloudProvider, maxAttempts: number): vo
   (provider as unknown as { maxAttempts: number }).maxAttempts = maxAttempts;
 }
 
+function setOidcClientReadyAttempts(provider: ZitadelCloudProvider, attempts: number): void {
+  (provider as unknown as { oidcClientReadyAttempts: number }).oidcClientReadyAttempts = attempts;
+}
+
 function setSleepMock(handler: (ms: number) => Promise<void>): void {
   (Bun as unknown as { sleep: typeof Bun.sleep }).sleep = handler as typeof Bun.sleep;
 }
@@ -136,7 +140,7 @@ describe("ZITADEL Cloud provider", () => {
   test("provisionFixture grants the denied user a project role outside route allowed groups", async () => {
     const userIds = ["admin-user", "route-user", "denied-user"];
     const calls = installFetchMock((call) => {
-      const method = call.init?.method;
+      const method = call.init?.method ?? "GET";
       const path = callPath(call);
       if (method === "POST" && path === "/management/v1/actions/_search") {
         return Response.json({ result: [] });
@@ -158,6 +162,12 @@ describe("ZITADEL Cloud provider", () => {
       }
       if (method === "POST" && path === "/management/v1/projects/project-1/apps/oidc") {
         return Response.json({ appId: "app-1", clientId: "client-1", clientSecret: "secret-1" });
+      }
+      if (method === "GET" && path === "/.well-known/openid-configuration") {
+        return Response.json({ token_endpoint: "https://zitadel.example.test/oauth/v2/token" });
+      }
+      if (method === "POST" && path === "/oauth/v2/token") {
+        return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
       }
       if (method === "POST" && path === "/management/v1/users/human/_import") {
         return Response.json({ userId: userIds.shift() });
@@ -191,5 +201,37 @@ describe("ZITADEL Cloud provider", () => {
     expect(fixture.deniedUser.roles).toEqual(["bystanders"]);
     expect(roleKeys).toEqual(["terrarium-admins", "agents", "admins", "bystanders"]);
     expect(grants).toContainEqual({ projectId: "project-1", roleKeys: ["bystanders"] });
+  });
+
+  test("waits for newly-created OIDC clients to reach the token endpoint", async () => {
+    const calls = installFetchMock((call, index) => {
+      const method = call.init?.method ?? "GET";
+      const path = callPath(call);
+      if (method === "GET" && path === "/.well-known/openid-configuration") {
+        return Response.json({ token_endpoint: "https://zitadel.example.test/oauth/v2/token" });
+      }
+      if (method === "POST" && path === "/oauth/v2/token" && index === 1) {
+        return Response.json({ error: "invalid_client", error_description: "client not found" }, { status: 401 });
+      }
+      if (method === "POST" && path === "/oauth/v2/token") {
+        return Response.json({ error: "Errors.User.Code.Invalid" }, { status: 400 });
+      }
+      throw new Error(`unexpected ${method} ${path}`);
+    });
+    const sleeps: number[] = [];
+    setSleepMock(async (ms) => {
+      sleeps.push(ms);
+    });
+    const provider = createProvider();
+    setOidcClientReadyAttempts(provider, 2);
+
+    await (
+      provider as unknown as {
+        waitForOidcClientReady(clientId: string, clientSecret: string, redirectUri: string): Promise<void>;
+      }
+    ).waitForOidcClientReady("client-1", "secret-1", "https://manage.example.test/oauth2/callback");
+
+    expect(calls.map(callPath)).toEqual(["/.well-known/openid-configuration", "/oauth/v2/token", "/oauth/v2/token"]);
+    expect(sleeps).toEqual([5000]);
   });
 });

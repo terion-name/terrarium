@@ -16,7 +16,8 @@ const ROUTE_AUTH_READY_ATTEMPTS = 12;
 const ROUTE_AUTH_READY_INTERVAL_MS = 1000;
 const ZITADEL_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
 const ZITADEL_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
-const ZITADEL_BOOTSTRAP_CERT_PATH = "/etc/traefik/bootstrap-certs/terrarium-bootstrap.crt";
+const SYSTEM_CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
+const CONTAINER_CA_BUNDLE_PATH = "/etc/ssl/certs/terrarium-ca-certificates.crt";
 const ZITADEL_ROUTES_APP_NAME = "terrarium-routes";
 const ZITADEL_WAIT_ATTEMPTS = 12;
 const ZITADEL_WAIT_INTERVAL_MS = 3000;
@@ -391,6 +392,8 @@ function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST"
   const cmd = [
     "curl",
     "-sS",
+    "--noproxy",
+    "*",
     "--resolve",
     `${authDomain}:443:127.0.0.1`,
     "--connect-timeout",
@@ -400,8 +403,8 @@ function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST"
     "--write-out",
     `\n${ZITADEL_HTTP_STATUS_MARKER}%{http_code}`
   ];
-  if (existsSync(ZITADEL_BOOTSTRAP_CERT_PATH)) {
-    cmd.push("--cacert", ZITADEL_BOOTSTRAP_CERT_PATH);
+  if (existsSync(SYSTEM_CA_BUNDLE_PATH)) {
+    cmd.push("--cacert", SYSTEM_CA_BUNDLE_PATH);
   }
   cmd.push("-X", method, "-H", `Authorization: Bearer ${pat}`, "-H", "Content-Type: application/json", url);
   return cmd;
@@ -634,25 +637,15 @@ async function syncUfw(desiredPorts: DesiredPort[]): Promise<string[]> {
   return errors;
 }
 
-/**
- * Loads LXC instances for proxy generation.
- *
- * During initial host provisioning the Traefik role runs before the LXD role,
- * so `lxc list -f json` may still print bootstrap text or fail entirely. In
- * that case we fall back to an empty instance list and let later sync runs pick
- * up container routes once LXD is actually ready.
- */
 async function loadInstancesForProxySync(): Promise<LxcInstance[]> {
   const result = await runAllowFailure(["timeout", "15s", "lxc", "list", "-f", "json"]);
   if (result.exitCode !== 0) {
-    console.warn(`${PREFIX}: LXD is not ready yet; skipping container route discovery`);
-    return [];
+    throw new Error(`LXD is not ready; refusing to overwrite proxy configuration: ${compactCommandOutput(result.stderr || result.stdout)}`);
   }
 
   const parsed = parseJsonFromOutput<LxcInstance[]>(result.stdout);
   if (!parsed) {
-    console.warn(`${PREFIX}: LXD output was not valid JSON yet; skipping container route discovery`);
-    return [];
+    throw new Error(`LXD output was not valid JSON; refusing to overwrite proxy configuration: ${compactCommandOutput(result.stdout)}`);
   }
 
   return parsed;
@@ -817,11 +810,9 @@ export function buildRouteAuthComposeArtifacts(
           command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"],
           volumes: [
             `${ROUTE_AUTH_DIR}/${profile.containerName}.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro`,
-            ...(localIdp
-              ? ["/etc/traefik/bootstrap-certs/terrarium-bootstrap.crt:/etc/ssl/certs/terrarium-bootstrap.crt:ro"]
-              : [])
+            ...(localIdp ? [`${SYSTEM_CA_BUNDLE_PATH}:${CONTAINER_CA_BUNDLE_PATH}:ro`] : [])
           ],
-          ...(localIdp ? { environment: { SSL_CERT_FILE: "/etc/ssl/certs/terrarium-bootstrap.crt" } } : {})
+          ...(localIdp ? { environment: { SSL_CERT_FILE: CONTAINER_CA_BUNDLE_PATH } } : {})
         }
       ];
     })
@@ -839,7 +830,7 @@ function buildRouteAuthCompose(
 ): string {
   const { composeYaml, profileConfigs } = buildRouteAuthComposeArtifacts(config, profiles, clientId, clientSecret, cookieSecret);
   for (const [containerName, content] of Object.entries(profileConfigs)) {
-    writeIfChanged(`${ROUTE_AUTH_DIR}/${containerName}.cfg`, content);
+    writeIfChanged(`${ROUTE_AUTH_DIR}/${containerName}.cfg`, content, { mode: 0o600, directoryMode: 0o700 });
   }
   return composeYaml;
 }
@@ -883,10 +874,10 @@ async function probeRouteAuthListeners(profiles: RouteAuthProfile[]): Promise<st
 
 async function syncRouteAuthStack(config: Record<string, unknown>, profiles: RouteAuthProfile[]): Promise<string[]> {
   const errors: string[] = [];
-  mkdirSync(ROUTE_AUTH_DIR, { recursive: true });
+  mkdirSync(ROUTE_AUTH_DIR, { recursive: true, mode: 0o700 });
 
   if (profiles.length === 0) {
-    writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, yamlStringify({ services: {} }));
+    writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, yamlStringify({ services: {} }), { mode: 0o600, directoryMode: 0o700 });
     await runAllowFailure(["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "down", "--remove-orphans"]);
     return errors;
   }
@@ -917,7 +908,7 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
   }
 
   const composeYaml = buildRouteAuthCompose(config, profiles, clientId, clientSecret, cookieSecret);
-  writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, composeYaml);
+  writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, composeYaml, { mode: 0o600, directoryMode: 0o700 });
   const result = await runAllowFailure(["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "up", "-d", "--remove-orphans"]);
   if (result.exitCode !== 0) {
     errors.push(formatRouteAuthCommandFailure("failed to reconcile route auth stack", result));
@@ -934,7 +925,7 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
     entryPoints: {
       web: { address: ":80" },
       websecure: { address: ":443" },
-      bootstrapweb: { address: ":18080" },
+      bootstrapweb: { address: "127.0.0.1:18080" },
       ...extraEntrypoints
     },
     providers: {

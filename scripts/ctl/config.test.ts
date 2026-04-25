@@ -30,9 +30,33 @@ describe("terrariumctl config reconciliation", () => {
   test("reruns Ansible when local IDP sync changes oauth client outputs", async () => {
     const calls: string[] = [];
 
-    await runReconcileActions({ terrarium_idp_mode: "local" }, recordActions(calls, ["old-client", "new-client"]));
+    await runReconcileActions({ terrarium_idp_mode: "local" }, recordActions(calls, ["old-client", "new-client", "new-client", "new-client"]));
 
-    expect(calls).toEqual(["reconfigure", "syncIdp", "reconfigure", "syncProxy"]);
+    expect(calls).toEqual(["reconfigure", "syncIdp", "reconfigure", "syncIdp", "syncProxy"]);
+  });
+
+  test("keeps rerunning Ansible until final local IDP outputs are consumed", async () => {
+    const calls: string[] = [];
+
+    await runReconcileActions(
+      { terrarium_idp_mode: "local" },
+      recordActions(calls, ["old-client", "mid-client", "mid-client", "new-client", "new-client", "new-client"])
+    );
+
+    expect(calls).toEqual(["reconfigure", "syncIdp", "reconfigure", "syncIdp", "reconfigure", "syncIdp", "syncProxy"]);
+  });
+
+  test("fails instead of continuing when local IDP outputs never stabilize", async () => {
+    const calls: string[] = [];
+
+    await expect(
+      runReconcileActions(
+        { terrarium_idp_mode: "local" },
+        recordActions(calls, ["client-1", "client-2", "client-2", "client-3", "client-3", "client-4", "client-4", "client-5"])
+      )
+    ).rejects.toThrow("local IDP outputs kept changing");
+
+    expect(calls).toEqual(["reconfigure", "syncIdp", "reconfigure", "syncIdp", "reconfigure", "syncIdp", "reconfigure", "syncIdp", "reconfigure"]);
   });
 
   test("skips IDP sync for external OIDC mode", async () => {

@@ -14,7 +14,7 @@ import type {
   VolumeRecord
 } from "./types";
 import { HetznerCloudProvider } from "./provider/hetzner";
-import { DuckDnsProvider } from "./provider/duckdns";
+import { IpEncodedDnsProvider } from "./provider/ip-encoded-dns";
 import { ZitadelCloudProvider } from "./provider/zitadel-cloud";
 import { S3Provider } from "./provider/s3";
 import { CifsProvider } from "./provider/cifs";
@@ -41,7 +41,7 @@ export class IntegrationContext {
   readonly config: IntegrationConfig;
   readonly logger: IntegrationLogger;
   readonly hetzner: HetznerCloudProvider;
-  readonly duckdns: DuckDnsProvider;
+  readonly publicDns: IpEncodedDnsProvider;
   readonly zitadelCloud: ZitadelCloudProvider;
   readonly s3: S3Provider;
   readonly cifs: CifsProvider;
@@ -67,7 +67,7 @@ export class IntegrationContext {
 
     this.logger = new IntegrationLogger(join(this.config.outputDir, "integration.log"));
     this.hetzner = new HetznerCloudProvider(this.config, this.logger.child("hetzner"));
-    this.duckdns = new DuckDnsProvider(this.config, this.logger.child("duckdns"));
+    this.publicDns = new IpEncodedDnsProvider(this.config, this.logger.child("public-dns"));
     this.zitadelCloud = new ZitadelCloudProvider(this.config, this.logger.child("zitadel-cloud"));
     this.s3 = new S3Provider(this.config, this.logger.child("s3"));
     this.cifs = new CifsProvider(this.config, this.logger.child("cifs"));
@@ -103,12 +103,12 @@ export class IntegrationContext {
     );
   }
 
-  domainBundle(prefix: string): DomainBundle {
+  domainBundle(prefix: string, ip: string): DomainBundle {
     return {
-      manage: this.duckdns.serviceHost(`${prefix}-manage`, this.config.slug),
-      proxy: this.duckdns.serviceHost(`${prefix}-proxy`, this.config.slug),
-      lxd: this.duckdns.serviceHost(`${prefix}-lxd`, this.config.slug),
-      auth: this.duckdns.serviceHost(`${prefix}-auth`, this.config.slug)
+      manage: this.publicDns.serviceHost(`${prefix}-manage`, this.config.slug, ip),
+      proxy: this.publicDns.serviceHost(`${prefix}-proxy`, this.config.slug, ip),
+      lxd: this.publicDns.serviceHost(`${prefix}-lxd`, this.config.slug, ip),
+      auth: this.publicDns.serviceHost(`${prefix}-auth`, this.config.slug, ip)
     };
   }
 
