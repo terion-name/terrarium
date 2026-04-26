@@ -315,10 +315,20 @@ async function ensureUserGrant(authDomain: string, pat: string, userId: string, 
   if (existing?.roleKeys?.includes(adminGroup)) {
     return;
   }
+  if (existing?.id) {
+    await zitadelApi(authDomain, pat, "PUT", `/management/v1/users/${userId}/grants/${existing.id}`, {
+      roleKeys: mergedRoleKeys(existing.roleKeys ?? [], adminGroup)
+    });
+    return;
+  }
   await zitadelApi(authDomain, pat, "POST", `/management/v1/users/${userId}/grants`, {
     projectId,
     roleKeys: [adminGroup]
   });
+}
+
+export function mergedRoleKeys(existingRoleKeys: string[], requiredRoleKey: string): string[] {
+  return Array.from(new Set([...existingRoleKeys, requiredRoleKey])).sort();
 }
 
 async function ensureGroupsAction(authDomain: string, pat: string): Promise<string> {

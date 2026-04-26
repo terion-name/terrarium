@@ -17,14 +17,20 @@ describe("Traefik bootstrap certificate template", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/traefik/tasks/main.yml"), "utf8");
     const playbook = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
     const certConfig = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/bootstrap-cert.yml.j2"), "utf8");
+    const dynamicConfig = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/terrarium-dynamic.yml.j2"), "utf8");
+    const bootstrapRoutes = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/bootstrap-routes.yml.j2"), "utf8");
 
     expect(tasks).toContain("[terrarium_auth_domain] if terrarium_bootstrap_tls_enabled else []");
     expect(tasks).not.toContain("'*.' ~ terrarium_bootstrap_tls_root_domain");
     expect(certConfig).toContain("certificates:");
     expect(certConfig).not.toContain("defaultCertificate");
+    expect(dynamicConfig).not.toContain("zitadel-root-bootstrap");
+    expect(bootstrapRoutes).toContain("zitadel-root-bootstrap");
     expect(tasks).toContain("Remove Traefik bootstrap certificate config when bootstrap TLS is not required");
+    expect(tasks).toContain("Remove temporary Traefik bootstrap routes when bootstrap TLS is not required");
     expect(tasks).toContain("systemctl try-restart snap.lxd.daemon.service");
     expect(playbook).toContain("Remove local auth bootstrap TLS material before requesting public TLS");
+    expect(playbook).toContain("dynamic/bootstrap-routes.yml");
     expect(playbook).toContain("Wait for local auth domain to serve public TLS");
     expect(playbook).toContain("terrarium_bootstrap_tls_removed is changed");
     expect(playbook.indexOf("Remove local auth bootstrap TLS material before requesting public TLS")).toBeLessThan(

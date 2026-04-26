@@ -1,0 +1,30 @@
+http:
+  routers:
+    zitadel-root-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`) && Path(`/`)
+      middlewares:
+        - zitadel-root-rewrite@file
+      service: zitadel-login@file
+      priority: 400
+    zitadel-login-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/ui/v2/login`)
+      service: zitadel-login@file
+      priority: 250
+    zitadel-api-alias-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/api`)
+      middlewares:
+        - zitadel-strip-api@file
+      service: zitadel-api@file
+      priority: 200
+    zitadel-canonical-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`)
+      service: zitadel-api@file
+      priority: 100

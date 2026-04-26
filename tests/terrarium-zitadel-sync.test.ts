@@ -4,6 +4,7 @@ import {
   isZitadelAlreadyExistsError,
   isRetriableZitadelApiError,
   isZitadelNoChangesResponse,
+  mergedRoleKeys,
   parseZitadelHttpOutput
 } from "../scripts/terrarium-zitadel-sync";
 
@@ -57,5 +58,10 @@ describe("terrarium local ZITADEL sync", () => {
     expect(isZitadelAlreadyExistsError('ZITADEL API POST /management/v1/projects/p1/roles returned HTTP 400: {"message":"Errors.Invalid.Argument"}')).toBe(
       false
     );
+  });
+
+  test("preserves existing grant roles when adding the local admin group", () => {
+    expect(mergedRoleKeys(["auditor", "operators"], "terrarium-admins")).toEqual(["auditor", "operators", "terrarium-admins"]);
+    expect(mergedRoleKeys(["terrarium-admins"], "terrarium-admins")).toEqual(["terrarium-admins"]);
   });
 });

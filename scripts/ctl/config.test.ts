@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { applySetIdpConfig, runReconcileActions, type ReconcileActions } from "./config";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { applySetIdpConfig, parseSetCommandOptions, runReconcileActions, type ReconcileActions } from "./config";
 
 function recordActions(calls: string[], outputs: string[] = [""]): ReconcileActions {
   return {
@@ -116,5 +119,25 @@ describe("terrariumctl config reconciliation", () => {
     expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test");
     expect(config.terrarium_oidc_client_id).toBe("");
     expect(config.terrarium_oidc_client_secret).toBe("");
+  });
+
+  test("reads set command secrets from files without requiring inline values", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "terrarium-config-test-"));
+    try {
+      const oidcSecretPath = join(tempDir, "oidc-secret");
+      const s3SecretPath = join(tempDir, "s3-secret");
+      writeFileSync(oidcSecretPath, "oidc-secret-from-file\n", "utf8");
+      writeFileSync(s3SecretPath, "s3-secret-from-file\n", "utf8");
+
+      const parsed = parseSetCommandOptions({
+        oidcSecretFile: oidcSecretPath,
+        "s3-secretKeyFile": s3SecretPath
+      });
+
+      expect(parsed.idp.oidcSecret).toBe("oidc-secret-from-file");
+      expect(parsed.s3.s3SecretKey).toBe("s3-secret-from-file");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

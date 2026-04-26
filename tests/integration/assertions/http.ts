@@ -9,6 +9,8 @@ type HttpAssertionOptions = {
   insecure?: boolean;
 };
 
+type JsonValidator = (value: unknown) => void;
+
 function curlResolveArgs(url: string, resolveIp?: string): string[] {
   if (!resolveIp) {
     return [];
@@ -183,4 +185,45 @@ export async function expectHttpBodyContains(
 
   const bodySnippet = lastBody.replace(/\s+/g, " ").trim().slice(0, 400);
   throw new Error(`expected ${url} body to include "${needle}" within ${timeoutMs}ms; last status=${lastStatus}; last body=${bodySnippet || "<empty>"}`);
+}
+
+/** Polls an HTTPS endpoint until it returns JSON accepted by the validator. */
+export async function expectHttpsJson(
+  url: string,
+  validate: JsonValidator,
+  timeoutMsOrOptions: number | HttpAssertionOptions = 180000
+): Promise<void> {
+  const timeoutMs = typeof timeoutMsOrOptions === "number" ? timeoutMsOrOptions : timeoutMsOrOptions.timeoutMs ?? 180000;
+  const resolveIp = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.resolveIp;
+  const insecure = typeof timeoutMsOrOptions === "number" ? false : timeoutMsOrOptions.insecure ?? false;
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus = "none";
+  let lastBody = "";
+  let lastError = "";
+
+  while (Date.now() < deadline) {
+    try {
+      const { status, body } = await readHttpsBody(url, { resolveIp, insecure });
+      lastStatus = String(status || 0);
+      lastBody = body;
+
+      if (status >= 200 && status < 300) {
+        validate(JSON.parse(body) as unknown);
+        return;
+      }
+
+      lastError = `unexpected HTTP status ${status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    await Bun.sleep(5000);
+  }
+
+  const bodySnippet = lastBody.replace(/\s+/g, " ").trim().slice(0, 400);
+  throw new Error(
+    `expected ${url} to return valid JSON within ${timeoutMs}ms; last status=${lastStatus}; last error=${lastError || "none"}; last body=${
+      bodySnippet || "<empty>"
+    }`
+  );
 }

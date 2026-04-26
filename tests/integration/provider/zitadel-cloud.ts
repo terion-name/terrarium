@@ -381,10 +381,7 @@ export class ZitadelCloudProvider {
 
     const errorCode = String(parsed.error || "").trim();
     const errorDescription = String(parsed.error_description || "").trim();
-    if (
-      ["unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "invalid_grant"].includes(errorCode) ||
-      [errorCode, errorDescription].some((value) => value.includes("Errors.User.Code.Invalid"))
-    ) {
+    if (errorCode === "invalid_grant" || [errorCode, errorDescription].some((value) => value.includes("Errors.User.Code.Invalid"))) {
       return { ready: true, message: errorDescription || errorCode };
     }
 

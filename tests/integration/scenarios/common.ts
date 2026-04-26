@@ -1,10 +1,11 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
-import { expectHttpBodyContains, waitForHttpStatusResolved } from "../assertions/http";
+import { expectHttpBodyContains, expectHttpsJson, waitForHttpStatusResolved } from "../assertions/http";
 import { expectManagementUi, expectProtectedRoute } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
@@ -41,6 +42,10 @@ function baseEmail(ctx: IntegrationContext): string {
   return `terrarium+${ctx.config.slug}@${ctx.config.ipDnsDomain}`;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function repoArchiveRemotePath(localArchivePath: string): string {
   return `/root/${basename(localArchivePath)}`;
 }
@@ -51,6 +56,18 @@ function binaryRemotePath(): string {
 
 function remoteCtl(command: string): string {
   return `/usr/local/bin/terrariumctl ${command}`;
+}
+
+export async function uploadSecretFile(ssh: SshHost, remotePath: string, secret: string): Promise<void> {
+  const tempDir = mkdtempSync(join(tmpdir(), "terrarium-secret-"));
+  const localPath = join(tempDir, "secret");
+  try {
+    writeFileSync(localPath, `${secret.replace(/\n+$/g, "")}\n`, { encoding: "utf8", mode: 0o600 });
+    await ssh.copyTo(localPath, remotePath);
+    await ssh.exec(`chmod 600 ${shellArg(remotePath)}`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 export function expectedRouteAuthRedirectUris(routeLabels: string[]): string[] {
@@ -138,6 +155,7 @@ export async function stageBundleOnHost(context: IntegrationContext, ssh: SshHos
 export async function installTerrarium(context: IntegrationContext, host: ManagedHost, options: InstallOptions): Promise<void> {
   const ssh = context.ssh(host);
   await stageBundleOnHost(context, ssh);
+  const secretFiles: string[] = [];
   let storageSource = options.storageSource;
   if (!storageSource && options.storageMode === "disk") {
     storageSource = (
@@ -175,7 +193,10 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     args.push(`--admin-group ${shellArg(options.adminGroup || "terrarium-admins")}`);
     args.push(`--oidc ${shellArg(options.oidcIssuer || "")}`);
     args.push(`--oidc-client ${shellArg(options.oidcClientId || "")}`);
-    args.push(`--oidc-secret ${shellArg(options.oidcClientSecret || "")}`);
+    const oidcSecretPath = `/root/terrarium-install-${host.label}-oidc-secret`;
+    await uploadSecretFile(ssh, oidcSecretPath, options.oidcClientSecret || "");
+    secretFiles.push(oidcSecretPath);
+    args.push(`--oidc-secret-file ${shellArg(oidcSecretPath)}`);
   }
   if (options.enableS3) {
     args.push("--enable-s3");
@@ -184,7 +205,10 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     args.push(`--s3-region ${shellArg(context.config.s3Region)}`);
     args.push(`--s3-prefix ${shellArg(`terrarium/${context.config.slug}/${host.label}`)}`);
     args.push(`--s3-access-key ${shellArg(context.config.s3AccessKey)}`);
-    args.push(`--s3-secret-key ${shellArg(context.config.s3SecretKey)}`);
+    const s3SecretPath = `/root/terrarium-install-${host.label}-s3-secret-key`;
+    await uploadSecretFile(ssh, s3SecretPath, context.config.s3SecretKey);
+    secretFiles.push(s3SecretPath);
+    args.push(`--s3-secret-key-file ${shellArg(s3SecretPath)}`);
   }
   if (options.enableSyncoid) {
     args.push("--enable-syncoid");
@@ -198,6 +222,7 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
   const remoteLogPath = `/root/terrarium-install-${host.label}.log`;
   await ssh.exec(`rm -f ${shellArg(remoteScriptPath)} ${shellArg(remoteStatusPath)} ${shellArg(remoteLogPath)}`);
   const installCommand = [
+    ...(secretFiles.length > 0 ? [`trap "rm -f ${secretFiles.map(shellArg).join(" ")}" EXIT`] : []),
     `export TERRARIUM_REPO_URL=${shellArg("file:///root/terrarium-src")}`,
     `export TERRARIUM_BUNDLE_DIR=${shellArg("/root/terrarium-bundle")}`,
     args.join(" ")
@@ -249,6 +274,36 @@ export async function verifyManagementUi(
   });
 }
 
+/** Verifies the public LXD endpoint serves the real API over trusted TLS and does not expose trusted anonymous access. */
+export async function verifyLxdApi(host: ManagedHost): Promise<void> {
+  await expectHttpsJson(
+    `https://${host.domains.lxd}/1.0`,
+    (body) => {
+      if (!isObject(body)) {
+        throw new Error("LXD API root did not return an object");
+      }
+
+      const metadata = body.metadata;
+      if (!isObject(metadata)) {
+        throw new Error("LXD API root did not include metadata");
+      }
+
+      if (!Array.isArray(metadata.api_extensions)) {
+        throw new Error("LXD API root did not include api_extensions");
+      }
+
+      const auth = typeof metadata.auth === "string" ? metadata.auth.toLowerCase() : "";
+      if (!auth) {
+        throw new Error("LXD API root did not include auth state");
+      }
+      if (auth === "trusted") {
+        throw new Error("LXD API root allowed trusted anonymous access");
+      }
+    },
+    { timeoutMs: 300000, resolveIp: host.server.ipv4 }
+  );
+}
+
 /** Creates a small HTTP server inside an LXC and publishes the requested proxy labels. */
 export async function createHttpFixtureContainer(
   host: SshHost,
@@ -258,6 +313,8 @@ export async function createHttpFixtureContainer(
 ): Promise<void> {
   const setupLogPath = `/root/${containerName}-setup.log`;
   const setupScriptPath = `/root/${containerName}-setup.sh`;
+  const setupRunnerPath = `/root/${containerName}-setup-runner.sh`;
+  const setupStatusPath = `/root/${containerName}-setup.exit`;
   const setupCommand = [
     `echo '[fixture] launch ${containerName}'`,
     `timeout 300s lxc launch ubuntu:24.04 ${shellArg(containerName)} --profile terrarium`,
@@ -296,7 +353,7 @@ systemctl daemon-reload && systemctl enable --now terrarium-fixture-http.service
   ].join(" && ");
 
   await deleteContainerIfPresent(host, containerName);
-  await host.exec(`rm -f ${shellArg(setupLogPath)} ${shellArg(setupScriptPath)}`);
+  await host.exec(`rm -f ${shellArg(setupLogPath)} ${shellArg(setupScriptPath)} ${shellArg(setupRunnerPath)} ${shellArg(setupStatusPath)}`);
   await host.write(
     setupScriptPath,
     `#!/usr/bin/env bash
@@ -305,13 +362,8 @@ ${setupCommand}
 `,
     "700"
   );
-  const result = await host.execAllowFailure(`${shellArg(setupScriptPath)} >${shellArg(setupLogPath)} 2>&1`, {
-    timeoutMs: 20 * 60 * 1000
-  });
-  if (result.exitCode !== 0) {
-    const log = await host.execAllowFailure(`tail -n 200 ${shellArg(setupLogPath)} || true`, { timeoutMs: 20000 });
-    throw new Error(`fixture setup failed for ${containerName}\n${log.stdout || log.stderr || result.stderr || result.stdout}`);
-  }
+  await host.execDetached(shellArg(setupScriptPath), setupRunnerPath, setupStatusPath, setupLogPath);
+  await waitForDetachedCommand(host, setupStatusPath, setupLogPath, 20 * 60 * 1000);
 }
 
 /** Forces local snapshots, mutates container state, and verifies in-place restore. */
@@ -349,18 +401,22 @@ export async function switchToExternalOidc(
 ): Promise<void> {
   const ssh = context.ssh(host);
   const scriptPath = `/root/terrarium-switch-oidc-${randomUUID()}.sh`;
+  const secretPath = `/root/terrarium-switch-oidc-${randomUUID()}-secret`;
+  await uploadSecretFile(ssh, secretPath, fixture.clientSecret);
   await ssh.execScript(
     `#!/usr/bin/env bash
 set -euo pipefail
+trap "rm -f ${shellArg(secretPath)}" EXIT
 ${remoteCtl("set idp oidc")} \\
   --oidc ${shellArg(context.config.zitadelCloudIssuer)} \\
   --oidc-client ${shellArg(fixture.clientId)} \\
-  --oidc-secret ${shellArg(fixture.clientSecret)} \\
+  --oidc-secret-file ${shellArg(secretPath)} \\
   --admin-group ${shellArg(fixture.adminGroup)}
 `,
     scriptPath
   );
   await verifyManagementUi(context, host, fixture.adminUser);
+  await verifyLxdApi(host);
 }
 
 /** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
@@ -376,6 +432,7 @@ ${remoteCtl("set idp local")}
   );
   const admin = await readLocalZitadelAdmin(ssh);
   await verifyManagementUi(context, host, admin);
+  await verifyLxdApi(host);
 }
 
 /** Runs a small route-auth matrix against the currently configured OIDC provider. */
@@ -415,12 +472,14 @@ export async function exerciseReconfiguration(context: IntegrationContext, host:
     )} --lxd-domain ${shellArg(altLxd)} --auth-domain ${shellArg(altAuth)}`
   );
   await ssh.exec(`${remoteCtl("set emails")} --email ${shellArg(baseEmail(context))} --acme-email ${shellArg(baseEmail(context))}`);
+  const s3SecretPath = "/root/terrarium-reconfigure-s3-secret";
+  await uploadSecretFile(ssh, s3SecretPath, context.config.s3SecretKey);
   await ssh.exec(
-    `${remoteCtl("set s3")} --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
+    `trap "rm -f ${shellArg(s3SecretPath)}" EXIT && ${remoteCtl("set s3")} --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
       context.config.s3Bucket
     )} --s3-region ${shellArg(context.config.s3Region)} --s3-prefix ${shellArg(`terrarium/${context.config.slug}/reconfigured`)} --s3-access-key ${shellArg(
       context.config.s3AccessKey
-    )} --s3-secret-key ${shellArg(context.config.s3SecretKey)}`
+    )} --s3-secret-key-file ${shellArg(s3SecretPath)}`
   );
   await ssh.exec(remoteCtl("set syncoid --disable"));
   await ssh.exec(`${remoteCtl("set syncoid --enable")} --syncoid-target root@127.0.0.1 --syncoid-target-dataset terrarium/containers --syncoid-ssh-key /root/.ssh/id_ed25519`).catch(() => {

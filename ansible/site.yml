@@ -114,6 +114,7 @@
         state: absent
       loop:
         - "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"
+        - "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-routes.yml"
         - "{{ terrarium_traefik_config_dir }}/bootstrap-certs"
         - /usr/local/share/ca-certificates/terrarium-bootstrap.crt
       register: terrarium_bootstrap_tls_removed

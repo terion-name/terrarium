@@ -42,12 +42,24 @@ export async function runAllowFailure(cmd: string[], options: CommandOptions = {
 
   let timedOut = false;
   let killTimer: Timer | undefined;
+  let resolveTimeout: ((result: CommandResult) => void) | undefined;
+  const timeoutResult =
+    options.timeoutMs !== undefined
+      ? new Promise<CommandResult>((resolve) => {
+          resolveTimeout = resolve;
+        })
+      : undefined;
   const timeout =
     options.timeoutMs !== undefined
       ? setTimeout(() => {
           timedOut = true;
           proc.kill("SIGTERM");
           killTimer = setTimeout(() => proc.kill("SIGKILL"), 2000);
+          resolveTimeout?.({
+            exitCode: 124,
+            stdout: "",
+            stderr: `command timed out after ${options.timeoutMs}ms`
+          });
         }, options.timeoutMs)
       : undefined;
 
@@ -56,11 +68,15 @@ export async function runAllowFailure(cmd: string[], options: CommandOptions = {
     proc.stdin?.end();
   }
 
-  const [exitCode, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text()
-  ]);
+  const completed = Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]).then(
+    ([exitCode, stdout, stderr]) => ({
+      exitCode,
+      stdout,
+      stderr: timedOut ? `${stderr}${stderr ? "\n" : ""}command timed out after ${options.timeoutMs}ms` : stderr
+    })
+  );
+
+  const result = timeoutResult ? await Promise.race([completed, timeoutResult]) : await completed;
 
   if (timeout) {
     clearTimeout(timeout);
@@ -69,11 +85,7 @@ export async function runAllowFailure(cmd: string[], options: CommandOptions = {
     clearTimeout(killTimer);
   }
 
-  return {
-    exitCode,
-    stdout,
-    stderr: timedOut ? `${stderr}${stderr ? "\n" : ""}command timed out after ${options.timeoutMs}ms` : stderr
-  };
+  return result;
 }
 
 /** Runs a command and throws with a rendered message when it exits non-zero. */

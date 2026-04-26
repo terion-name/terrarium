@@ -282,10 +282,7 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
     throw new Error(errorDescription || errorCode || `OIDC token probe failed with HTTP ${tokenResponse.status}`);
   }
 
-  if (
-    ["unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "invalid_grant"].includes(errorCode) ||
-    [errorCode, errorDescription].some((value) => value.includes("Errors.User.Code.Invalid"))
-  ) {
+  if (errorCode === "invalid_grant" || [errorCode, errorDescription].some((value) => value.includes("Errors.User.Code.Invalid"))) {
     return;
   }
 

@@ -1,11 +1,13 @@
 import { IntegrationContext } from "../context";
+import { expectRemoteContains } from "../assertions/host";
 import {
   captureFailureArtifacts,
   createHttpFixtureContainer,
   expectedRouteAuthRedirectUris,
   installTerrarium,
   preparePartitionTarget,
-  provisionHost
+  provisionHost,
+  uploadSecretFile
 } from "./common";
 import { runSmokeSuite } from "./smoke";
 
@@ -91,13 +93,17 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     await fileSsh.exec(
       `expect -c 'set timeout 120; spawn bash -lc "terrariumctl backup restore --instance compose-${context.config.slug} --as-new compose-${context.config.slug}-restored"; expect { -re {Select.*pool} { send "terrarium\\r"; exp_continue } eof {} }'`
     );
+    await fileSsh.exec(`lxc start compose-${context.config.slug}-restored || true`);
+    await expectRemoteContains(fileSsh, `lxc exec compose-${context.config.slug}-restored -- cat /srv/www/index.html`, "compose-ok");
 
+    const s3SecretPath = "/root/terrarium-full-s3-secret";
+    await uploadSecretFile(fileSsh, s3SecretPath, context.config.s3SecretKey);
     await fileSsh.exec(
-      `terrariumctl set s3 --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
+      `trap "rm -f ${shellArg(s3SecretPath)}" EXIT && terrariumctl set s3 --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
         context.config.s3Bucket
       )} --s3-region ${shellArg(context.config.s3Region)} --s3-prefix ${shellArg(
         `terrarium/${context.config.slug}/full`
-      )} --s3-access-key ${shellArg(context.config.s3AccessKey)} --s3-secret-key ${shellArg(context.config.s3SecretKey)}`
+      )} --s3-access-key ${shellArg(context.config.s3AccessKey)} --s3-secret-key-file ${shellArg(s3SecretPath)}`
     );
     const badS3 = await fileSsh.execAllowFailure(
       `terrariumctl set s3 --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(

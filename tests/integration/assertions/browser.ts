@@ -591,7 +591,14 @@ function assertUserFacingPageBody(body: string, markers: readonly string[], labe
 
 export function isLoginOrOauthCallbackPlumbingPath(pathname: string): boolean {
   const normalized = pathname.toLowerCase();
-  return normalized.startsWith("/ui/v2/login") || normalized.startsWith("/ui/login") || normalized === "/oauth2" || normalized.startsWith("/oauth2/");
+  return (
+    normalized.startsWith("/ui/v2/login") ||
+    normalized.startsWith("/ui/login") ||
+    normalized === "/oauth2" ||
+    normalized.startsWith("/oauth2/") ||
+    normalized === "/oidc" ||
+    normalized.startsWith("/oidc/")
+  );
 }
 
 export function isTargetApplicationPage(currentUrl: string, targetHost: string): boolean {

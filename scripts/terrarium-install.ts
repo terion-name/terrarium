@@ -410,6 +410,14 @@ async function promptText(message: string, defaultValue = ""): Promise<string> {
   });
 }
 
+async function promptSecret(message: string, defaultValue = ""): Promise<string> {
+  const entered = await password({
+    message: defaultValue ? `${message} (leave empty to keep current value)` : message,
+    mask: "*"
+  });
+  return entered || defaultValue;
+}
+
 async function promptEmail(message: string, defaultValue = "", fieldName = "email"): Promise<string> {
   return await input({
     message,
@@ -456,7 +464,7 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
       "--oidc"
     );
     options.oidcClientId = await promptText("External OIDC client ID", options.oidcClientId);
-    options.oidcClientSecret = await promptText("External OIDC client secret", options.oidcClientSecret);
+    options.oidcClientSecret = await promptSecret("External OIDC client secret", options.oidcClientSecret);
 
     if (!options.oidcClientId) {
       warn("OIDC client ID is required for external OIDC mode.");
@@ -499,7 +507,7 @@ async function promptAndVerifyS3(options: InstallOptions): Promise<void> {
     options.s3Region = await promptText("S3 region", options.s3Region || "us-east-1");
     options.s3Prefix = await promptText("S3 prefix", options.s3Prefix || "terrarium");
     options.s3AccessKey = await promptText("S3 access key", options.s3AccessKey);
-    options.s3SecretKey = await promptText("S3 secret key", options.s3SecretKey);
+    options.s3SecretKey = await promptSecret("S3 secret key", options.s3SecretKey);
 
     if (!options.s3Bucket || !options.s3AccessKey || !options.s3SecretKey) {
       warn("S3 bucket, access key, and secret key are all required.");
@@ -975,6 +983,28 @@ function readCliOption(rawOptions: Record<string, unknown>, key: string, aliases
   return "";
 }
 
+function readSecretCliOption(
+  rawOptions: Record<string, unknown>,
+  key: string,
+  fileKey: string,
+  aliases: string[] = [],
+  fileAliases: string[] = []
+): string {
+  const inlineValue = readCliOption(rawOptions, key, aliases);
+  const filePath = readCliOption(rawOptions, fileKey, fileAliases);
+  if (inlineValue && filePath) {
+    fail(`use only one of --${key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)} or --${fileKey.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}`);
+  }
+  if (!filePath) {
+    return inlineValue;
+  }
+  try {
+    return readFileSync(filePath, "utf8").trim();
+  } catch (error) {
+    fail(`failed to read secret file ${filePath}: ${String(error).replace(/^Error: /, "")}`);
+  }
+}
+
 async function installTerrarium(options: InstallOptions): Promise<void> {
   printSplash();
   requireRoot();
@@ -1039,6 +1069,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--oidc <issuer>", "OIDC issuer URL; required when --idp=oidc")
     .option("--oidc-client <clientId>", "OIDC client ID; required when --idp=oidc")
     .option("--oidc-secret <clientSecret>", "OIDC client secret; required when --idp=oidc")
+    .option("--oidc-secret-file <path>", "Read the OIDC client secret from a root-readable file")
     .option("--auth-domain <domain>", "ZITADEL auth domain")
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL")
     .option("--root-pwd <password>", "Set or update the root password used for Cockpit login")
@@ -1052,6 +1083,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--s3-prefix <prefix>", "S3 object prefix")
     .option("--s3-access-key <key>", "S3 access key")
     .option("--s3-secret-key <secret>", "S3 secret key")
+    .option("--s3-secret-key-file <path>", "Read the S3 secret key from a root-readable file")
     .option("--enable-syncoid", "Enable syncoid replication")
     .option("--syncoid-target <host>", "Remote syncoid SSH target")
     .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset")
@@ -1072,7 +1104,13 @@ export function registerInstallCommand(cli: CAC): void {
       options.adminGroup = readCliOption(cliOptions, "adminGroup");
       options.oidcIssuer = readCliOption(cliOptions, "oidc");
       options.oidcClientId = readCliOption(cliOptions, "oidcClient");
-      options.oidcClientSecret = readCliOption(cliOptions, "oidcSecret");
+      options.oidcClientSecret = readSecretCliOption(
+        cliOptions,
+        "oidcSecret",
+        "oidcSecretFile",
+        ["oidc-secret"],
+        ["oidc-secret-file"]
+      );
       options.authDomain = readCliOption(cliOptions, "authDomain");
       options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail");
       options.rootPassword = readCliOption(cliOptions, "rootPwd");
@@ -1085,7 +1123,13 @@ export function registerInstallCommand(cli: CAC): void {
       options.s3Region = readCliOption(cliOptions, "s3Region", ["s3-region"]);
       options.s3Prefix = readCliOption(cliOptions, "s3Prefix", ["s3-prefix"]) || options.s3Prefix;
       options.s3AccessKey = readCliOption(cliOptions, "s3AccessKey", ["s3-accessKey", "s3-access-key"]);
-      options.s3SecretKey = readCliOption(cliOptions, "s3SecretKey", ["s3-secretKey", "s3-secret-key"]);
+      options.s3SecretKey = readSecretCliOption(
+        cliOptions,
+        "s3SecretKey",
+        "s3SecretKeyFile",
+        ["s3-secretKey", "s3-secret-key"],
+        ["s3-secretKeyFile", "s3-secret-key-file"]
+      );
       options.enableSyncoid = Boolean(cliOptions.enableSyncoid);
       options.syncoidTarget = readCliOption(cliOptions, "syncoidTarget");
       options.syncoidTargetDataset = readCliOption(cliOptions, "syncoidTargetDataset");

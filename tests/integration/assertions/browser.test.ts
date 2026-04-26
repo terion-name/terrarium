@@ -27,6 +27,7 @@ describe("browser assertion helpers", () => {
   test("keeps oauth and login plumbing separate from target application pages", () => {
     expect(isLoginOrOauthCallbackPlumbingPath("/oauth2/route/grouped/callback")).toBe(true);
     expect(isLoginOrOauthCallbackPlumbingPath("/oauth2/callback")).toBe(true);
+    expect(isLoginOrOauthCallbackPlumbingPath("/oidc/callback")).toBe(true);
     expect(isLoginOrOauthCallbackPlumbingPath("/ui/v2/login/password")).toBe(true);
     expect(isLoginOrOauthCallbackPlumbingPath("/protected")).toBe(false);
 

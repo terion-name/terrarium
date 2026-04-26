@@ -167,7 +167,7 @@ describe("ZITADEL Cloud provider", () => {
         return Response.json({ token_endpoint: "https://zitadel.example.test/oauth/v2/token" });
       }
       if (method === "POST" && path === "/oauth/v2/token") {
-        return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
       }
       if (method === "POST" && path === "/management/v1/users/human/_import") {
         return Response.json({ userId: userIds.shift() });

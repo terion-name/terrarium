@@ -49,7 +49,7 @@ describe("OIDC verification", () => {
     await expect(verifyOidcConfig(oidcOptions())).rejects.toThrow("client not found");
   });
 
-  test("accepts grant-policy errors after credentials are recognized", async () => {
+  test("rejects token errors that do not prove client authentication", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/.well-known/openid-configuration")) {
@@ -59,6 +59,21 @@ describe("OIDC verification", () => {
         return authResponse();
       }
       return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
+    }) as typeof fetch;
+
+    await expect(verifyOidcConfig(oidcOptions())).rejects.toThrow("unsupported_grant_type");
+  });
+
+  test("accepts invalid_grant after client authentication succeeds", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return discoveryResponse();
+      }
+      if (url.includes("/oauth/v2/authorize")) {
+        return authResponse();
+      }
+      return Response.json({ error: "invalid_grant" }, { status: 400 });
     }) as typeof fetch;
 
     await expect(verifyOidcConfig(oidcOptions())).resolves.toBeUndefined();

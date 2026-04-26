@@ -48,6 +48,7 @@ export type SetIdpOptions = {
   oidc?: string;
   oidcClient?: string;
   oidcSecret?: string;
+  oidcSecretFile?: string;
   zitadelAdminEmail?: string;
 };
 
@@ -61,6 +62,7 @@ export type SetS3Options = {
   s3Prefix?: string;
   s3AccessKey?: string;
   s3SecretKey?: string;
+  s3SecretKeyFile?: string;
 };
 
 /** Reusable option bag for `set syncoid`. */
@@ -76,6 +78,28 @@ type SetIdpPlan = {
   summary: string;
   verifyOidc?: OidcVerificationOptions;
 };
+
+function secretCliOption(
+  rawOptions: Record<string, unknown>,
+  key: string,
+  fileKey: string,
+  aliases: string[] = [],
+  fileAliases: string[] = []
+): string {
+  const inlineValue = cliOption(rawOptions, key, aliases);
+  const filePath = cliOption(rawOptions, fileKey, fileAliases);
+  if (inlineValue && filePath) {
+    throw new Error(`use only one of --${key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)} or --${fileKey.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}`);
+  }
+  if (!filePath) {
+    return inlineValue || "";
+  }
+  try {
+    return readFileSync(filePath, "utf8").trim();
+  } catch (error) {
+    throw new Error(`failed to read secret file ${filePath}: ${String(error).replace(/^Error: /, "")}`);
+  }
+}
 
 /**
  * Writes a config document and converges the live host to match it.
@@ -336,7 +360,7 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
       authDomain: cliOption(rawOptions, "authDomain", ["auth-domain"]),
       oidc: cliOption(rawOptions, "oidc"),
       oidcClient: cliOption(rawOptions, "oidcClient", ["oidc-client"]),
-      oidcSecret: cliOption(rawOptions, "oidcSecret", ["oidc-secret"]),
+      oidcSecret: secretCliOption(rawOptions, "oidcSecret", "oidcSecretFile", ["oidc-secret"], ["oidc-secret-file"]),
       zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
     },
     s3: {
@@ -347,7 +371,13 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
       s3Region: cliOption(rawOptions, "s3Region", ["s3-region"]),
       s3Prefix: cliOption(rawOptions, "s3Prefix", ["s3-prefix"]),
       s3AccessKey: cliOption(rawOptions, "s3AccessKey", ["s3-accessKey", "s3-access-key"]),
-      s3SecretKey: cliOption(rawOptions, "s3SecretKey", ["s3-secretKey", "s3-secret-key"])
+      s3SecretKey: secretCliOption(
+        rawOptions,
+        "s3SecretKey",
+        "s3SecretKeyFile",
+        ["s3-secretKey", "s3-secret-key"],
+        ["s3-secretKeyFile", "s3-secret-key-file"]
+      )
     },
     syncoid: {
       enable: Boolean(rawOptions.enable),

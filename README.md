@@ -221,7 +221,8 @@ Top-level commands:
 | `--admin-group` | group name | yes when `--idp=oidc`; no otherwise | `terrarium-admins` when `--idp=local`, otherwise prompted in interactive mode | Sets the management admin group that is allowed into Cockpit and LXD. |
 | `--oidc` | issuer URL | yes when `--idp=oidc`; no otherwise | derived from `https://<auth-domain>` when `--idp=local` | Sets the OIDC issuer URL. |
 | `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
-| `--oidc-secret` | client secret | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
+| `--oidc-secret` | client secret | yes when `--idp=oidc` and `--oidc-secret-file` is omitted; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy, LXD, and published-route auth. Prefer `--oidc-secret-file` for automation. |
+| `--oidc-secret-file` | path | yes when `--idp=oidc` and `--oidc-secret` is omitted; no otherwise | none | Reads the external OIDC client secret from a root-readable file. |
 | `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
 | `--root-pwd` | password | yes in non-interactive mode when root has no usable local password; no otherwise | existing root password if already set, otherwise prompted in interactive mode | Sets or updates the root password used for Cockpit login. |
@@ -234,7 +235,8 @@ Top-level commands:
 | `--s3-region` | region name | no | `us-east-1` when omitted | Sets the S3 region. |
 | `--s3-prefix` | prefix | no | `terrarium` | Sets the object prefix under the bucket. |
 | `--s3-access-key` | access key | yes if `--enable-s3` is set | none | Sets the S3 access key. |
-| `--s3-secret-key` | secret key | yes if `--enable-s3` is set | none | Sets the S3 secret key. |
+| `--s3-secret-key` | secret key | yes if `--enable-s3` is set and `--s3-secret-key-file` is omitted | none | Sets the S3 secret key. Prefer `--s3-secret-key-file` for automation. |
+| `--s3-secret-key-file` | path | yes if `--enable-s3` is set and `--s3-secret-key` is omitted | none | Reads the S3 secret key from a root-readable file. |
 
 Install verification notes:
 

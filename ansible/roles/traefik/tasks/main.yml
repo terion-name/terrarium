@@ -151,6 +151,21 @@
     mode: "0644"
   notify: restart traefik
 
+- name: Render temporary Traefik bootstrap routes
+  ansible.builtin.template:
+    src: bootstrap-routes.yml.j2
+    dest: "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-routes.yml"
+    mode: "0644"
+  notify: restart traefik
+  when: terrarium_bootstrap_tls_enabled
+
+- name: Remove temporary Traefik bootstrap routes when bootstrap TLS is not required
+  ansible.builtin.file:
+    path: "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-routes.yml"
+    state: absent
+  notify: restart traefik
+  when: not terrarium_bootstrap_tls_enabled
+
 - name: Install Traefik sync service
   ansible.builtin.template:
     src: terrarium-traefik-sync.service.j2
