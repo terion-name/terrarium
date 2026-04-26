@@ -6,7 +6,7 @@ import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
 import { expectHttpBodyContains, expectHttpsJson, waitForHttpStatusResolved } from "../assertions/http";
-import { expectManagementUi, expectProtectedRoute } from "../assertions/browser";
+import { expectLxdUi, expectManagementUi, expectProtectedRoute } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
 
@@ -170,10 +170,13 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     `--domain ${shellArg(context.publicDns.rootDomain(host.server.ipv4))}`,
     `--email ${shellArg(options.email || baseEmail(context))}`,
     `--acme-email ${shellArg(options.acmeEmail || baseEmail(context))}`,
-    `--root-pwd ${shellArg(`Terrarium!${context.config.slug}`)}`,
     `--idp ${options.idpMode}`,
     `--storage-mode ${options.storageMode}`
   ];
+  const rootPasswordPath = `/root/terrarium-install-${host.label}-root-password`;
+  await uploadSecretFile(ssh, rootPasswordPath, `Terrarium!${context.config.slug}`);
+  secretFiles.push(rootPasswordPath);
+  args.push(`--root-pwd-file ${shellArg(rootPasswordPath)}`);
 
   args.push(`--manage-domain ${shellArg(options.manageDomain || host.domains.manage)}`);
   args.push(`--proxy-domain ${shellArg(options.proxyDomain || host.domains.proxy)}`);
@@ -304,6 +307,22 @@ export async function verifyLxdApi(host: ManagedHost): Promise<void> {
   );
 }
 
+/** Verifies a real browser login through LXD's public OIDC flow. */
+export async function verifyLxdUi(
+  context: IntegrationContext,
+  host: ManagedHost,
+  user: { email: string; password: string; userId?: string; roles?: string[] }
+): Promise<void> {
+  const outputDir = join(context.localArtifactsDir, host.label, "lxd-browser");
+  mkdirSync(outputDir, { recursive: true });
+  await expectLxdUi(`https://${host.domains.lxd}`, user as never, outputDir, {
+    resolveIp: host.server.ipv4,
+    resolveHosts: {
+      [host.domains.auth]: host.server.ipv4
+    }
+  });
+}
+
 /** Creates a small HTTP server inside an LXC and publishes the requested proxy labels. */
 export async function createHttpFixtureContainer(
   host: SshHost,
@@ -417,6 +436,7 @@ ${remoteCtl("set idp oidc")} \\
   );
   await verifyManagementUi(context, host, fixture.adminUser);
   await verifyLxdApi(host);
+  await verifyLxdUi(context, host, fixture.adminUser);
 }
 
 /** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
@@ -433,6 +453,7 @@ ${remoteCtl("set idp local")}
   const admin = await readLocalZitadelAdmin(ssh);
   await verifyManagementUi(context, host, admin);
   await verifyLxdApi(host);
+  await verifyLxdUi(context, host, admin);
 }
 
 /** Runs a small route-auth matrix against the currently configured OIDC provider. */

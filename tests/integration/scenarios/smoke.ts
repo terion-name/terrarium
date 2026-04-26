@@ -13,6 +13,7 @@ import {
   switchBackToLocalIdp,
   switchToExternalOidc,
   verifyLxdApi,
+  verifyLxdUi,
   verifyLocalBackupRestore,
   verifyManagementUi,
   verifyProtectedRoutes,
@@ -72,6 +73,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
     const localAdmin = await readLocalZitadelAdmin(primarySsh);
     await verifyManagementUi(context, primary, localAdmin);
     await verifyLxdApi(primary);
+    await verifyLxdUi(context, primary, localAdmin);
 
     const plainRoute = `https://plain-${context.config.slug}.${rootDomain}:8080`;
     const authRoute = `https://auth-${context.config.slug}.${rootDomain}:8080@auth`;

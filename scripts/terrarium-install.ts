@@ -757,7 +757,7 @@ function validateNonInteractive(options: InstallOptions): void {
   options.email = validateEmail(options.email, "--email");
   options.acmeEmail = validateEmail(options.acmeEmail || options.email, "--acme-email");
   if (!options.rootPassword && rootPasswordState() !== "usable") {
-    fail("--root-pwd is required in non-interactive mode when root has no usable local password");
+    fail("--root-pwd or --root-pwd-file is required in non-interactive mode when root has no usable local password");
   }
 
   if (options.idpMode === "local") {
@@ -1073,6 +1073,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--auth-domain <domain>", "ZITADEL auth domain")
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL")
     .option("--root-pwd <password>", "Set or update the root password used for Cockpit login")
+    .option("--root-pwd-file <path>", "Read the root password used for Cockpit login from a root-readable file")
     .option("--storage-mode <mode>", "Storage mode: disk, partition, or file")
     .option("--storage-source <pathOrAuto>", "Disk or partition path for disk/partition mode, or auto")
     .option("--storage-size <size>", "File-backed pool size")
@@ -1113,7 +1114,7 @@ export function registerInstallCommand(cli: CAC): void {
       );
       options.authDomain = readCliOption(cliOptions, "authDomain");
       options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail");
-      options.rootPassword = readCliOption(cliOptions, "rootPwd");
+      options.rootPassword = readSecretCliOption(cliOptions, "rootPwd", "rootPwdFile", ["root-pwd"], ["root-pwd-file"]);
       options.storageMode = readCliOption(cliOptions, "storageMode").replace("loop", "file");
       options.storageSource = readCliOption(cliOptions, "storageSource");
       options.storageSize = readCliOption(cliOptions, "storageSize");

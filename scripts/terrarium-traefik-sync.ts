@@ -1207,20 +1207,27 @@ export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<vo
   const { dynamicYaml, extraEntrypoints, ufwPorts, authProfiles, errors } = buildDynamicConfig(containers, config);
   const staticYaml = buildStaticConfig(config, extraEntrypoints);
 
+  const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
+  const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
+  assertProxySyncSucceeded({
+    dynamicErrors: errors,
+    ufwErrors: [],
+    localRouteClientErrors,
+    routeAuthErrors
+  });
+
   const staticChanged = writeIfChanged(STATIC_CONFIG_PATH, staticYaml);
   writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml);
   const ufwErrors = await syncUfw(ufwPorts);
-  const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
-  const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
 
   if (staticChanged) {
     await runText(["systemctl", "restart", "traefik"], PREFIX);
   }
 
   assertProxySyncSucceeded({
-    dynamicErrors: errors,
+    dynamicErrors: [],
     ufwErrors,
-    localRouteClientErrors,
-    routeAuthErrors
+    localRouteClientErrors: [],
+    routeAuthErrors: []
   });
 }

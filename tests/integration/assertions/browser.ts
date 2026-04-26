@@ -11,6 +11,8 @@ type LoginOptions = {
   resolveHosts?: Record<string, string>;
   expected?: LoginExpectation;
   ignoreHTTPSErrors?: boolean;
+  postLoginBodyMarkers?: readonly string[];
+  postLoginLabel?: string;
 };
 
 const BROWSER_WAIT_TIMEOUT_MS = 120000;
@@ -32,6 +34,21 @@ const ERROR_TEXT_MARKERS = [
 ] as const;
 const COCKPIT_TEXT_MARKERS = ["Cockpit", "Log in", "Username", "Password"] as const;
 const TRAEFIK_TEXT_MARKERS = ["Traefik", "Dashboard", "HTTP", "Routers", "Services"] as const;
+const LXD_TEXT_MARKERS = ["LXD", "Instances", "Projects", "Storage"] as const;
+const USERNAME_INPUT_SELECTORS = [
+  '[data-testid="username-text-input"]',
+  'input[name="loginName"]',
+  'input[autocomplete="username"]',
+  'input[type="email"]',
+  'input[name="username"]'
+] as const;
+const PASSWORD_INPUT_SELECTORS = [
+  '[data-testid="password-text-input"]',
+  'input[name="password"]',
+  'input[autocomplete="password"]',
+  'input[autocomplete="current-password"]',
+  'input[type="password"]'
+] as const;
 const USERNAME_SUBMIT_SELECTORS = submitControlSelectors(["Next", "Continue", "Sign in"]);
 const PASSWORD_SUBMIT_SELECTORS = submitControlSelectors(["Sign in", "Login", "Continue"]);
 
@@ -68,6 +85,53 @@ async function clickFirst(page: Page, selectors: string[]): Promise<void> {
   }
 
   throw new Error(`none of the click selectors became enabled: ${selectors.join(", ")}`);
+}
+
+async function inputVisible(page: Page, selectors: readonly string[]): Promise<boolean> {
+  for (const selector of selectors) {
+    if (await page.locator(selector).first().isVisible().catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
+      return;
+    }
+    if (parseBrowserUrl(page.url())?.host !== targetHost) {
+      return;
+    }
+
+    const startSelectors = [
+      'a:has-text("Log in")',
+      'button:has-text("Log in")',
+      'a:has-text("Login")',
+      'button:has-text("Login")',
+      'a:has-text("Sign in")',
+      'button:has-text("Sign in")',
+      'a:has-text("Single sign-on")',
+      'button:has-text("Single sign-on")',
+      'a:has-text("SSO")',
+      'button:has-text("SSO")',
+      'a:has-text("OIDC")',
+      'button:has-text("OIDC")',
+      'a:has-text("OpenID")',
+      'button:has-text("OpenID")'
+    ];
+    for (const selector of startSelectors) {
+      const locator = page.locator(selector).first();
+      if ((await locator.isVisible().catch(() => false)) && !(await locator.isDisabled().catch(() => false))) {
+        await locator.click();
+        return;
+      }
+    }
+
+    await page.waitForTimeout(250);
+  }
 }
 
 async function typeInto(page: Page, selector: string, value: string): Promise<void> {
@@ -142,6 +206,41 @@ async function waitForEnabled(page: Page, selectors: string[]): Promise<void> {
 
 async function submitForm(page: Page, buttonSelectors: string[]): Promise<void> {
   await clickFirst(page, buttonSelectors);
+}
+
+async function waitForUserFacingBody(page: Page, markers: readonly string[], label: string): Promise<void> {
+  const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
+  let lastBody = "";
+
+  while (Date.now() < deadline) {
+    const body = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+    lastBody = body;
+    if (bodyContainsHttpErrorText(body)) {
+      throw new Error(`${label} rendered an HTTP error page:\n${bodySnippetForError(body)}`);
+    }
+    if (bodyContainsAnyMarker(body, markers)) {
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+
+  throw new Error(`${label} did not render expected UI markers; body:\n${bodySnippetForError(lastBody) || "<empty>"}`);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: Timer | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 async function waitForReturnToTargetHost(
@@ -356,12 +455,17 @@ export async function withBrowser<T>(
   options: { resolveHosts?: Record<string, string>; ignoreHTTPSErrors?: boolean } = {}
 ): Promise<T> {
   mkdirSync(outputDir, { recursive: true });
-  const browser = await chromium.launch({
-    headless: true,
-    args: hostResolverRules(options.resolveHosts).map((rules) => `--host-resolver-rules=${rules}`)
-  });
+  const browser = await withTimeout(
+    chromium.launch({
+      headless: true,
+      timeout: BROWSER_WAIT_TIMEOUT_MS,
+      args: hostResolverRules(options.resolveHosts).map((rules) => `--host-resolver-rules=${rules}`)
+    }),
+    BROWSER_WAIT_TIMEOUT_MS,
+    "browser launch"
+  );
   try {
-    return await runFlow(browser);
+    return await withTimeout(runFlow(browser), BROWSER_WAIT_TIMEOUT_MS + 30000, "browser flow");
   } finally {
     await withCloseTimeout(browser.close());
   }
@@ -397,14 +501,10 @@ async function loginThroughZitadelWithBrowser(
     stage = "opening target URL";
     await page.goto(url, { waitUntil: "commit", timeout: BROWSER_WAIT_TIMEOUT_MS });
 
+    stage = "starting OIDC login if the target shows a login screen";
+    await clickOidcStartIfNeeded(page, targetHost);
     stage = "waiting for username input";
-    const emailSelector = await firstVisible(page, [
-      '[data-testid="username-text-input"]',
-      'input[name="loginName"]',
-      'input[autocomplete="username"]',
-      'input[type="email"]',
-      'input[name="username"]'
-    ]);
+    const emailSelector = await firstVisible(page, [...USERNAME_INPUT_SELECTORS]);
     stage = "entering username";
     await typeInto(page, emailSelector, user.email);
     stage = "waiting for username submit";
@@ -413,13 +513,7 @@ async function loginThroughZitadelWithBrowser(
     await submitForm(page, USERNAME_SUBMIT_SELECTORS);
 
     stage = "waiting for password input";
-    const passwordSelector = await firstVisible(page, [
-      '[data-testid="password-text-input"]',
-      'input[name="password"]',
-      'input[autocomplete="password"]',
-      'input[autocomplete="current-password"]',
-      'input[type="password"]'
-    ]);
+    const passwordSelector = await firstVisible(page, [...PASSWORD_INPUT_SELECTORS]);
     stage = "entering password";
     await typeInto(page, passwordSelector, user.password);
     stage = "waiting for password submit";
@@ -431,6 +525,10 @@ async function loginThroughZitadelWithBrowser(
     await waitForReturnToTargetHost(page, targetHost, user.email, expected);
     stage = "waiting for post-login document";
     await page.waitForLoadState("domcontentloaded", { timeout: BROWSER_WAIT_TIMEOUT_MS }).catch(() => undefined);
+    if (options.postLoginBodyMarkers) {
+      stage = `waiting for ${options.postLoginLabel || "target"} UI markers`;
+      await waitForUserFacingBody(page, options.postLoginBodyMarkers, options.postLoginLabel || "target");
+    }
     stage = "capturing success screenshot";
     await page.screenshot({ path: screenshotPath, fullPage: true });
     const finalUrl = page.url();
@@ -525,6 +623,31 @@ export async function expectManagementUi(
     }
     assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
   }, { resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined });
+}
+
+/** Verifies that the public LXD UI completes OIDC login and renders an authenticated management view. */
+export async function expectLxdUi(
+  lxdUrl: string,
+  user: OidcTestUser,
+  outputDir: string,
+  options: { resolveIp?: string; resolveHosts?: Record<string, string> } = {}
+): Promise<void> {
+  const resolveHosts = {
+    ...(options.resolveHosts ?? {}),
+    ...(options.resolveIp ? { [new URL(lxdUrl).hostname]: options.resolveIp } : {})
+  };
+  const result = await loginThroughZitadel(lxdUrl, user, {
+    outputDir,
+    resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined,
+    postLoginBodyMarkers: LXD_TEXT_MARKERS,
+    postLoginLabel: "LXD UI"
+  });
+  const final = new URL(result.finalUrl);
+  const target = new URL(lxdUrl);
+  if (final.host !== target.host) {
+    throw new Error(`unexpected post-login LXD host: ${result.finalUrl}`);
+  }
+  assertUserFacingPageBody(`${result.title}\n${result.bodyText}`, LXD_TEXT_MARKERS, "LXD UI");
 }
 
 /** Verifies a protected published route for either allow or deny behavior. */

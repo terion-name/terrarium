@@ -98,6 +98,7 @@
       AWS_SECRET_ACCESS_KEY={{ terrarium_s3_secret_key }}
       AWS_DEFAULT_REGION={{ terrarium_s3_region }}
   when: terrarium_enable_s3
+  no_log: true
 
 - name: Install S3 backup systemd service
   ansible.builtin.template:

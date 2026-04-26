@@ -61,6 +61,7 @@
     content: "{{ terrarium_config_bundle | to_nice_yaml(indent=2) }}"
     dest: "{{ terrarium_config_path }}"
     mode: "0600"
+  no_log: true
 
 - name: Build Terrarium local hostnames list
   ansible.builtin.set_fact:
