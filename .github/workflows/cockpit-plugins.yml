@@ -11,8 +11,95 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      zfs_repo: ${{ steps.refs.outputs.zfs_repo }}
+      zfs_ref: ${{ steps.refs.outputs.zfs_ref }}
+      zfs_ref_safe: ${{ steps.refs.outputs.zfs_ref_safe }}
+      zfs_release: ${{ steps.refs.outputs.zfs_release }}
+      zfs_published: ${{ steps.published.outputs.zfs_published }}
+      s3_repo: ${{ steps.refs.outputs.s3_repo }}
+      s3_ref: ${{ steps.refs.outputs.s3_ref }}
+      s3_ref_safe: ${{ steps.refs.outputs.s3_ref_safe }}
+      s3_release: ${{ steps.refs.outputs.s3_release }}
+      s3_published: ${{ steps.published.outputs.s3_published }}
+      should_build: ${{ steps.published.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve pinned plugin refs
+        id: refs
+        run: |
+          ruby <<'RUBY' >> "${GITHUB_OUTPUT}"
+          require "yaml"
+
+          def sanitize(value)
+            value.gsub(/[^A-Za-z0-9._-]+/, "-")
+          end
+
+          defaults = YAML.load_file("ansible/roles/cockpit_plugins/defaults/main.yml")
+          {
+            "zfs" => {
+              "repo" => defaults.fetch("terrarium_cockpit_zfs_repo"),
+              "ref" => defaults.fetch("terrarium_cockpit_zfs_ref")
+            },
+            "s3" => {
+              "repo" => defaults.fetch("terrarium_cockpit_s3_repo"),
+              "ref" => defaults.fetch("terrarium_cockpit_s3_ref")
+            }
+          }.each do |plugin, values|
+            ref_safe = sanitize(values.fetch("ref"))
+            puts "#{plugin}_repo=#{values.fetch("repo")}"
+            puts "#{plugin}_ref=#{values.fetch("ref")}"
+            puts "#{plugin}_ref_safe=#{ref_safe}"
+            puts "#{plugin}_release=cockpit-plugin-#{plugin}-#{ref_safe}"
+          end
+          RUBY
+
+      - name: Check published plugin releases
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZFS_RELEASE: ${{ steps.refs.outputs.zfs_release }}
+          S3_RELEASE: ${{ steps.refs.outputs.s3_release }}
+        run: |
+          set -euo pipefail
+
+          release_exists() {
+            gh release view "$1" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1
+          }
+
+          zfs_published=false
+          s3_published=false
+          if release_exists "${ZFS_RELEASE}"; then
+            zfs_published=true
+          fi
+          if release_exists "${S3_RELEASE}"; then
+            s3_published=true
+          fi
+
+          should_build=true
+          if [ "${zfs_published}" = true ] && [ "${s3_published}" = true ]; then
+            should_build=false
+          fi
+
+          {
+            echo "zfs_published=${zfs_published}"
+            echo "s3_published=${s3_published}"
+            echo "should_build=${should_build}"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [ "${zfs_published}" = true ]; then
+            echo "Skipping ${ZFS_RELEASE}; release already exists."
+          fi
+          if [ "${s3_published}" = true ]; then
+            echo "Skipping ${S3_RELEASE}; release already exists."
+          fi
+
   build:
     runs-on: ubuntu-24.04
+    needs: check
     strategy:
       fail-fast: false
       matrix:
@@ -27,54 +114,66 @@ jobs:
             arch: arm64
     steps:
       - uses: actions/checkout@v4
+        if: >-
+          ${{
+            (matrix.plugin == 'zfs' && needs.check.outputs.zfs_published != 'true') ||
+            (matrix.plugin == 's3' && needs.check.outputs.s3_published != 'true')
+          }}
 
       - uses: docker/setup-qemu-action@v3
-        if: matrix.arch == 'arm64'
-
-      - name: Resolve pinned plugin refs
-        id: refs
-        run: |
-          ruby <<'RUBY' >> "${GITHUB_OUTPUT}"
-          require "yaml"
-          defaults = YAML.load_file("ansible/roles/cockpit_plugins/defaults/main.yml")
-          puts "zfs_repo=#{defaults.fetch("terrarium_cockpit_zfs_repo")}"
-          puts "zfs_ref=#{defaults.fetch("terrarium_cockpit_zfs_ref")}"
-          puts "s3_repo=#{defaults.fetch("terrarium_cockpit_s3_repo")}"
-          puts "s3_ref=#{defaults.fetch("terrarium_cockpit_s3_ref")}"
-          RUBY
+        if: >-
+          ${{
+            matrix.arch == 'arm64' &&
+            (
+              (matrix.plugin == 'zfs' && needs.check.outputs.zfs_published != 'true') ||
+              (matrix.plugin == 's3' && needs.check.outputs.s3_published != 'true')
+            )
+          }}
 
       - name: Resolve bundle basename
         id: bundle
+        if: >-
+          ${{
+            (matrix.plugin == 'zfs' && needs.check.outputs.zfs_published != 'true') ||
+            (matrix.plugin == 's3' && needs.check.outputs.s3_published != 'true')
+          }}
         env:
           PLUGIN: ${{ matrix.plugin }}
           TARGET_ARCH: ${{ matrix.arch }}
+          ZFS_REF_SAFE: ${{ needs.check.outputs.zfs_ref_safe }}
+          S3_REF_SAFE: ${{ needs.check.outputs.s3_ref_safe }}
         run: |
-          sanitize() {
-            printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-'
-          }
           case "${PLUGIN}" in
-            zfs) PLUGIN_REF='${{ steps.refs.outputs.zfs_ref }}' ;;
-            s3) PLUGIN_REF='${{ steps.refs.outputs.s3_ref }}' ;;
+            zfs) PLUGIN_REF_SAFE="${ZFS_REF_SAFE}" ;;
+            s3) PLUGIN_REF_SAFE="${S3_REF_SAFE}" ;;
           esac
-          PLUGIN_REF_SAFE="$(sanitize "${PLUGIN_REF}")"
           BASENAME="cockpit-plugin-${PLUGIN}-${PLUGIN_REF_SAFE}-linux-${TARGET_ARCH}.tar.gz"
           echo "basename=${BASENAME}" >> "${GITHUB_OUTPUT}"
           echo "artifact_name=${BASENAME%.tar.gz}" >> "${GITHUB_OUTPUT}"
 
       - name: Build Cockpit plugin bundle
+        if: >-
+          ${{
+            (matrix.plugin == 'zfs' && needs.check.outputs.zfs_published != 'true') ||
+            (matrix.plugin == 's3' && needs.check.outputs.s3_published != 'true')
+          }}
         env:
           PLUGIN: ${{ matrix.plugin }}
           TARGET_ARCH: ${{ matrix.arch }}
           BUNDLE_BASENAME: ${{ steps.bundle.outputs.basename }}
+          ZFS_REPO: ${{ needs.check.outputs.zfs_repo }}
+          ZFS_REF: ${{ needs.check.outputs.zfs_ref }}
+          S3_REPO: ${{ needs.check.outputs.s3_repo }}
+          S3_REF: ${{ needs.check.outputs.s3_ref }}
         run: |
           case "${PLUGIN}" in
             zfs)
-              PLUGIN_REPO='${{ steps.refs.outputs.zfs_repo }}'
-              PLUGIN_REF='${{ steps.refs.outputs.zfs_ref }}'
+              PLUGIN_REPO="${ZFS_REPO}"
+              PLUGIN_REF="${ZFS_REF}"
               ;;
             s3)
-              PLUGIN_REPO='${{ steps.refs.outputs.s3_repo }}'
-              PLUGIN_REF='${{ steps.refs.outputs.s3_ref }}'
+              PLUGIN_REPO="${S3_REPO}"
+              PLUGIN_REF="${S3_REF}"
               ;;
           esac
           mkdir -p release-assets
@@ -91,6 +190,11 @@ jobs:
               --ref ${PLUGIN_REF@Q}"
 
       - uses: actions/upload-artifact@v4
+        if: >-
+          ${{
+            (matrix.plugin == 'zfs' && needs.check.outputs.zfs_published != 'true') ||
+            (matrix.plugin == 's3' && needs.check.outputs.s3_published != 'true')
+          }}
         with:
           name: ${{ steps.bundle.outputs.artifact_name }}
           path: release-assets/${{ steps.bundle.outputs.basename }}
@@ -98,7 +202,10 @@ jobs:
 
   publish:
     runs-on: ubuntu-24.04
-    needs: build
+    needs:
+      - check
+      - build
+    if: ${{ always() && needs.check.outputs.should_build == 'true' && needs.build.result == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -106,70 +213,62 @@ jobs:
         with:
           path: artifacts
 
-      - name: Resolve pinned plugin refs
-        id: refs
-        run: |
-          ruby <<'RUBY' >> "${GITHUB_OUTPUT}"
-          require "yaml"
-          defaults = YAML.load_file("ansible/roles/cockpit_plugins/defaults/main.yml")
-          puts "zfs_ref=#{defaults.fetch("terrarium_cockpit_zfs_ref")}"
-          puts "s3_ref=#{defaults.fetch("terrarium_cockpit_s3_ref")}"
-          RUBY
-
-      - name: Resolve plugin release refs
-        id: release_refs
-        env:
-          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
-          S3_REF: ${{ steps.refs.outputs.s3_ref }}
-        run: |
-          sanitize() {
-            printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-'
-          }
-          echo "zfs_release=cockpit-plugin-zfs-$(sanitize "${ZFS_REF}")" >> "${GITHUB_OUTPUT}"
-          echo "s3_release=cockpit-plugin-s3-$(sanitize "${S3_REF}")" >> "${GITHUB_OUTPUT}"
-
       - name: Prepare release assets
+        id: prepare
         env:
-          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
-          S3_REF: ${{ steps.refs.outputs.s3_ref }}
+          ZFS_REF_SAFE: ${{ needs.check.outputs.zfs_ref_safe }}
+          S3_REF_SAFE: ${{ needs.check.outputs.s3_ref_safe }}
+          ZFS_PUBLISHED: ${{ needs.check.outputs.zfs_published }}
+          S3_PUBLISHED: ${{ needs.check.outputs.s3_published }}
         run: |
-          sanitize() {
-            printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-'
-          }
-          ZFS_REF_SAFE="$(sanitize "${ZFS_REF}")"
-          S3_REF_SAFE="$(sanitize "${S3_REF}")"
           mkdir -p release-assets/zfs release-assets/s3
-          for BASENAME in \
-            "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-amd64.tar.gz" \
-            "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-arm64.tar.gz"
-          do
-            cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/zfs/${BASENAME}"
-          done
-          for BASENAME in \
-            "cockpit-plugin-s3-${S3_REF_SAFE}-linux-amd64.tar.gz" \
-            "cockpit-plugin-s3-${S3_REF_SAFE}-linux-arm64.tar.gz"
-          do
-            cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/s3/${BASENAME}"
-          done
+
+          zfs_ready=false
+          s3_ready=false
+          if [ "${ZFS_PUBLISHED}" != true ]; then
+            for BASENAME in \
+              "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-amd64.tar.gz" \
+              "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-arm64.tar.gz"
+            do
+              cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/zfs/${BASENAME}"
+            done
+            zfs_ready=true
+          fi
+          if [ "${S3_PUBLISHED}" != true ]; then
+            for BASENAME in \
+              "cockpit-plugin-s3-${S3_REF_SAFE}-linux-amd64.tar.gz" \
+              "cockpit-plugin-s3-${S3_REF_SAFE}-linux-arm64.tar.gz"
+            do
+              cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/s3/${BASENAME}"
+            done
+            s3_ready=true
+          fi
+
+          {
+            echo "zfs_ready=${zfs_ready}"
+            echo "s3_ready=${s3_ready}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Publish cockpit-zfs bundles
+        if: steps.prepare.outputs.zfs_ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_refs.outputs.zfs_release }}
+          tag_name: ${{ needs.check.outputs.zfs_release }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.release_refs.outputs.zfs_release }}
+          name: ${{ needs.check.outputs.zfs_release }}
           files: |
             release-assets/zfs/*.tar.gz
           prerelease: false
-          overwrite_files: true
+          overwrite_files: false
 
       - name: Publish cockpit-s3 bundles
+        if: steps.prepare.outputs.s3_ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_refs.outputs.s3_release }}
+          tag_name: ${{ needs.check.outputs.s3_release }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.release_refs.outputs.s3_release }}
+          name: ${{ needs.check.outputs.s3_release }}
           files: |
             release-assets/s3/*.tar.gz
           prerelease: false
-          overwrite_files: true
+          overwrite_files: false
