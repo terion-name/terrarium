@@ -18,6 +18,9 @@ export class CifsProvider {
   }
 
   runPath(slug: string): string {
-    return `${this.hostPathBase}/${slug}`;
+    if (!this.hostPathBase) {
+      return "";
+    }
+    return [this.hostPathBase, slug].join("/");
   }
 }

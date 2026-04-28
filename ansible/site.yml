@@ -22,6 +22,8 @@
     terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain) if terrarium_idp_mode == 'local' else '' }}"
     terrarium_oidc_client_id: ""
     terrarium_oidc_client_secret: ""
+    terrarium_lxd_oidc_client_id: ""
+    terrarium_lxd_oidc_client_secret: ""
     terrarium_admin_group: ""
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
     terrarium_email: ""
@@ -37,6 +39,7 @@
     terrarium_syncoid_target: ""
     terrarium_syncoid_target_dataset: ""
     terrarium_syncoid_ssh_key: /root/.ssh/id_ed25519
+    terrarium_apply_hardening: true
     terrarium_config_bundle:
       terrarium_repo_dir: "{{ terrarium_repo_dir }}"
       terrarium_config_path: "{{ terrarium_config_path }}"
@@ -53,6 +56,8 @@
       terrarium_oidc_issuer: "{{ terrarium_oidc_issuer }}"
       terrarium_oidc_client_id: "{{ terrarium_oidc_client_id }}"
       terrarium_oidc_client_secret: "{{ terrarium_oidc_client_secret }}"
+      terrarium_lxd_oidc_client_id: "{{ terrarium_lxd_oidc_client_id }}"
+      terrarium_lxd_oidc_client_secret: "{{ terrarium_lxd_oidc_client_secret }}"
       terrarium_admin_group: "{{ terrarium_admin_group }}"
       terrarium_zitadel_admin_email: "{{ terrarium_zitadel_admin_email }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
@@ -99,6 +104,7 @@
     - role: lxd
     - role: backups
     - role: hardening
+      when: terrarium_apply_hardening | bool
   post_tasks:
     - name: Run Traefik sync after all dependent services are configured
       ansible.builtin.command: /usr/local/bin/terrariumctl proxy sync
@@ -151,9 +157,45 @@
       delay: 10
       until: terrarium_auth_public_tls.rc == 0
       changed_when: false
+      failed_when: false
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
+
+    - name: Restart Traefik to retry local auth ACME after public TLS wait failure
+      ansible.builtin.systemd:
+        name: traefik
+        state: restarted
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_auth_domain | default('') | length > 0
+        - terrarium_auth_public_tls is defined
+        - terrarium_auth_public_tls.rc | default(0) != 0
+
+    - name: Wait again for local auth domain to serve public TLS after ACME retry
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -fsS
+          - --noproxy
+          - "*"
+          - --resolve
+          - "{{ terrarium_auth_domain }}:443:127.0.0.1"
+          - --connect-timeout
+          - "10"
+          - --max-time
+          - "20"
+          - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
+      register: terrarium_auth_public_tls_retry
+      retries: 36
+      delay: 10
+      until: terrarium_auth_public_tls_retry.rc == 0
+      changed_when: false
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_auth_domain | default('') | length > 0
+        - terrarium_auth_public_tls is defined
+        - terrarium_auth_public_tls.rc | default(0) != 0
 
     - name: Enable Traefik sync timer after dependent services are configured
       ansible.builtin.systemd:

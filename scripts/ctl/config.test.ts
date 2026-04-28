@@ -22,6 +22,34 @@ function recordActions(calls: string[], outputs: string[] = [""]): ReconcileActi
 }
 
 describe("terrariumctl config reconciliation", () => {
+  test("recovers exact numeric-looking client IDs from argv when cac coerces them", () => {
+    const originalArgv = process.argv;
+    const clientId = "370342054720506035";
+    const lxdClientId = "370342055777410480";
+    process.argv = [
+      "terrariumctl",
+      "set",
+      "idp",
+      "oidc",
+      "--oidc-client",
+      clientId,
+      "--lxd-oidc-client",
+      lxdClientId
+    ];
+
+    try {
+      const parsed = parseSetCommandOptions({
+        oidcClient: Number(clientId),
+        lxdOidcClient: Number(lxdClientId)
+      });
+
+      expect(parsed.idp.oidcClient).toBe(clientId);
+      expect(parsed.idp.lxdOidcClient).toBe(lxdClientId);
+    } finally {
+      process.argv = originalArgv;
+    }
+  });
+
   test("syncs local IDP outputs before proxy config convergence finishes", async () => {
     const calls: string[] = [];
 
@@ -93,8 +121,38 @@ describe("terrariumctl config reconciliation", () => {
       issuer: "https://issuer.example.test",
       clientId: "client-1",
       clientSecret: "secret-1",
+      lxdClientId: "client-1",
+      lxdClientSecret: "secret-1",
       manageDomain: "primary-manage.example.test",
       lxdDomain: "primary-lxd.example.test"
+    });
+  });
+
+  test("persists a separate external LXD OIDC client without requiring a secret", () => {
+    const config: Record<string, unknown> = {
+      terrarium_public_ip: "203.0.113.10",
+      terrarium_root_domain: "example.test",
+      terrarium_manage_domain: "primary-manage.example.test",
+      terrarium_lxd_domain: "primary-lxd.example.test",
+      terrarium_auth_domain: "primary-auth.example.test",
+      terrarium_admin_group: "terrarium-admins"
+    };
+
+    const plan = applySetIdpConfig(config, {
+      mode: "oidc",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "manage-client",
+      oidcSecret: "manage-secret",
+      lxdOidcClient: "lxd-client"
+    });
+
+    expect(config.terrarium_lxd_oidc_client_id).toBe("lxd-client");
+    expect(config.terrarium_lxd_oidc_client_secret).toBe("");
+    expect(plan.verifyOidc).toMatchObject({
+      clientId: "manage-client",
+      clientSecret: "manage-secret",
+      lxdClientId: "lxd-client",
+      lxdClientSecret: ""
     });
   });
 
@@ -109,7 +167,9 @@ describe("terrariumctl config reconciliation", () => {
       terrarium_admin_group: "terrarium-admins",
       terrarium_oidc_issuer: "https://issuer.example.test/",
       terrarium_oidc_client_id: "client-1",
-      terrarium_oidc_client_secret: "secret-1"
+      terrarium_oidc_client_secret: "secret-1",
+      terrarium_lxd_oidc_client_id: "lxd-client",
+      terrarium_lxd_oidc_client_secret: "lxd-secret"
     };
 
     const plan = applySetIdpConfig(config, { mode: "local" });
@@ -119,22 +179,28 @@ describe("terrariumctl config reconciliation", () => {
     expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test");
     expect(config.terrarium_oidc_client_id).toBe("");
     expect(config.terrarium_oidc_client_secret).toBe("");
+    expect(config.terrarium_lxd_oidc_client_id).toBe("");
+    expect(config.terrarium_lxd_oidc_client_secret).toBe("");
   });
 
   test("reads set command secrets from files without requiring inline values", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "terrarium-config-test-"));
     try {
       const oidcSecretPath = join(tempDir, "oidc-secret");
+      const lxdOidcSecretPath = join(tempDir, "lxd-oidc-secret");
       const s3SecretPath = join(tempDir, "s3-secret");
       writeFileSync(oidcSecretPath, "oidc-secret-from-file\n", "utf8");
+      writeFileSync(lxdOidcSecretPath, "lxd-oidc-secret-from-file\n", "utf8");
       writeFileSync(s3SecretPath, "s3-secret-from-file\n", "utf8");
 
       const parsed = parseSetCommandOptions({
         oidcSecretFile: oidcSecretPath,
+        lxdOidcSecretFile: lxdOidcSecretPath,
         "s3-secretKeyFile": s3SecretPath
       });
 
       expect(parsed.idp.oidcSecret).toBe("oidc-secret-from-file");
+      expect(parsed.idp.lxdOidcSecret).toBe("lxd-oidc-secret-from-file");
       expect(parsed.s3.s3SecretKey).toBe("s3-secret-from-file");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

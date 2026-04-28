@@ -6,6 +6,7 @@ import { PREFIX } from "./context";
 
 /** Options that control how a host SMB/CIFS mount is presented on the Terrarium host. */
 export type MountAddOptions = {
+  passwordFile?: string;
   uid?: string;
   gid?: string;
   fileMode?: string;
@@ -130,9 +131,13 @@ export async function mountAddCmd(
   if (!username) {
     throw new Error("username is required");
   }
+  if (passwordArg && options.passwordFile) {
+    throw new Error("use either --password or --password-file, not both");
+  }
 
   const secret =
     passwordArg ||
+    (options.passwordFile ? readFileSync(options.passwordFile, "utf8").replace(/\n+$/g, "") : undefined) ||
     (await password({
       message: `Password for ${username} (${address})`,
       mask: true,
@@ -148,6 +153,9 @@ export async function mountAddCmd(
   const optionsList = [
     "iocharset=utf8",
     "rw",
+    "noperm",
+    "forceuid",
+    "forcegid",
     ...(options.seal === false ? [] : ["seal"]),
     `credentials=${credentialsPath}`,
     `uid=${options.uid || "0"}`,

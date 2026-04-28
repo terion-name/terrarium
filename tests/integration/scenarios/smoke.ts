@@ -13,9 +13,8 @@ import {
   switchBackToLocalIdp,
   switchToExternalOidc,
   verifyLxdApi,
-  verifyLxdUi,
   verifyLocalBackupRestore,
-  verifyManagementUi,
+  verifyManagementSurfaces,
   verifyProtectedRoutes,
   verifyS3BackupRestore,
   verifySyncoid,
@@ -71,9 +70,8 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
     await waitForTerrariumPublicEndpoints(primary, true);
 
     const localAdmin = await readLocalZitadelAdmin(primarySsh);
-    await verifyManagementUi(context, primary, localAdmin);
+    await verifyManagementSurfaces(context, primary, localAdmin);
     await verifyLxdApi(primary);
-    await verifyLxdUi(context, primary, localAdmin);
 
     const plainRoute = `https://plain-${context.config.slug}.${rootDomain}:8080`;
     const authRoute = `https://auth-${context.config.slug}.${rootDomain}:8080@auth`;

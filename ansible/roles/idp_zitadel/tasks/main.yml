@@ -100,6 +100,10 @@
 
     - name: Run ZITADEL reconciliation
       ansible.builtin.command: /usr/local/bin/terrariumctl idp sync
+      register: terrarium_zitadel_sync
+      until: terrarium_zitadel_sync.rc == 0
+      retries: 6
+      delay: 10
       changed_when: false
 
 - name: Disable self-hosted ZITADEL service when not enabled

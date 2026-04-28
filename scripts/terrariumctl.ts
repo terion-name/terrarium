@@ -34,13 +34,15 @@ async function confirmDestructive(message: string): Promise<void> {
 
 /** Shared callback bundle used by all `set ...` commands after config changes. */
 const reconcileActions = {
-  reconfigure: reconfigureCmd,
+  reconfigure: () => reconfigureCmd({ applyHardening: false }),
   syncProxy: syncProxyConfig,
   syncIdp: syncIdpConfig
 };
 
 /** Main CLI definition for the compiled Terrarium binary. */
 const cli = cac("terrariumctl");
+// CAC's string transform runs after numeric coercion; cliOption recovers exact argv values instead.
+const STRING_OPTION = {};
 cli.version(TERRARIUM_VERSION);
 
 registerInstallCommand(cli);
@@ -81,14 +83,15 @@ cli
 
 cli
   .command("mount <action> [...args]", "Manage host SMB/CIFS mounts")
-  .option("-p, --password <password>", "SMB/CIFS password for non-interactive automation")
-  .option("--uid <uid>", "UID to present for mounted files", { default: "0" })
-  .option("--gid <gid>", "GID to present for mounted files", { default: "0" })
-  .option("--file-mode <mode>", "File mode for mounted files", { default: "0660" })
-  .option("--dir-mode <mode>", "Directory mode for mounted directories", { default: "0770" })
-  .option("--seal <value>", "Enable SMB encryption: true or false", { default: "true" })
+  .option("-p, --password <password>", "SMB/CIFS password for non-interactive automation", STRING_OPTION)
+  .option("--password-file <path>", "Read SMB/CIFS password from a root-readable file", STRING_OPTION)
+  .option("--uid <uid>", "UID to present for mounted files", { ...STRING_OPTION, default: "0" })
+  .option("--gid <gid>", "GID to present for mounted files", { ...STRING_OPTION, default: "0" })
+  .option("--file-mode <mode>", "File mode for mounted files", { ...STRING_OPTION, default: "0660" })
+  .option("--dir-mode <mode>", "Directory mode for mounted directories", { ...STRING_OPTION, default: "0770" })
+  .option("--seal <value>", "Enable SMB encryption: true or false", { ...STRING_OPTION, default: "true" })
   .usage(
-    "mount add smb|cifs /host/path //server/share username [-p PASSWORD] [--seal true|false]\n  terrariumctl mount remove /host/path\n  terrariumctl mount list"
+    "mount add smb|cifs /host/path //server/share username [-p PASSWORD|--password-file PATH] [--seal true|false]\n  terrariumctl mount remove /host/path\n  terrariumctl mount list"
   )
   .action(async (action, args, options) => {
     const normalizedAction = action.trim().toLowerCase();
@@ -101,6 +104,7 @@ cli
         throw new Error("mount add requires: <protocol> <hostPath> <address> <username>");
       }
       await mountAddCmd(protocol, hostPath, address, username, rawOptions.password as string | undefined, {
+        passwordFile: rawOptions.passwordFile as string | undefined,
         uid: rawOptions.uid as string | undefined,
         gid: rawOptions.gid as string | undefined,
         fileMode: rawOptions.fileMode as string | undefined,
@@ -139,28 +143,31 @@ cli
 
 cli
   .command("set <section> [value]", "Update persisted Terrarium configuration")
-  .option("--manage-domain <domain>", "Override the Cockpit domain")
-  .option("--proxy-domain <domain>", "Override the Traefik dashboard domain")
-  .option("--lxd-domain <domain>", "Override the LXD domain")
-  .option("--auth-domain <domain>", "Override the ZITADEL domain")
-  .option("--email <email>", "Terrarium contact/admin email")
-  .option("--acme-email <email>", "ACME account email")
-  .option("--zitadel-admin-email <email>", "ZITADEL bootstrap admin email")
-  .option("--admin-group <group>", "Management admin group")
-  .option("--oidc <issuer>", "External OIDC issuer URL")
-  .option("--oidc-client <clientId>", "External OIDC client ID")
-  .option("--oidc-secret <clientSecret>", "External OIDC client secret")
-  .option("--oidc-secret-file <path>", "Read the external OIDC client secret from a root-readable file")
-  .option("--s3-endpoint <url>", "S3 endpoint URL")
-  .option("--s3-bucket <name>", "S3 bucket name")
-  .option("--s3-region <name>", "S3 region")
-  .option("--s3-prefix <prefix>", "S3 object prefix")
-  .option("--s3-access-key <key>", "S3 access key")
-  .option("--s3-secret-key <secret>", "S3 secret key")
-  .option("--s3-secret-key-file <path>", "Read the S3 secret key from a root-readable file")
-  .option("--syncoid-target <host>", "Remote syncoid SSH target")
-  .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset")
-  .option("--syncoid-ssh-key <path>", "SSH key path for syncoid")
+  .option("--manage-domain <domain>", "Override the Cockpit domain", STRING_OPTION)
+  .option("--proxy-domain <domain>", "Override the Traefik dashboard domain", STRING_OPTION)
+  .option("--lxd-domain <domain>", "Override the LXD domain", STRING_OPTION)
+  .option("--auth-domain <domain>", "Override the ZITADEL domain", STRING_OPTION)
+  .option("--email <email>", "Terrarium contact/admin email", STRING_OPTION)
+  .option("--acme-email <email>", "ACME account email", STRING_OPTION)
+  .option("--zitadel-admin-email <email>", "ZITADEL bootstrap admin email", STRING_OPTION)
+  .option("--admin-group <group>", "Management admin group", STRING_OPTION)
+  .option("--oidc <issuer>", "External OIDC issuer URL", STRING_OPTION)
+  .option("--oidc-client <clientId>", "External OIDC client ID", STRING_OPTION)
+  .option("--oidc-secret <clientSecret>", "External OIDC client secret", STRING_OPTION)
+  .option("--oidc-secret-file <path>", "Read the external OIDC client secret from a root-readable file", STRING_OPTION)
+  .option("--lxd-oidc-client <clientId>", "Optional separate external OIDC client ID for LXD", STRING_OPTION)
+  .option("--lxd-oidc-secret <clientSecret>", "Optional separate external OIDC client secret for LXD", STRING_OPTION)
+  .option("--lxd-oidc-secret-file <path>", "Read the optional LXD OIDC client secret from a root-readable file", STRING_OPTION)
+  .option("--s3-endpoint <url>", "S3 endpoint URL", STRING_OPTION)
+  .option("--s3-bucket <name>", "S3 bucket name", STRING_OPTION)
+  .option("--s3-region <name>", "S3 region", STRING_OPTION)
+  .option("--s3-prefix <prefix>", "S3 object prefix", STRING_OPTION)
+  .option("--s3-access-key <key>", "S3 access key", STRING_OPTION)
+  .option("--s3-secret-key <secret>", "S3 secret key", STRING_OPTION)
+  .option("--s3-secret-key-file <path>", "Read the S3 secret key from a root-readable file", STRING_OPTION)
+  .option("--syncoid-target <host>", "Remote syncoid SSH target", STRING_OPTION)
+  .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset", STRING_OPTION)
+  .option("--syncoid-ssh-key <path>", "SSH key path for syncoid", STRING_OPTION)
   .option("--enable", "Enable the selected integration")
   .option("--disable", "Disable the selected integration")
   .usage("set domains [rootDomain] | set emails | set idp local|oidc | set s3 | set syncoid")

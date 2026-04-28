@@ -19,6 +19,8 @@ export type OidcVerificationOptions = {
   issuer: string;
   clientId: string;
   clientSecret: string;
+  lxdClientId?: string;
+  lxdClientSecret?: string;
   manageDomain: string;
   lxdDomain: string;
 };
@@ -165,11 +167,6 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   }
 }
 
-/** Builds the callback URIs Terrarium expects the shared external OIDC client to allow. */
-function oidcCallbackUris(options: OidcVerificationOptions): string[] {
-  return [`https://${options.manageDomain}/oauth2/callback`, `https://${options.lxdDomain}/oidc/callback`];
-}
-
 async function verifyAuthorizationProbe(authorizationEndpoint: string, clientId: string, redirectUri: string): Promise<void> {
   const deadline = Date.now() + 120000;
   let lastStatus = 0;
@@ -184,6 +181,8 @@ async function verifyAuthorizationProbe(authorizationEndpoint: string, clientId:
     authUrl.searchParams.set("scope", "openid");
     authUrl.searchParams.set("state", randomUUID());
     authUrl.searchParams.set("nonce", randomUUID());
+    authUrl.searchParams.set("code_challenge", Buffer.from(randomUUID()).toString("base64url"));
+    authUrl.searchParams.set("code_challenge_method", "S256");
 
     const authResponse = await fetchWithTimeout(authUrl.toString(), { redirect: "manual" });
     const location = authResponse.headers.get("location") ?? "";
@@ -216,45 +215,19 @@ async function verifyAuthorizationProbe(authorizationEndpoint: string, clientId:
   }
 }
 
-/**
- * Verifies that an external OIDC issuer is reachable and that the configured
- * client credentials are at least recognized by the provider.
- *
- * The probe intentionally combines two checks:
- * - discovery plus authorization-endpoint requests for the expected callback URIs
- * - a token-endpoint confidential-client probe
- *
- * The token probe submits a deliberately invalid authorization code using
- * client authentication. A response such as `invalid_grant` proves the provider
- * recognized the client and secret before rejecting the fake code. `invalid_client`
- * still means the configured client credentials are not proven.
- */
-export async function verifyOidcConfig(options: OidcVerificationOptions): Promise<void> {
-  const discoveryUrl = `${options.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
-  const discoveryResponse = await fetchWithTimeout(discoveryUrl);
-  if (!discoveryResponse.ok) {
-    throw new Error(`OIDC discovery failed at ${discoveryUrl} with HTTP ${discoveryResponse.status}`);
-  }
-
-  const discovery = (await discoveryResponse.json()) as Record<string, unknown>;
-  const authorizationEndpoint = String(discovery.authorization_endpoint || "");
-  const tokenEndpoint = String(discovery.token_endpoint || "");
-  if (!authorizationEndpoint || !tokenEndpoint) {
-    throw new Error("OIDC discovery document is missing authorization_endpoint or token_endpoint");
-  }
-
-  const callbackUris = oidcCallbackUris(options);
-  for (const redirectUri of callbackUris) {
-    await verifyAuthorizationProbe(authorizationEndpoint, options.clientId, redirectUri);
-  }
-
+async function verifyConfidentialClientProbe(
+  tokenEndpoint: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string
+): Promise<void> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: `terrarium-verification-${randomUUID()}`,
-    redirect_uri: callbackUris[0],
+    redirect_uri: redirectUri,
     code_verifier: randomUUID()
   });
-  const basicAuth = Buffer.from(`${options.clientId}:${options.clientSecret}`, "utf8").toString("base64");
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
   const tokenResponse = await fetchWithTimeout(tokenEndpoint, {
     method: "POST",
     headers: {
@@ -287,4 +260,44 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
   }
 
   throw new Error(errorDescription || errorCode || `OIDC token probe failed with HTTP ${tokenResponse.status}`);
+}
+
+/**
+ * Verifies that an external OIDC issuer is reachable and that the configured
+ * client credentials are at least recognized by the provider.
+ *
+ * The probe intentionally combines two checks:
+ * - discovery plus authorization-endpoint requests for the expected callback URIs
+ * - a token-endpoint confidential-client probe
+ *
+ * The token probe submits a deliberately invalid authorization code using
+ * client authentication. A response such as `invalid_grant` proves the provider
+ * recognized the client and secret before rejecting the fake code. `invalid_client`
+ * still means the configured client credentials are not proven.
+ */
+export async function verifyOidcConfig(options: OidcVerificationOptions): Promise<void> {
+  const discoveryUrl = `${options.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
+  const discoveryResponse = await fetchWithTimeout(discoveryUrl);
+  if (!discoveryResponse.ok) {
+    throw new Error(`OIDC discovery failed at ${discoveryUrl} with HTTP ${discoveryResponse.status}`);
+  }
+
+  const discovery = (await discoveryResponse.json()) as Record<string, unknown>;
+  const authorizationEndpoint = String(discovery.authorization_endpoint || "");
+  const tokenEndpoint = String(discovery.token_endpoint || "");
+  if (!authorizationEndpoint || !tokenEndpoint) {
+    throw new Error("OIDC discovery document is missing authorization_endpoint or token_endpoint");
+  }
+
+  const manageRedirectUri = `https://${options.manageDomain}/oauth2/callback`;
+  const lxdRedirectUri = `https://${options.lxdDomain}/oidc/callback`;
+  const lxdClientId = options.lxdClientId || options.clientId;
+  const lxdClientSecret = options.lxdClientSecret || (lxdClientId === options.clientId ? options.clientSecret : "");
+
+  await verifyAuthorizationProbe(authorizationEndpoint, options.clientId, manageRedirectUri);
+  await verifyAuthorizationProbe(authorizationEndpoint, lxdClientId, lxdRedirectUri);
+  await verifyConfidentialClientProbe(tokenEndpoint, options.clientId, options.clientSecret, manageRedirectUri);
+  if (lxdClientSecret && (lxdClientId !== options.clientId || lxdClientSecret !== options.clientSecret)) {
+    await verifyConfidentialClientProbe(tokenEndpoint, lxdClientId, lxdClientSecret, lxdRedirectUri);
+  }
 }

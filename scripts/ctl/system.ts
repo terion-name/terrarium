@@ -2,12 +2,16 @@ import { existsSync } from "node:fs";
 import { CONFIG_PATH, PREFIX } from "./context";
 import { runText } from "../lib/common";
 
+export type ReconfigureOptions = {
+  applyHardening?: boolean;
+};
+
 /**
  * Re-runs the installed Ansible reconciliation against the persisted host config.
  *
  * This is the command Terrarium uses for day-2 convergence after config changes.
  */
-export async function reconfigureCmd(): Promise<void> {
+export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<void> {
   if (!existsSync("/opt/terrarium/ansible/site.yml")) {
     throw new Error("/opt/terrarium/ansible/site.yml not found");
   }
@@ -15,8 +19,13 @@ export async function reconfigureCmd(): Promise<void> {
     throw new Error("compiled Terrarium binaries are missing from /opt/terrarium/dist; rerun install.sh");
   }
 
+  const args = ["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`];
+  if (options.applyHardening === false) {
+    args.push("-e", "terrarium_apply_hardening=false");
+  }
+
   await runText(
-    ["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`],
+    args,
     PREFIX,
     { cwd: "/opt/terrarium" }
   );

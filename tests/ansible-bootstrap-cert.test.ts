@@ -32,6 +32,8 @@ describe("Traefik bootstrap certificate template", () => {
     expect(playbook).toContain("Remove local auth bootstrap TLS material before requesting public TLS");
     expect(playbook).toContain("dynamic/bootstrap-routes.yml");
     expect(playbook).toContain("Wait for local auth domain to serve public TLS");
+    expect(playbook).toContain("Restart Traefik to retry local auth ACME after public TLS wait failure");
+    expect(playbook).toContain("Wait again for local auth domain to serve public TLS after ACME retry");
     expect(playbook).toContain("terrarium_bootstrap_tls_removed is changed");
     expect(playbook.indexOf("Remove local auth bootstrap TLS material before requesting public TLS")).toBeLessThan(
       playbook.indexOf("Wait for local auth domain to serve public TLS")
@@ -51,5 +53,21 @@ describe("Traefik bootstrap certificate template", () => {
     expect(dynamicConfig).not.toContain("passthrough: true");
     expect(lxdTasks).toContain("Disable LXD ACME certificate management");
     expect(lxdTasks).not.toContain("lxc config set acme.domain");
+  });
+
+  test("retries local ZITADEL reconciliation after service restarts", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("register: terrarium_zitadel_sync");
+    expect(tasks).toContain("until: terrarium_zitadel_sync.rc == 0");
+    expect(tasks).toContain("retries: 6");
+  });
+
+  test("retries transient Traefik release download failures", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/traefik/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("register: terrarium_traefik_download");
+    expect(tasks).toContain("until: terrarium_traefik_download is succeeded");
+    expect(tasks).toContain("retries: 5");
   });
 });

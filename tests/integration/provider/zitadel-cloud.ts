@@ -81,11 +81,11 @@ function normalizeRouteCallbackUri(value: string): string {
 }
 
 export function buildZitadelCloudRedirectUris(domains: DomainBundle, routeCallbackUris: string[] = []): string[] {
-  const redirectUris = new Set([
-    `https://${domains.manage}/oauth2/callback`,
-    `https://${domains.manage}/oauth2/app/callback`,
-    `https://${domains.lxd}/oidc/callback`
-  ]);
+  return [...new Set([...buildZitadelCloudManagementRedirectUris(domains, routeCallbackUris), ...buildZitadelCloudLxdRedirectUris(domains)])];
+}
+
+export function buildZitadelCloudManagementRedirectUris(domains: DomainBundle, routeCallbackUris: string[] = []): string[] {
+  const redirectUris = new Set([`https://${domains.manage}/oauth2/callback`, `https://${domains.manage}/oauth2/app/callback`]);
   for (const callbackUri of routeCallbackUris) {
     const normalized = normalizeRouteCallbackUri(callbackUri);
     if (normalized) {
@@ -93,6 +93,10 @@ export function buildZitadelCloudRedirectUris(domains: DomainBundle, routeCallba
     }
   }
   return [...redirectUris];
+}
+
+export function buildZitadelCloudLxdRedirectUris(domains: DomainBundle): string[] {
+  return [`https://${domains.lxd}/oidc/callback`];
 }
 
 function isRetryableZitadelStatus(status: number): boolean {
@@ -268,20 +272,24 @@ export class ZitadelCloudProvider {
   private async createOidcApp(
     projectId: string,
     name: string,
-    domains: DomainBundle,
-    routeCallbackUris: string[] = [],
+    options: {
+      redirectUris: string[];
+      appType: "OIDC_APP_TYPE_WEB" | "OIDC_APP_TYPE_NATIVE" | "OIDC_APP_TYPE_USER_AGENT";
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC" | "OIDC_AUTH_METHOD_TYPE_NONE";
+      grantTypes: string[];
+      postLogoutRedirectUris: string[];
+      requireSecret: boolean;
+    },
     onCreated?: (app: { appId: string; clientId: string }) => void | Promise<void>
   ): Promise<{ appId: string; clientId: string; clientSecret: string }> {
-    const redirectUris = buildZitadelCloudRedirectUris(domains, routeCallbackUris);
-
     const result = await this.api<AppResponse>("POST", `/management/v1/projects/${projectId}/apps/oidc`, {
       name,
-      redirectUris,
+      redirectUris: options.redirectUris,
       responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
-      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
-      appType: "OIDC_APP_TYPE_WEB",
-      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
-      postLogoutRedirectUris: [`https://${domains.manage}`],
+      grantTypes: options.grantTypes,
+      appType: options.appType,
+      authMethodType: options.authMethodType,
+      postLogoutRedirectUris: options.postLogoutRedirectUris,
       version: "OIDC_VERSION_1_0",
       devMode: false,
       accessTokenType: "OIDC_TOKEN_TYPE_BEARER",
@@ -295,19 +303,44 @@ export class ZitadelCloudProvider {
     await onCreated?.({ appId: result.appId, clientId: result.clientId });
 
     let clientSecret = result.clientSecret ?? "";
-    if (!clientSecret) {
+    if (options.requireSecret && !clientSecret) {
       const secret = await this.api<{ clientSecret?: string }>("PUT", `/management/v1/projects/${projectId}/apps/${result.appId}/oidc_client_secret`);
       clientSecret = secret.clientSecret ?? "";
     }
-    if (!clientSecret) {
+    if (options.requireSecret && !clientSecret) {
       throw new Error("failed to obtain ZITADEL client secret");
     }
-    await this.waitForOidcClientReady(result.clientId, clientSecret, redirectUris[0]);
+    if (options.requireSecret) {
+      await this.waitForOidcClientReady(result.clientId, clientSecret, options.redirectUris[0]);
+    } else {
+      await this.waitForOidcAuthorizationReady(result.clientId, options.redirectUris[0]);
+    }
     return {
       appId: result.appId,
       clientId: result.clientId,
       clientSecret
     };
+  }
+
+  private async waitForOidcAuthorizationReady(clientId: string, redirectUri: string): Promise<void> {
+    const authorizationEndpoint = await this.discoverAuthorizationEndpoint();
+    let lastError = "";
+    for (let attempt = 1; attempt <= this.oidcClientReadyAttempts; attempt += 1) {
+      const probe = await this.probeOidcAuthorization(authorizationEndpoint, clientId, redirectUri).catch((error) => ({
+        ready: false,
+        message: error instanceof Error ? error.message : String(error)
+      }));
+      if (probe.ready) {
+        this.logger.info(`ZITADEL OIDC client ${clientId} accepts authorization requests`);
+        return;
+      }
+      lastError = probe.message;
+      this.logger.info(`waiting for ZITADEL OIDC client ${clientId} authorization setup: ${lastError}`);
+      if (attempt < this.oidcClientReadyAttempts) {
+        await Bun.sleep(5000);
+      }
+    }
+    throw new Error(`ZITADEL OIDC client ${clientId} did not become authorization-ready: ${lastError}`);
   }
 
   private async waitForOidcClientReady(clientId: string, clientSecret: string, redirectUri: string): Promise<void> {
@@ -344,6 +377,21 @@ export class ZitadelCloudProvider {
       throw new Error("ZITADEL discovery document is missing token_endpoint");
     }
     return tokenEndpoint;
+  }
+
+  private async discoverAuthorizationEndpoint(): Promise<string> {
+    const response = await fetch(`${this.issuer}/.well-known/openid-configuration`, {
+      signal: AbortSignal.timeout(this.requestTimeoutMs)
+    });
+    if (!response.ok) {
+      throw new Error(`ZITADEL discovery failed with HTTP ${response.status}: ${await response.text()}`);
+    }
+    const discovery = (await response.json()) as { authorization_endpoint?: unknown };
+    const authorizationEndpoint = String(discovery.authorization_endpoint || "");
+    if (!authorizationEndpoint) {
+      throw new Error("ZITADEL discovery document is missing authorization_endpoint");
+    }
+    return authorizationEndpoint;
   }
 
   private async probeOidcClient(
@@ -387,6 +435,39 @@ export class ZitadelCloudProvider {
 
     const message = errorDescription || errorCode || raw || `HTTP ${response.status}`;
     return { ready: false, message };
+  }
+
+  private async probeOidcAuthorization(
+    authorizationEndpoint: string,
+    clientId: string,
+    redirectUri: string
+  ): Promise<{ ready: boolean; message: string }> {
+    const authUrl = new URL(authorizationEndpoint);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("scope", "openid email profile offline_access");
+    authUrl.searchParams.set("state", randomBytes(8).toString("hex"));
+    authUrl.searchParams.set("nonce", randomBytes(8).toString("hex"));
+    authUrl.searchParams.set("code_challenge", randomBytes(32).toString("base64url"));
+    authUrl.searchParams.set("code_challenge_method", "S256");
+
+    const response = await fetch(authUrl, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(this.requestTimeoutMs)
+    });
+    const location = response.headers.get("location") ?? "";
+    const body = await response.text().catch(() => "");
+    if (response.status < 400 && !location.includes("error=")) {
+      return { ready: true, message: "authorization probe accepted" };
+    }
+    const retryable =
+      response.status >= 500 ||
+      (response.status === 400 && (body.includes("Errors.App.NotFound") || body.includes("Errors.Internal") || body.includes("Errors.ResourceOwner")));
+    return {
+      ready: false,
+      message: retryable ? body || `HTTP ${response.status}` : location || body || `HTTP ${response.status}`
+    };
   }
 
   private async ensureGroupsAction(): Promise<void> {
@@ -435,6 +516,7 @@ export class ZitadelCloudProvider {
 
     const projectName = `terrarium-${slug}`;
     const appName = `terrarium-${slug}-external`;
+    const lxdAppName = `terrarium-${slug}-lxd`;
     const routeGroups = ["agents", "admins"];
     const projectId = await this.createProject(projectName);
     await onProgress?.({ type: "project", fixtureSlug: slug, projectId, projectName, adminGroup, routeGroups });
@@ -444,8 +526,28 @@ export class ZitadelCloudProvider {
     }
     await this.createRole(projectId, DENIED_ROUTE_ROLE, "Route denied fixture user");
 
-    const app = await this.createOidcApp(projectId, appName, domains, routeCallbackUris, async (created) => {
-      await onProgress?.({ type: "app", fixtureSlug: slug, projectId, appId: created.appId, appName });
+    const app = await this.createOidcApp(
+      projectId,
+      appName,
+      {
+        redirectUris: buildZitadelCloudManagementRedirectUris(domains, routeCallbackUris),
+        appType: "OIDC_APP_TYPE_WEB",
+        authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+        grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+        postLogoutRedirectUris: [`https://${domains.manage}`],
+        requireSecret: true
+      },
+      async (created) => {
+        await onProgress?.({ type: "app", fixtureSlug: slug, projectId, appId: created.appId, appName });
+      }
+    );
+    const lxdApp = await this.createOidcApp(projectId, lxdAppName, {
+      redirectUris: buildZitadelCloudLxdRedirectUris(domains),
+      appType: "OIDC_APP_TYPE_NATIVE",
+      authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN", "OIDC_GRANT_TYPE_DEVICE_CODE"],
+      postLogoutRedirectUris: [`https://${domains.lxd}`],
+      requireSecret: false
     });
 
     const adminPassword = generateComplexPassword();
@@ -493,6 +595,10 @@ export class ZitadelCloudProvider {
       appName,
       clientId: app.clientId,
       clientSecret: app.clientSecret,
+      lxdAppId: lxdApp.appId,
+      lxdAppName,
+      lxdClientId: lxdApp.clientId,
+      lxdClientSecret: lxdApp.clientSecret,
       adminGroup,
       routeGroups,
       adminUser,

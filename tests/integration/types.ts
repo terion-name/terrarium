@@ -81,6 +81,10 @@ export type ExternalOidcFixture = {
   appName: string;
   clientId: string;
   clientSecret: string;
+  lxdAppId: string;
+  lxdAppName: string;
+  lxdClientId: string;
+  lxdClientSecret: string;
   adminGroup: string;
   routeGroups: string[];
   adminUser: OidcTestUser;

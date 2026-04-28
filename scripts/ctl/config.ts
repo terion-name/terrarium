@@ -49,6 +49,9 @@ export type SetIdpOptions = {
   oidcClient?: string;
   oidcSecret?: string;
   oidcSecretFile?: string;
+  lxdOidcClient?: string;
+  lxdOidcSecret?: string;
+  lxdOidcSecretFile?: string;
   zitadelAdminEmail?: string;
 };
 
@@ -229,6 +232,8 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", "");
     setConfigValue(config, "terrarium_oidc_client_secret", "");
+    setConfigValue(config, "terrarium_lxd_oidc_client_id", "");
+    setConfigValue(config, "terrarium_lxd_oidc_client_secret", "");
     const currentAdmin = options.zitadelAdminEmail || configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
     setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(currentAdmin, "--zitadel-admin-email"));
     return { summary: "Switched IDP mode to local" };
@@ -249,6 +254,11 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     if (!clientSecret) {
       throw new Error("--oidc-secret is required when mode is oidc");
     }
+    const lxdClientId = options.lxdOidcClient || configString(config, "terrarium_lxd_oidc_client_id") || clientId;
+    const existingLxdSecret = configString(config, "terrarium_lxd_oidc_client_secret");
+    const lxdClientSecret =
+      options.lxdOidcSecret ||
+      (options.lxdOidcClient && options.lxdOidcClient !== clientId ? "" : existingLxdSecret || (lxdClientId === clientId ? clientSecret : ""));
     if (options.authDomain) {
       setConfigValue(config, "terrarium_auth_domain", options.authDomain);
     }
@@ -256,12 +266,16 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", clientId);
     setConfigValue(config, "terrarium_oidc_client_secret", clientSecret);
+    setConfigValue(config, "terrarium_lxd_oidc_client_id", lxdClientId === clientId ? "" : lxdClientId);
+    setConfigValue(config, "terrarium_lxd_oidc_client_secret", lxdClientId === clientId && lxdClientSecret === clientSecret ? "" : lxdClientSecret);
     return {
       summary: "Switched IDP mode to oidc",
       verifyOidc: {
         issuer: configString(config, "terrarium_oidc_issuer"),
         clientId: configString(config, "terrarium_oidc_client_id"),
         clientSecret: configString(config, "terrarium_oidc_client_secret"),
+        lxdClientId,
+        lxdClientSecret,
         manageDomain: configString(config, "terrarium_manage_domain"),
         lxdDomain: configString(config, "terrarium_lxd_domain")
       }
@@ -361,6 +375,14 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
       oidc: cliOption(rawOptions, "oidc"),
       oidcClient: cliOption(rawOptions, "oidcClient", ["oidc-client"]),
       oidcSecret: secretCliOption(rawOptions, "oidcSecret", "oidcSecretFile", ["oidc-secret"], ["oidc-secret-file"]),
+      lxdOidcClient: cliOption(rawOptions, "lxdOidcClient", ["lxd-oidc-client"]),
+      lxdOidcSecret: secretCliOption(
+        rawOptions,
+        "lxdOidcSecret",
+        "lxdOidcSecretFile",
+        ["lxd-oidc-secret"],
+        ["lxd-oidc-secret-file"]
+      ),
       zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
     },
     s3: {

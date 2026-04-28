@@ -83,6 +83,11 @@ type RouteAuthComposeArtifacts = {
   profileConfigs: Record<string, string>;
 };
 
+type RouteAuthComposeRender = {
+  composeYaml: string;
+  changed: boolean;
+};
+
 type CommandResult = Awaited<ReturnType<typeof runAllowFailure>>;
 
 type ProxySyncErrorGroups = {
@@ -778,7 +783,7 @@ export function buildRouteAuthComposeArtifacts(
         `client_id = "${clientId}"`,
         `client_secret = "${clientSecret}"`,
         `cookie_secret = "${cookieSecret}"`,
-        'cookie_name = "_terrarium_route_oauth2_proxy"',
+        `cookie_name = "_terrarium_route_${profile.containerName.replace(/^route-/, "")}"`,
         "cookie_secure = true",
         `cookie_domains = [ "${sharedCookieDomain}" ]`,
         `whitelist_domains = [ "${sharedCookieDomain}", "${manageDomain}", "${profile.host}" ]`,
@@ -827,12 +832,13 @@ function buildRouteAuthCompose(
   clientId: string,
   clientSecret: string,
   cookieSecret: string
-): string {
+): RouteAuthComposeRender {
   const { composeYaml, profileConfigs } = buildRouteAuthComposeArtifacts(config, profiles, clientId, clientSecret, cookieSecret);
+  let changed = false;
   for (const [containerName, content] of Object.entries(profileConfigs)) {
-    writeIfChanged(`${ROUTE_AUTH_DIR}/${containerName}.cfg`, content, { mode: 0o600, directoryMode: 0o700 });
+    changed = writeIfChanged(`${ROUTE_AUTH_DIR}/${containerName}.cfg`, content, { mode: 0o600, directoryMode: 0o700 }) || changed;
   }
-  return composeYaml;
+  return { composeYaml, changed };
 }
 
 async function probeRouteAuthListener(profile: RouteAuthProfile): Promise<string | null> {
@@ -907,9 +913,13 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
     return errors;
   }
 
-  const composeYaml = buildRouteAuthCompose(config, profiles, clientId, clientSecret, cookieSecret);
-  writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, composeYaml, { mode: 0o600, directoryMode: 0o700 });
-  const result = await runAllowFailure(["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "up", "-d", "--remove-orphans"]);
+  const rendered = buildRouteAuthCompose(config, profiles, clientId, clientSecret, cookieSecret);
+  const changed = writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, rendered.composeYaml, { mode: 0o600, directoryMode: 0o700 }) || rendered.changed;
+  const upArgs = ["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "up", "-d", "--remove-orphans"];
+  if (changed) {
+    upArgs.push("--force-recreate");
+  }
+  const result = await runAllowFailure(upArgs);
   if (result.exitCode !== 0) {
     errors.push(formatRouteAuthCommandFailure("failed to reconcile route auth stack", result));
     return errors;

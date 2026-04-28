@@ -1,6 +1,9 @@
 import { confirm } from "@inquirer/prompts";
+import { existsSync, mkdirSync, readdirSync, renameSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { parse, stringify } from "yaml";
 import { heading, label, requireConfig, success, value } from "./context";
-import { configBoolean, configString, normalizeS3Endpoint, runAllowFailure, runInteractive, runText } from "../lib/common";
+import { JsonRecord, configBoolean, configString, normalizeS3Endpoint, runAllowFailure, runInteractive, runText } from "../lib/common";
 import { backupExportCmd } from "../terrarium-s3-export";
 import { reconstructFromS3 } from "../terrarium-zfs-reconstruct";
 import { PREFIX } from "./context";
@@ -67,20 +70,299 @@ async function confirmDestructive(message: string): Promise<void> {
  */
 function printAsNewRecoveryNotice(pool: string, dataset: string, instanceName: string): void {
   console.log(`\n${heading("Manual LXD Import Required")}`);
-  console.log("Terrarium restored the ZFS dataset, but LXD has not imported it as an instance yet.");
-  console.log("This step is interactive in upstream LXD and cannot be completed non-interactively.");
+  console.log("Terrarium restored the ZFS dataset and prepared its LXD recovery metadata.");
+  console.log("LXD recovery is still interactive upstream, so Terrarium will drive you through that handoff and then verify the import.");
   console.log(`${label("Recovered dataset:")} ${value(dataset)}`);
   console.log(`${label("Target instance name:")} ${value(instanceName)}`);
   console.log(`${label("Next steps:")} 1) Terrarium will now start ${value("lxd recover")}`);
   console.log(`            2) Select storage pool ${value(pool)} when prompted`);
   console.log(`            3) Import the recovered volume as instance ${value(instanceName)}`);
-  console.log(`            4) Verify it with ${value(`lxc list ${instanceName}`)}`);
+  console.log(`            4) Terrarium verifies the import with ${value(`lxc info ${instanceName}`)}`);
 }
 
 /** Starts the upstream interactive LXD recovery flow after Terrarium has prepared the dataset. */
 async function handOffToLxdRecover(): Promise<void> {
   console.log(`\n${label("Starting:")} ${value("lxd recover")}`);
   await runInteractive(["lxd", "recover"], PREFIX);
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function lxdStorageRoot(pool: string): string {
+  for (const root of ["/var/snap/lxd/common/lxd/storage-pools", "/var/lib/lxd/storage-pools"]) {
+    const path = join(root, pool);
+    if (existsSync(path)) {
+      return path;
+    }
+  }
+  return join("/var/snap/lxd/common/lxd/storage-pools", pool);
+}
+
+function rewriteNameReferences(value: unknown, oldName: string, newName: string): { value: unknown; changed: boolean } {
+  if (typeof value === "string") {
+    if (value.includes(oldName)) {
+      return { value: value.replaceAll(oldName, newName), changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const result = rewriteNameReferences(item, oldName, newName);
+      changed = result.changed || changed;
+      return result.value;
+    });
+    return { value: next, changed };
+  }
+
+  if (isRecord(value)) {
+    let changed = false;
+    const next: JsonRecord = {};
+    for (const [key, item] of Object.entries(value)) {
+      const result = rewriteNameReferences(item, oldName, newName);
+      changed = result.changed || changed;
+      next[key] = result.value;
+    }
+    return { value: next, changed };
+  }
+
+  return { value, changed: false };
+}
+
+function scrubGeneratedLxdIdentity(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => scrubGeneratedLxdIdentity(item));
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const next: JsonRecord = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "config" && isRecord(item)) {
+      next[key] = Object.fromEntries(Object.entries(item).filter(([configKey]) => !configKey.startsWith("volatile.")));
+      continue;
+    }
+
+    if (key === "devices" && isRecord(item)) {
+      next[key] = Object.fromEntries(
+        Object.entries(item).map(([deviceName, device]) => {
+          if (!isRecord(device)) {
+            return [deviceName, scrubGeneratedLxdIdentity(device)];
+          }
+          const scrubbedDevice = { ...device };
+          delete scrubbedDevice.hwaddr;
+          return [deviceName, scrubGeneratedLxdIdentity(scrubbedDevice)];
+        })
+      );
+      continue;
+    }
+
+    next[key] = scrubGeneratedLxdIdentity(item);
+  }
+
+  return next;
+}
+
+export function rewriteRecoveredBackupMetadata(backup: JsonRecord, oldName: string, newName: string): JsonRecord {
+  const renamed = rewriteNameReferences(backup, oldName, newName);
+  if (!renamed.changed) {
+    throw new Error(`recovered LXD backup metadata did not reference source instance '${oldName}'`);
+  }
+  return scrubGeneratedLxdIdentity(renamed.value) as JsonRecord;
+}
+
+function rewriteBackupYaml(mountPath: string, oldName: string, newName: string): void {
+  const backupPath = join(mountPath, "backup.yaml");
+  if (!existsSync(backupPath)) {
+    throw new Error(`recovered LXD dataset is missing backup.yaml at ${backupPath}`);
+  }
+
+  const backup = parse(readFileSync(backupPath, "utf8")) as unknown;
+  if (!isRecord(backup)) {
+    throw new Error(`recovered LXD backup metadata is not an object: ${backupPath}`);
+  }
+
+  try {
+    writeFileSync(backupPath, stringify(rewriteRecoveredBackupMetadata(backup, oldName, newName)));
+  } catch (error) {
+    const message = String(error).replace(/^Error: /, "");
+    throw new Error(message.includes(backupPath) ? message : `${message}: ${backupPath}`);
+  }
+}
+
+function directoryHasEntries(path: string): boolean {
+  return existsSync(path) && readdirSync(path).length > 0;
+}
+
+function prepareRootfsDirectoryForLxdRecover(mountPath: string): void {
+  const rootfsPath = join(mountPath, "rootfs");
+  if (directoryHasEntries(rootfsPath)) {
+    return;
+  }
+
+  const stagingPath = join(mountPath, ".terrarium-rootfs.tmp");
+  if (existsSync(stagingPath)) {
+    throw new Error(`temporary LXD rootfs staging path already exists: ${stagingPath}`);
+  }
+
+  mkdirSync(stagingPath);
+  for (const entry of readdirSync(mountPath)) {
+    if (entry === "backup.yaml" || entry === "rootfs" || entry === ".terrarium-rootfs.tmp") {
+      continue;
+    }
+    renameSync(join(mountPath, entry), join(stagingPath, entry));
+  }
+  if (!existsSync(rootfsPath)) {
+    renameSync(stagingPath, rootfsPath);
+  } else {
+    for (const entry of readdirSync(stagingPath)) {
+      renameSync(join(stagingPath, entry), join(rootfsPath, entry));
+    }
+    rmSync(stagingPath, { recursive: true, force: true });
+  }
+
+  if (!directoryHasEntries(rootfsPath)) {
+    throw new Error(`recovered LXD dataset is missing rootfs contents at ${rootfsPath}`);
+  }
+}
+
+async function prepareDatasetForLxdRecover(pool: string, targetDataset: string, oldName: string, newName: string): Promise<string> {
+  const mountPath = join(lxdStorageRoot(pool), "containers", newName);
+  const rootfsPath = join(mountPath, "rootfs");
+  const rootfsDataset = `${targetDataset}/rootfs`;
+  await runText(["mkdir", "-p", mountPath], PREFIX);
+  await runAllowFailure(["zfs", "unmount", targetDataset]);
+  await runText(["zfs", "set", `mountpoint=${mountPath}`, targetDataset], PREFIX);
+  const mount = await runAllowFailure(["zfs", "mount", targetDataset]);
+  if (mount.exitCode !== 0 && !`${mount.stderr}\n${mount.stdout}`.toLowerCase().includes("already mounted")) {
+    throw new Error(`failed to mount recovered dataset at ${mountPath}: ${mount.stderr.trim() || mount.stdout.trim()}`);
+  }
+  if ((await zfsDatasetExists(rootfsDataset))) {
+    await materializeRootfsDataset(rootfsDataset, rootfsPath);
+  }
+  rewriteBackupYaml(mountPath, oldName, newName);
+  prepareRootfsDirectoryForLxdRecover(mountPath);
+  return mountPath;
+}
+
+async function mountRecoveredDataset(targetDataset: string, mountPath: string): Promise<void> {
+  const rootfsPath = join(mountPath, "rootfs");
+  await runText(["mkdir", "-p", mountPath], PREFIX);
+  await runText(["zfs", "set", `mountpoint=${mountPath}`, targetDataset], PREFIX);
+  const mount = await runAllowFailure(["zfs", "mount", targetDataset]);
+  if (mount.exitCode !== 0 && !`${mount.stderr}\n${mount.stdout}`.toLowerCase().includes("already mounted")) {
+    throw new Error(`failed to remount recovered dataset at ${mountPath}: ${mount.stderr.trim() || mount.stdout.trim()}`);
+  }
+
+  if (!directoryHasEntries(rootfsPath)) {
+    const datasetState = await runAllowFailure(["zfs", "get", "-H", "-o", "property,value", "mounted,mountpoint,canmount", targetDataset]);
+    throw new Error(
+      [
+        `recovered LXD dataset is mounted but missing rootfs contents at ${rootfsPath}`,
+        datasetState.stdout.trim() ? `zfs state:\n${datasetState.stdout.trim()}` : "",
+        datasetState.stderr.trim() ? `zfs stderr:\n${datasetState.stderr.trim()}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    );
+  }
+}
+
+async function zfsDatasetExists(dataset: string): Promise<boolean> {
+  return (await runAllowFailure(["zfs", "list", "-H", dataset])).exitCode === 0;
+}
+
+async function zfsSnapshotExists(snapshot: string): Promise<boolean> {
+  return (await runAllowFailure(["zfs", "list", "-H", "-t", "snapshot", snapshot])).exitCode === 0;
+}
+
+function restoreTempDatasetName(targetDataset: string, label: string): string {
+  const suffix = `${label}-${process.pid}-${Date.now()}`.replace(/[^A-Za-z0-9_.:-]/g, "-");
+  return `${targetDataset}-${suffix}`;
+}
+
+async function makeTempMountPath(): Promise<string> {
+  return (await runText(["mktemp", "-d", "/var/tmp/terrarium-rootfs.XXXXXX"], PREFIX)).trim();
+}
+
+async function copyMountedRootfs(sourceMountPath: string, rootfsPath: string): Promise<void> {
+  await runText(["mkdir", "-p", rootfsPath], PREFIX);
+  await runText(["rsync", "-aHAX", "--numeric-ids", `${sourceMountPath}/`, `${rootfsPath}/`], PREFIX);
+}
+
+async function materializeRootfsDataset(rootfsDataset: string, rootfsPath: string): Promise<void> {
+  const tempMountPath = await makeTempMountPath();
+  try {
+    await runAllowFailure(["zfs", "unmount", rootfsDataset]);
+    await runText(["zfs", "set", `mountpoint=${tempMountPath}`, rootfsDataset], PREFIX);
+    const rootfsMount = await runAllowFailure(["zfs", "mount", rootfsDataset]);
+    if (rootfsMount.exitCode !== 0 && !`${rootfsMount.stderr}\n${rootfsMount.stdout}`.toLowerCase().includes("already mounted")) {
+      throw new Error(`failed to mount recovered rootfs dataset at ${tempMountPath}: ${rootfsMount.stderr.trim() || rootfsMount.stdout.trim()}`);
+    }
+    await copyMountedRootfs(tempMountPath, rootfsPath);
+  } finally {
+    await runAllowFailure(["zfs", "unmount", rootfsDataset]);
+    await runAllowFailure(["zfs", "destroy", "-r", rootfsDataset]);
+    await runAllowFailure(["rm", "-rf", tempMountPath]);
+  }
+}
+
+async function materializeRootfsSnapshotIfPresent(
+  sourceDataset: string,
+  snapshot: string,
+  targetDataset: string,
+  targetMountPath: string
+): Promise<void> {
+  const snapshotMarker = snapshot.indexOf("@");
+  if (snapshotMarker === -1) {
+    throw new Error(`invalid ZFS snapshot name: ${snapshot}`);
+  }
+
+  const childSnapshot = `${sourceDataset}/rootfs${snapshot.slice(snapshotMarker)}`;
+  if (!(await zfsSnapshotExists(childSnapshot))) {
+    return;
+  }
+
+  const tempDataset = restoreTempDatasetName(targetDataset, "rootfs-stage");
+  const tempMountPath = await makeTempMountPath();
+  const rootfsPath = join(targetMountPath, "rootfs");
+  try {
+    await runText(["zfs", "clone", "-o", `mountpoint=${tempMountPath}`, childSnapshot, tempDataset], PREFIX);
+    await copyMountedRootfs(tempMountPath, rootfsPath);
+    console.log(success(`Materialized rootfs from ${childSnapshot} into ${rootfsPath}`));
+  } finally {
+    await runAllowFailure(["zfs", "unmount", tempDataset]);
+    await runAllowFailure(["zfs", "destroy", "-r", tempDataset]);
+    await runAllowFailure(["rm", "-rf", tempMountPath]);
+  }
+}
+
+async function recoverAsNewInstance(pool: string, sourceName: string, targetDataset: string, newName: string): Promise<void> {
+  const mountPath = await prepareDatasetForLxdRecover(pool, targetDataset, sourceName, newName);
+  console.log(`${label("Prepared mount:")} ${value(mountPath)}`);
+  printAsNewRecoveryNotice(pool, targetDataset, newName);
+  await handOffToLxdRecover();
+  await mountRecoveredDataset(targetDataset, mountPath);
+  const imported = await runAllowFailure(["lxc", "info", newName]);
+  if (imported.exitCode !== 0) {
+    const volumes = await runAllowFailure(["lxc", "storage", "volume", "list", pool]);
+    const datasets = await runAllowFailure(["zfs", "list", "-H", "-o", "name,mountpoint", targetDataset]);
+    throw new Error(
+      [
+        `LXD recovery completed but instance '${newName}' was not imported.`,
+        volumes.stdout.trim() ? `storage volumes:\n${volumes.stdout.trim()}` : "",
+        datasets.stdout.trim() ? `dataset:\n${datasets.stdout.trim()}` : "",
+        imported.stderr.trim() ? `lxc info stderr:\n${imported.stderr.trim()}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    );
+  }
 }
 
 /** Finds the newest snapshot that matches the requested dataset and optional selector. */
@@ -123,10 +405,12 @@ async function restoreLocal(
   }
 
   const targetDataset = `${pool}/containers/${newName}`;
-  await runText(["zfs", "clone", snapshot, targetDataset], PREFIX);
+  const targetMountPath = join(lxdStorageRoot(pool), "containers", newName);
+  await runText(["mkdir", "-p", targetMountPath], PREFIX);
+  await runText(["zfs", "clone", "-o", `mountpoint=${targetMountPath}`, snapshot, targetDataset], PREFIX);
+  await materializeRootfsSnapshotIfPresent(dataset, snapshot, targetDataset, targetMountPath);
   console.log(success(`Cloned ${snapshot} to ${targetDataset}`));
-  printAsNewRecoveryNotice(pool, targetDataset, newName);
-  await handOffToLxdRecover();
+  await recoverAsNewInstance(pool, instance, targetDataset, newName);
 }
 
 /** Restores an S3-backed dataset chain either in-place or into a new importable dataset. */
@@ -151,8 +435,7 @@ async function restoreS3(
     console.log(`${label("Next:")} ${value(`lxc start ${instance}`)}`);
   } else {
     console.log(success(`Reconstructed dataset into ${target}`));
-    printAsNewRecoveryNotice(pool, target, newName);
-    await handOffToLxdRecover();
+    await recoverAsNewInstance(pool, instance, target, newName);
   }
 }
 

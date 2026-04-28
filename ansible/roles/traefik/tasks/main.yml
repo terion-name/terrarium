@@ -13,6 +13,10 @@
     url: "https://github.com/traefik/traefik/releases/download/{{ terrarium_traefik_version }}/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
     dest: "/tmp/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
     mode: "0644"
+  register: terrarium_traefik_download
+  until: terrarium_traefik_download is succeeded
+  retries: 5
+  delay: 10
 
 - name: Extract Traefik binary
   ansible.builtin.unarchive:

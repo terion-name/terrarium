@@ -14,6 +14,8 @@ const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
 const REPO_DIR = process.env.TERRARIUM_REPO_DIR ?? "/opt/terrarium";
 const BUNDLE_DIR = process.env.TERRARIUM_BUNDLE_DIR ?? "";
+// CAC's string transform runs after numeric coercion; readCliOption recovers exact argv values instead.
+const STRING_OPTION = {};
 
 $.throws(true);
 
@@ -62,6 +64,8 @@ type InstallOptions = {
   oidcIssuer: string;
   oidcClientId: string;
   oidcClientSecret: string;
+  lxdOidcClientId: string;
+  lxdOidcClientSecret: string;
   zitadelAdminEmail: string;
   rootPassword: string;
   storageMode: string;
@@ -465,6 +469,10 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
     );
     options.oidcClientId = await promptText("External OIDC client ID", options.oidcClientId);
     options.oidcClientSecret = await promptSecret("External OIDC client secret", options.oidcClientSecret);
+    options.lxdOidcClientId = await promptText("Optional separate LXD OIDC client ID", options.lxdOidcClientId);
+    options.lxdOidcClientSecret = options.lxdOidcClientId
+      ? await promptSecret("Optional separate LXD OIDC client secret", options.lxdOidcClientSecret)
+      : "";
 
     if (!options.oidcClientId) {
       warn("OIDC client ID is required for external OIDC mode.");
@@ -480,6 +488,8 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
         issuer: options.oidcIssuer,
         clientId: options.oidcClientId,
         clientSecret: options.oidcClientSecret,
+        lxdClientId: options.lxdOidcClientId || options.oidcClientId,
+        lxdClientSecret: options.lxdOidcClientId ? options.lxdOidcClientSecret : options.oidcClientSecret,
         manageDomain: options.manageDomain,
         lxdDomain: options.lxdDomain
       });
@@ -541,6 +551,8 @@ async function verifyConfiguredIntegrations(options: InstallOptions): Promise<vo
       issuer: options.oidcIssuer,
       clientId: options.oidcClientId,
       clientSecret: options.oidcClientSecret,
+      lxdClientId: options.lxdOidcClientId || options.oidcClientId,
+      lxdClientSecret: options.lxdOidcClientId ? options.lxdOidcClientSecret : options.oidcClientSecret,
       manageDomain: options.manageDomain,
       lxdDomain: options.lxdDomain
     });
@@ -562,11 +574,56 @@ function applyPartitionCandidate(options: InstallOptions, candidate: PartitionCa
   options.storageSource = candidate.source;
   if (candidate.kind === "free-space") {
     options.storagePartitionStart = candidate.startMiB;
-    options.storagePartitionEnd = candidate.endMiB;
+    options.storagePartitionEnd = partitionEndForCandidate(candidate, options.storageSize);
   } else {
     options.storagePartitionStart = "";
     options.storagePartitionEnd = "";
   }
+}
+
+export function partitionEndForCandidate(candidate: Extract<PartitionCandidate, { kind: "free-space" }>, storageSize: string): string {
+  const requestedMiB = parseStorageSizeMiB(storageSize);
+  if (!requestedMiB) {
+    return candidate.endMiB;
+  }
+
+  const startMiB = Number(candidate.startMiB.replace(/MiB$/i, ""));
+  const candidateEndMiB = Number(candidate.endMiB.replace(/MiB$/i, ""));
+  if (!Number.isFinite(startMiB) || !Number.isFinite(candidateEndMiB)) {
+    return candidate.endMiB;
+  }
+
+  const requestedEndMiB = startMiB + requestedMiB;
+  if (requestedEndMiB > candidateEndMiB) {
+    fail(`--storage-size ${storageSize} does not fit in discovered free space ${candidate.startMiB}-${candidate.endMiB}`);
+  }
+
+  return `${Math.round(requestedEndMiB)}MiB`;
+}
+
+function parseStorageSizeMiB(value: string): number | undefined {
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const match = normalized.match(/^(\d+(?:\.\d+)?)([kmgt]?i?b?)?$/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return undefined;
+  }
+
+  const unit = (match[2] || "mib").toLowerCase();
+  const multiplier =
+    unit.startsWith("t") ? 1024 * 1024 :
+    unit.startsWith("g") ? 1024 :
+    unit.startsWith("k") ? 1 / 1024 :
+    1;
+  return Math.ceil(amount * multiplier);
 }
 
 async function resolveAutoStorageSource(options: InstallOptions, disks: DiskCandidate[], partitions: PartitionCandidate[]): Promise<void> {
@@ -768,6 +825,8 @@ function validateNonInteractive(options: InstallOptions): void {
     options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
     options.oidcClientId = "";
     options.oidcClientSecret = "";
+    options.lxdOidcClientId = "";
+    options.lxdOidcClientSecret = "";
   } else {
     if (!options.adminGroup) {
       fail("--admin-group is required when --idp=oidc");
@@ -782,6 +841,9 @@ function validateNonInteractive(options: InstallOptions): void {
     }
     if (!options.oidcClientSecret) {
       fail("--oidc-secret is required when --idp=oidc");
+    }
+    if (options.lxdOidcClientSecret && !options.lxdOidcClientId) {
+      fail("--lxd-oidc-client is required when --lxd-oidc-secret or --lxd-oidc-secret-file is used");
     }
   }
 
@@ -880,6 +942,8 @@ function buildConfig(options: InstallOptions): string {
     terrarium_oidc_issuer: options.oidcIssuer,
     terrarium_oidc_client_id: options.oidcClientId,
     terrarium_oidc_client_secret: options.oidcClientSecret,
+    terrarium_lxd_oidc_client_id: options.lxdOidcClientId,
+    terrarium_lxd_oidc_client_secret: options.lxdOidcClientSecret,
     terrarium_zitadel_admin_email: options.zitadelAdminEmail,
     terrarium_storage_mode: options.storageMode,
     terrarium_storage_source: options.storageSource,
@@ -952,6 +1016,8 @@ function defaultOptions(): InstallOptions {
     oidcIssuer: "",
     oidcClientId: "",
     oidcClientSecret: "",
+    lxdOidcClientId: "",
+    lxdOidcClientSecret: "",
     zitadelAdminEmail: "",
     rootPassword: "",
     storageMode: "",
@@ -973,14 +1039,34 @@ function defaultOptions(): InstallOptions {
   };
 }
 
-function readCliOption(rawOptions: Record<string, unknown>, key: string, aliases: string[] = []): string {
-  for (const candidate of [key, ...aliases]) {
+export function readCliOption(rawOptions: Record<string, unknown>, key: string, aliases: string[] = []): string {
+  const candidates = [key, ...aliases];
+  for (const candidate of candidates) {
     const value = rawOptions[candidate];
     if (typeof value === "string") {
       return value;
     }
+    if (typeof value === "number") {
+      return rawCliOption(candidates) ?? String(value);
+    }
   }
   return "";
+}
+
+function rawCliOption(names: string[]): string | undefined {
+  const longNames = new Set(names.map((name) => `--${name}`));
+  for (let index = 0; index < process.argv.length; index += 1) {
+    const arg = process.argv[index];
+    if (longNames.has(arg)) {
+      return process.argv[index + 1];
+    }
+    for (const longName of longNames) {
+      if (arg.startsWith(`${longName}=`)) {
+        return arg.slice(longName.length + 1);
+      }
+    }
+  }
+  return undefined;
 }
 
 function readSecretCliOption(
@@ -1057,38 +1143,41 @@ export function registerInstallCommand(cli: CAC): void {
     .command("install", "Install Terrarium on the current host")
     .option("--non-interactive", "Disable prompts and require full configuration through flags")
     .option("--yes", "Assume yes for confirmation prompts")
-    .option("--ref <ref>", "Git branch or tag to checkout for the Terrarium repo")
-    .option("--email <email>", "Terrarium contact/admin email")
-    .option("--acme-email <email>", "ACME account email for Traefik and LXD")
-    .option("--domain <domain>", "Root domain used to derive service subdomains")
-    .option("--manage-domain <domain>", "Cockpit domain")
-    .option("--proxy-domain <domain>", "Traefik dashboard domain")
-    .option("--lxd-domain <domain>", "LXD domain")
-    .option("--idp <mode>", "Identity provider mode: local or oidc")
-    .option("--admin-group <group>", "Management admin group; required when --idp=oidc")
-    .option("--oidc <issuer>", "OIDC issuer URL; required when --idp=oidc")
-    .option("--oidc-client <clientId>", "OIDC client ID; required when --idp=oidc")
-    .option("--oidc-secret <clientSecret>", "OIDC client secret; required when --idp=oidc")
-    .option("--oidc-secret-file <path>", "Read the OIDC client secret from a root-readable file")
-    .option("--auth-domain <domain>", "ZITADEL auth domain")
-    .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL")
-    .option("--root-pwd <password>", "Set or update the root password used for Cockpit login")
-    .option("--root-pwd-file <path>", "Read the root password used for Cockpit login from a root-readable file")
-    .option("--storage-mode <mode>", "Storage mode: disk, partition, or file")
-    .option("--storage-source <pathOrAuto>", "Disk or partition path for disk/partition mode, or auto")
-    .option("--storage-size <size>", "File-backed pool size")
+    .option("--ref <ref>", "Git branch or tag to checkout for the Terrarium repo", STRING_OPTION)
+    .option("--email <email>", "Terrarium contact/admin email", STRING_OPTION)
+    .option("--acme-email <email>", "ACME account email for Traefik and LXD", STRING_OPTION)
+    .option("--domain <domain>", "Root domain used to derive service subdomains", STRING_OPTION)
+    .option("--manage-domain <domain>", "Cockpit domain", STRING_OPTION)
+    .option("--proxy-domain <domain>", "Traefik dashboard domain", STRING_OPTION)
+    .option("--lxd-domain <domain>", "LXD domain", STRING_OPTION)
+    .option("--idp <mode>", "Identity provider mode: local or oidc", STRING_OPTION)
+    .option("--admin-group <group>", "Management admin group; required when --idp=oidc", STRING_OPTION)
+    .option("--oidc <issuer>", "OIDC issuer URL; required when --idp=oidc", STRING_OPTION)
+    .option("--oidc-client <clientId>", "OIDC client ID; required when --idp=oidc", STRING_OPTION)
+    .option("--oidc-secret <clientSecret>", "OIDC client secret; required when --idp=oidc", STRING_OPTION)
+    .option("--oidc-secret-file <path>", "Read the OIDC client secret from a root-readable file", STRING_OPTION)
+    .option("--lxd-oidc-client <clientId>", "Optional separate OIDC client ID for LXD", STRING_OPTION)
+    .option("--lxd-oidc-secret <clientSecret>", "Optional separate OIDC client secret for LXD", STRING_OPTION)
+    .option("--lxd-oidc-secret-file <path>", "Read the optional LXD OIDC client secret from a root-readable file", STRING_OPTION)
+    .option("--auth-domain <domain>", "ZITADEL auth domain", STRING_OPTION)
+    .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL", STRING_OPTION)
+    .option("--root-pwd <password>", "Set or update the root password used for Cockpit login", STRING_OPTION)
+    .option("--root-pwd-file <path>", "Read the root password used for Cockpit login from a root-readable file", STRING_OPTION)
+    .option("--storage-mode <mode>", "Storage mode: disk, partition, or file", STRING_OPTION)
+    .option("--storage-source <pathOrAuto>", "Disk or partition path for disk/partition mode, or auto", STRING_OPTION)
+    .option("--storage-size <size>", "File-backed pool size", STRING_OPTION)
     .option("--enable-s3", "Enable S3 archive backups")
-    .option("--s3-endpoint <url>", "S3 endpoint URL")
-    .option("--s3-bucket <name>", "S3 bucket name")
-    .option("--s3-region <name>", "S3 region")
-    .option("--s3-prefix <prefix>", "S3 object prefix")
-    .option("--s3-access-key <key>", "S3 access key")
-    .option("--s3-secret-key <secret>", "S3 secret key")
-    .option("--s3-secret-key-file <path>", "Read the S3 secret key from a root-readable file")
+    .option("--s3-endpoint <url>", "S3 endpoint URL", STRING_OPTION)
+    .option("--s3-bucket <name>", "S3 bucket name", STRING_OPTION)
+    .option("--s3-region <name>", "S3 region", STRING_OPTION)
+    .option("--s3-prefix <prefix>", "S3 object prefix", STRING_OPTION)
+    .option("--s3-access-key <key>", "S3 access key", STRING_OPTION)
+    .option("--s3-secret-key <secret>", "S3 secret key", STRING_OPTION)
+    .option("--s3-secret-key-file <path>", "Read the S3 secret key from a root-readable file", STRING_OPTION)
     .option("--enable-syncoid", "Enable syncoid replication")
-    .option("--syncoid-target <host>", "Remote syncoid SSH target")
-    .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset")
-    .option("--syncoid-ssh-key <path>", "SSH key path for syncoid")
+    .option("--syncoid-target <host>", "Remote syncoid SSH target", STRING_OPTION)
+    .option("--syncoid-target-dataset <dataset>", "Remote syncoid dataset", STRING_OPTION)
+    .option("--syncoid-ssh-key <path>", "SSH key path for syncoid", STRING_OPTION)
     .action(async (rawOptions) => {
       const cliOptions = rawOptions as Record<string, unknown>;
       const options = defaultOptions();
@@ -1096,15 +1185,15 @@ export function registerInstallCommand(cli: CAC): void {
       options.mode = Boolean(cliOptions.nonInteractive) ? "non-interactive" : "interactive";
       options.assumeYes = Boolean(cliOptions.yes);
       options.email = readCliOption(cliOptions, "email");
-      options.acmeEmail = readCliOption(cliOptions, "acmeEmail");
+      options.acmeEmail = readCliOption(cliOptions, "acmeEmail", ["acme-email"]);
       options.domain = readCliOption(cliOptions, "domain");
-      options.manageDomain = readCliOption(cliOptions, "manageDomain");
-      options.proxyDomain = readCliOption(cliOptions, "proxyDomain");
-      options.lxdDomain = readCliOption(cliOptions, "lxdDomain");
+      options.manageDomain = readCliOption(cliOptions, "manageDomain", ["manage-domain"]);
+      options.proxyDomain = readCliOption(cliOptions, "proxyDomain", ["proxy-domain"]);
+      options.lxdDomain = readCliOption(cliOptions, "lxdDomain", ["lxd-domain"]);
       options.idpMode = readCliOption(cliOptions, "idp").trim().toLowerCase() as IdpMode | "";
-      options.adminGroup = readCliOption(cliOptions, "adminGroup");
+      options.adminGroup = readCliOption(cliOptions, "adminGroup", ["admin-group"]);
       options.oidcIssuer = readCliOption(cliOptions, "oidc");
-      options.oidcClientId = readCliOption(cliOptions, "oidcClient");
+      options.oidcClientId = readCliOption(cliOptions, "oidcClient", ["oidc-client"]);
       options.oidcClientSecret = readSecretCliOption(
         cliOptions,
         "oidcSecret",
@@ -1112,13 +1201,21 @@ export function registerInstallCommand(cli: CAC): void {
         ["oidc-secret"],
         ["oidc-secret-file"]
       );
-      options.authDomain = readCliOption(cliOptions, "authDomain");
-      options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail");
+      options.lxdOidcClientId = readCliOption(cliOptions, "lxdOidcClient", ["lxd-oidc-client"]);
+      options.lxdOidcClientSecret = readSecretCliOption(
+        cliOptions,
+        "lxdOidcSecret",
+        "lxdOidcSecretFile",
+        ["lxd-oidc-secret"],
+        ["lxd-oidc-secret-file"]
+      );
+      options.authDomain = readCliOption(cliOptions, "authDomain", ["auth-domain"]);
+      options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail", ["zitadel-admin-email"]);
       options.rootPassword = readSecretCliOption(cliOptions, "rootPwd", "rootPwdFile", ["root-pwd"], ["root-pwd-file"]);
-      options.storageMode = readCliOption(cliOptions, "storageMode").replace("loop", "file");
-      options.storageSource = readCliOption(cliOptions, "storageSource");
-      options.storageSize = readCliOption(cliOptions, "storageSize");
-      options.enableS3 = Boolean(cliOptions.enableS3);
+      options.storageMode = readCliOption(cliOptions, "storageMode", ["storage-mode"]).replace("loop", "file");
+      options.storageSource = readCliOption(cliOptions, "storageSource", ["storage-source"]);
+      options.storageSize = readCliOption(cliOptions, "storageSize", ["storage-size"]);
+      options.enableS3 = Boolean(cliOptions.enableS3 || cliOptions["enable-s3"]);
       options.s3Endpoint = normalizeS3Endpoint(readCliOption(cliOptions, "s3Endpoint", ["s3-endpoint"]));
       options.s3Bucket = readCliOption(cliOptions, "s3Bucket", ["s3-bucket"]);
       options.s3Region = readCliOption(cliOptions, "s3Region", ["s3-region"]);
@@ -1131,10 +1228,10 @@ export function registerInstallCommand(cli: CAC): void {
         ["s3-secretKey", "s3-secret-key"],
         ["s3-secretKeyFile", "s3-secret-key-file"]
       );
-      options.enableSyncoid = Boolean(cliOptions.enableSyncoid);
-      options.syncoidTarget = readCliOption(cliOptions, "syncoidTarget");
-      options.syncoidTargetDataset = readCliOption(cliOptions, "syncoidTargetDataset");
-      options.syncoidSshKey = readCliOption(cliOptions, "syncoidSshKey");
+      options.enableSyncoid = Boolean(cliOptions.enableSyncoid || cliOptions["enable-syncoid"]);
+      options.syncoidTarget = readCliOption(cliOptions, "syncoidTarget", ["syncoid-target"]);
+      options.syncoidTargetDataset = readCliOption(cliOptions, "syncoidTargetDataset", ["syncoid-target-dataset"]);
+      options.syncoidSshKey = readCliOption(cliOptions, "syncoidSshKey", ["syncoid-ssh-key"]);
       await installTerrarium(options);
     });
 }

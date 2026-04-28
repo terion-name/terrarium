@@ -139,6 +139,7 @@ describe("ZITADEL Cloud provider", () => {
 
   test("provisionFixture grants the denied user a project role outside route allowed groups", async () => {
     const userIds = ["admin-user", "route-user", "denied-user"];
+    let appCount = 0;
     const calls = installFetchMock((call) => {
       const method = call.init?.method ?? "GET";
       const path = callPath(call);
@@ -161,13 +162,25 @@ describe("ZITADEL Cloud provider", () => {
         return Response.json({});
       }
       if (method === "POST" && path === "/management/v1/projects/project-1/apps/oidc") {
-        return Response.json({ appId: "app-1", clientId: "client-1", clientSecret: "secret-1" });
+        appCount += 1;
+        return appCount === 1
+          ? Response.json({ appId: "app-1", clientId: "client-1", clientSecret: "secret-1" })
+          : Response.json({ appId: "lxd-app-1", clientId: "lxd-client-1" });
       }
       if (method === "GET" && path === "/.well-known/openid-configuration") {
-        return Response.json({ token_endpoint: "https://zitadel.example.test/oauth/v2/token" });
+        return Response.json({
+          authorization_endpoint: "https://zitadel.example.test/oauth/v2/authorize",
+          token_endpoint: "https://zitadel.example.test/oauth/v2/token"
+        });
       }
       if (method === "POST" && path === "/oauth/v2/token") {
         return Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      if (method === "GET" && path === "/oauth/v2/authorize") {
+        return new Response("", {
+          status: 302,
+          headers: { location: "https://zitadel.example.test/ui/login" }
+        });
       }
       if (method === "POST" && path === "/management/v1/users/human/_import") {
         return Response.json({ userId: userIds.shift() });
@@ -198,9 +211,28 @@ describe("ZITADEL Cloud provider", () => {
       .map((call) => jsonBody(call));
 
     expect(fixture.routeGroups).toEqual(["agents", "admins"]);
+    expect(fixture.clientId).toBe("client-1");
+    expect(fixture.clientSecret).toBe("secret-1");
+    expect(fixture.lxdClientId).toBe("lxd-client-1");
+    expect(fixture.lxdClientSecret).toBe("");
     expect(fixture.deniedUser.roles).toEqual(["bystanders"]);
     expect(roleKeys).toEqual(["terrarium-admins", "agents", "admins", "bystanders"]);
     expect(grants).toContainEqual({ projectId: "project-1", roleKeys: ["bystanders"] });
+    const appBodies = calls
+      .filter((call) => call.init?.method === "POST" && callPath(call) === "/management/v1/projects/project-1/apps/oidc")
+      .map((call) => jsonBody(call));
+    expect(appBodies).toMatchObject([
+      {
+        appType: "OIDC_APP_TYPE_WEB",
+        authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+        redirectUris: expect.arrayContaining(["https://manage.example.test/oauth2/callback"])
+      },
+      {
+        appType: "OIDC_APP_TYPE_NATIVE",
+        authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+        redirectUris: ["https://lxd.example.test/oidc/callback"]
+      }
+    ]);
   });
 
   test("waits for newly-created OIDC clients to reach the token endpoint", async () => {

@@ -6,7 +6,7 @@ import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
 import { expectHttpBodyContains, expectHttpsJson, waitForHttpStatusResolved } from "../assertions/http";
-import { expectLxdUi, expectManagementUi, expectProtectedRoute } from "../assertions/browser";
+import { expectLxdUi, expectManagementSurfaces, expectManagementUi, expectProtectedRoute } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
 
@@ -27,6 +27,8 @@ type InstallOptions = {
   oidcIssuer?: string;
   oidcClientId?: string;
   oidcClientSecret?: string;
+  lxdOidcClientId?: string;
+  lxdOidcClientSecret?: string;
   adminGroup?: string;
   enableS3?: boolean;
   enableSyncoid?: boolean;
@@ -200,6 +202,15 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     await uploadSecretFile(ssh, oidcSecretPath, options.oidcClientSecret || "");
     secretFiles.push(oidcSecretPath);
     args.push(`--oidc-secret-file ${shellArg(oidcSecretPath)}`);
+    if (options.lxdOidcClientId) {
+      args.push(`--lxd-oidc-client ${shellArg(options.lxdOidcClientId)}`);
+      if (options.lxdOidcClientSecret) {
+        const lxdOidcSecretPath = `/root/terrarium-install-${host.label}-lxd-oidc-secret`;
+        await uploadSecretFile(ssh, lxdOidcSecretPath, options.lxdOidcClientSecret);
+        secretFiles.push(lxdOidcSecretPath);
+        args.push(`--lxd-oidc-secret-file ${shellArg(lxdOidcSecretPath)}`);
+      }
+    }
   }
   if (options.enableS3) {
     args.push("--enable-s3");
@@ -269,12 +280,39 @@ export async function verifyManagementUi(
 ): Promise<void> {
   const outputDir = join(context.localArtifactsDir, host.label, "browser");
   mkdirSync(outputDir, { recursive: true });
+  context.logger.info(`verify ${host.label} management UI as ${user.email}`);
   await expectManagementUi(`https://${host.domains.manage}`, `https://${host.domains.proxy}`, user as never, outputDir, {
     resolveIp: host.server.ipv4,
     resolveHosts: {
       [host.domains.auth]: host.server.ipv4
     }
   });
+  context.logger.info(`verified ${host.label} management UI`);
+}
+
+/** Verifies the browser-facing management surfaces without relaunching Chromium between apps. */
+export async function verifyManagementSurfaces(
+  context: IntegrationContext,
+  host: ManagedHost,
+  user: { email: string; password: string; userId?: string; roles?: string[] }
+): Promise<void> {
+  const outputDir = join(context.localArtifactsDir, host.label, "browser");
+  mkdirSync(outputDir, { recursive: true });
+  context.logger.info(`verify ${host.label} management surfaces as ${user.email}`);
+  await expectManagementSurfaces(
+    `https://${host.domains.manage}`,
+    `https://${host.domains.proxy}`,
+    `https://${host.domains.lxd}`,
+    user as never,
+    outputDir,
+    {
+      resolveIp: host.server.ipv4,
+      resolveHosts: {
+        [host.domains.auth]: host.server.ipv4
+      }
+    }
+  );
+  context.logger.info(`verified ${host.label} management surfaces`);
 }
 
 /** Verifies the public LXD endpoint serves the real API over trusted TLS and does not expose trusted anonymous access. */
@@ -315,12 +353,14 @@ export async function verifyLxdUi(
 ): Promise<void> {
   const outputDir = join(context.localArtifactsDir, host.label, "lxd-browser");
   mkdirSync(outputDir, { recursive: true });
+  context.logger.info(`verify ${host.label} LXD UI as ${user.email}`);
   await expectLxdUi(`https://${host.domains.lxd}`, user as never, outputDir, {
     resolveIp: host.server.ipv4,
     resolveHosts: {
       [host.domains.auth]: host.server.ipv4
     }
   });
+  context.logger.info(`verified ${host.label} LXD UI`);
 }
 
 /** Creates a small HTTP server inside an LXC and publishes the requested proxy labels. */
@@ -430,13 +470,13 @@ ${remoteCtl("set idp oidc")} \\
   --oidc ${shellArg(context.config.zitadelCloudIssuer)} \\
   --oidc-client ${shellArg(fixture.clientId)} \\
   --oidc-secret-file ${shellArg(secretPath)} \\
+  --lxd-oidc-client ${shellArg(fixture.lxdClientId)} \\
   --admin-group ${shellArg(fixture.adminGroup)}
 `,
     scriptPath
   );
-  await verifyManagementUi(context, host, fixture.adminUser);
+  await verifyManagementSurfaces(context, host, fixture.adminUser);
   await verifyLxdApi(host);
-  await verifyLxdUi(context, host, fixture.adminUser);
 }
 
 /** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
@@ -451,9 +491,8 @@ ${remoteCtl("set idp local")}
     scriptPath
   );
   const admin = await readLocalZitadelAdmin(ssh);
-  await verifyManagementUi(context, host, admin);
+  await verifyManagementSurfaces(context, host, admin);
   await verifyLxdApi(host);
-  await verifyLxdUi(context, host, admin);
 }
 
 /** Runs a small route-auth matrix against the currently configured OIDC provider. */

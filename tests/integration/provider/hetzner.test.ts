@@ -21,11 +21,11 @@ const logger = {
   }
 } as unknown as IntegrationLogger;
 
-function createProvider(): HetznerCloudProvider {
+function createProvider(hcloudLocation = "fsn1"): HetznerCloudProvider {
   return new HetznerCloudProvider(
     {
       hcloudToken: "token-1",
-      hcloudLocation: "fsn1"
+      hcloudLocation
     } as IntegrationConfig,
     logger
   );
@@ -58,6 +58,60 @@ afterEach(() => {
 });
 
 describe("Hetzner Cloud provider cleanup", () => {
+  test("createServer retries transient placement failures", async () => {
+    const sleeps: number[] = [];
+    setSleepMock(async (ms) => {
+      sleeps.push(ms);
+    });
+    const calls = installFetchMock([
+      new Response(JSON.stringify({ locations: [{ name: "fsn1", network_zone: "eu-central" }] }), { status: 200 }),
+      new Response(JSON.stringify({ error: { code: "resource_unavailable", message: "error during placement" } }), { status: 412 }),
+      new Response(JSON.stringify({ server: { id: 42, name: "server-1" }, action: { id: 99, status: "running" } }), { status: 201 }),
+      new Response(JSON.stringify({ server: { id: 42, name: "server-1", public_net: { ipv4: { ip: "192.0.2.42" } } } }), {
+        status: 200
+      })
+    ]);
+
+    const server = await createProvider().createServer("server-1", "cx22", "fsn1", [1], {});
+
+    expect(server).toEqual({ id: 42, name: "server-1", ipv4: "192.0.2.42" });
+    expect(calls.map(callPath)).toEqual(["/v1/locations", "/v1/servers", "/v1/servers", "/v1/servers/42"]);
+    expect(calls.map((call) => call.init?.method)).toEqual(["GET", "POST", "POST", "GET"]);
+    expect(sleeps).toEqual([15000]);
+  });
+
+  test("createServer tries alternate locations for a requested network zone", async () => {
+    const sleeps: number[] = [];
+    setSleepMock(async (ms) => {
+      sleeps.push(ms);
+    });
+    const calls = installFetchMock([
+      new Response(
+        JSON.stringify({
+          locations: [
+            { name: "fsn1", network_zone: "eu-central" },
+            { name: "nbg1", network_zone: "eu-central" }
+          ]
+        }),
+        { status: 200 }
+      ),
+      new Response(JSON.stringify({ error: { code: "resource_unavailable", message: "error during placement" } }), { status: 412 }),
+      new Response(JSON.stringify({ server: { id: 42, name: "server-1" }, action: { id: 99, status: "running" } }), { status: 201 }),
+      new Response(JSON.stringify({ server: { id: 42, name: "server-1", public_net: { ipv4: { ip: "192.0.2.42" } } } }), {
+        status: 200
+      })
+    ]);
+
+    const server = await createProvider("eu-central").createServer("server-1", "cx22", "eu-central", [1], {});
+    const createBodies = calls
+      .filter((call) => callPath(call) === "/v1/servers" && call.init?.body)
+      .map((call) => JSON.parse(String(call.init?.body)) as { location: string });
+
+    expect(server).toEqual({ id: 42, name: "server-1", ipv4: "192.0.2.42" });
+    expect(createBodies.map((body) => body.location)).toEqual(["nbg1", "fsn1"]);
+    expect(sleeps).toEqual([15000]);
+  });
+
   test("deleteVolume retries transient locked responses", async () => {
     const sleeps: number[] = [];
     setSleepMock(async (ms) => {

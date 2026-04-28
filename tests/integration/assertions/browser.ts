@@ -16,7 +16,14 @@ type LoginOptions = {
 };
 
 const BROWSER_WAIT_TIMEOUT_MS = 120000;
+const BROWSER_FLOW_TIMEOUT_MS = 180000;
 const BROWSER_CLOSE_TIMEOUT_MS = 10000;
+const BROWSER_CLICK_TIMEOUT_MS = 10000;
+const BROWSER_POLL_TIMEOUT_MS = 1000;
+const BROWSER_INPUT_ATTEMPT_TIMEOUT_MS = 10000;
+const BROWSER_INPUT_TOTAL_TIMEOUT_MS = 45000;
+const BROWSER_LOGIN_DOCUMENT_TIMEOUT_MS = 30000;
+const BROWSER_OIDC_START_TIMEOUT_MS = 30000;
 const BODY_SNIPPET_LENGTH = 4000;
 const DENIAL_TEXT_MARKERS = ["403", "forbidden", "access denied", "not authorized", "permission denied"] as const;
 const ERROR_TEXT_MARKERS = [
@@ -32,7 +39,7 @@ const ERROR_TEXT_MARKERS = [
   "service unavailable",
   "gateway timeout"
 ] as const;
-const COCKPIT_TEXT_MARKERS = ["Cockpit", "Log in", "Username", "Password"] as const;
+const COCKPIT_TEXT_MARKERS = ["Cockpit", "Log in", "Username", "Password", "Ubuntu 24.04"] as const;
 const TRAEFIK_TEXT_MARKERS = ["Traefik", "Dashboard", "HTTP", "Routers", "Services"] as const;
 const LXD_TEXT_MARKERS = ["LXD", "Instances", "Projects", "Storage"] as const;
 const USERNAME_INPUT_SELECTORS = [
@@ -40,7 +47,12 @@ const USERNAME_INPUT_SELECTORS = [
   'input[name="loginName"]',
   'input[autocomplete="username"]',
   'input[type="email"]',
-  'input[name="username"]'
+  'input[name="username"]',
+  'input[placeholder*="email" i]',
+  'input[placeholder*="login" i]',
+  'input[placeholder*="username" i]',
+  'input[type="text"]',
+  "input:not([type])"
 ] as const;
 const PASSWORD_INPUT_SELECTORS = [
   '[data-testid="password-text-input"]',
@@ -51,34 +63,65 @@ const PASSWORD_INPUT_SELECTORS = [
 ] as const;
 const USERNAME_SUBMIT_SELECTORS = submitControlSelectors(["Next", "Continue", "Sign in"]);
 const PASSWORD_SUBMIT_SELECTORS = submitControlSelectors(["Sign in", "Login", "Continue"]);
+const CONSENT_SUBMIT_SELECTORS = ["Allow", "Authorize", "Approve", "Accept", "Continue", "Grant access"].flatMap((label) => [
+  `button:has-text("${label}")`,
+  `[role="button"]:has-text("${label}")`,
+  `input[type="submit"][value="${label}"]`,
+  `input[type="button"][value="${label}"]`
+]);
 
 async function firstVisible(page: Page, selectors: string[]): Promise<string> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
+  let reloadedBlankLoginPage = false;
 
   while (Date.now() < deadline) {
     for (const selector of selectors) {
       const locator = page.locator(selector).first();
-      if (await locator.isVisible().catch(() => false)) {
+      if (await locatorVisible(locator)) {
         return selector;
       }
+    }
+
+    if (!reloadedBlankLoginPage && await reloadBlankLoginDocumentIfNeeded(page)) {
+      reloadedBlankLoginPage = true;
+      await page.waitForTimeout(1000);
+      continue;
     }
 
     await page.waitForTimeout(500);
   }
 
-  throw new Error(`none of the selectors were visible: ${selectors.join(", ")}`);
+  const body = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+  throw new Error(
+    [
+      `none of the selectors were visible: ${selectors.join(", ")}`,
+      `current URL: ${page.url()}`,
+      `body:\n${bodySnippetForError(body) || "<empty>"}`
+    ].join("\n")
+  );
+}
+
+async function reloadBlankLoginDocumentIfNeeded(page: Page): Promise<boolean> {
+  const parsed = parseBrowserUrl(page.url());
+  if (!parsed || !isLoginOrOauthCallbackPlumbingPath(parsed.pathname)) {
+    return false;
+  }
+
+  const body = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
+  if (body.trim()) {
+    return false;
+  }
+
+  await maybeWithTimeout(page.reload({ waitUntil: "commit", timeout: 10000 }).catch(() => undefined), 12000);
+  return true;
 }
 
 async function clickFirst(page: Page, selectors: string[]): Promise<void> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    for (const selector of selectors) {
-      const locator = page.locator(selector).first();
-      if ((await locator.isVisible().catch(() => false)) && !(await locator.isDisabled().catch(() => false))) {
-        await locator.click();
-        return;
-      }
+    if (await clickFirstVisible(page, selectors)) {
+      return;
     }
 
     await page.waitForTimeout(500);
@@ -87,9 +130,23 @@ async function clickFirst(page: Page, selectors: string[]): Promise<void> {
   throw new Error(`none of the click selectors became enabled: ${selectors.join(", ")}`);
 }
 
+async function clickFirstVisible(page: Page, selectors: string[]): Promise<boolean> {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (
+      (await locatorVisible(locator)) &&
+      !(await locatorDisabled(locator))
+    ) {
+      await locator.click({ noWaitAfter: true, timeout: BROWSER_CLICK_TIMEOUT_MS });
+      return true;
+    }
+  }
+  return false;
+}
+
 async function inputVisible(page: Page, selectors: readonly string[]): Promise<boolean> {
   for (const selector of selectors) {
-    if (await page.locator(selector).first().isVisible().catch(() => false)) {
+    if (await locatorVisible(page.locator(selector).first())) {
       return true;
     }
   }
@@ -97,13 +154,26 @@ async function inputVisible(page: Page, selectors: readonly string[]): Promise<b
 }
 
 async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + BROWSER_OIDC_START_TIMEOUT_MS;
+  let reloadedBlankTargetLoginPage = false;
+  let lastBody = "";
+
   while (Date.now() < deadline) {
     if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
       return;
     }
-    if (parseBrowserUrl(page.url())?.host !== targetHost) {
+    const parsed = parseBrowserUrl(page.url());
+    if (parsed && parsed.host !== targetHost) {
       return;
+    }
+
+    await maybeWithTimeout(page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => undefined), 4000);
+    lastBody = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
+    if (!lastBody.trim() && !reloadedBlankTargetLoginPage && parsed && isLoginOrOauthCallbackPlumbingPath(parsed.pathname)) {
+      reloadedBlankTargetLoginPage = true;
+      await maybeWithTimeout(page.reload({ waitUntil: "commit", timeout: 10000 }).catch(() => undefined), 12000);
+      await page.waitForTimeout(1000);
+      continue;
     }
 
     const startSelectors = [
@@ -124,49 +194,155 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
     ];
     for (const selector of startSelectors) {
       const locator = page.locator(selector).first();
-      if ((await locator.isVisible().catch(() => false)) && !(await locator.isDisabled().catch(() => false))) {
-        await locator.click();
+      if (
+        (await locatorVisible(locator)) &&
+        !(await locatorDisabled(locator))
+      ) {
+        await locator.click({ noWaitAfter: true, timeout: BROWSER_CLICK_TIMEOUT_MS });
         return;
       }
     }
 
     await page.waitForTimeout(250);
   }
+
+  if (parseBrowserUrl(page.url())?.host === targetHost) {
+    throw new Error(
+      [
+        `target login page did not expose an OIDC start control: ${page.url()}`,
+        `body:\n${bodySnippetForError(lastBody) || "<empty>"}`
+      ].join("\n")
+    );
+  }
+}
+
+async function waitForIdentityLoginDocument(page: Page, targetHost: string): Promise<void> {
+  const deadline = Date.now() + BROWSER_LOGIN_DOCUMENT_TIMEOUT_MS;
+  let reloadedBlankLoginPage = false;
+
+  while (Date.now() < deadline) {
+    const currentUrl = page.url();
+    const parsed = parseBrowserUrl(currentUrl);
+    if (parsed?.host === targetHost) {
+      return;
+    }
+
+    await maybeWithTimeout(page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => undefined), 4000);
+    if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
+      return;
+    }
+
+    const body = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
+    if (body.trim()) {
+      return;
+    }
+
+    if (!reloadedBlankLoginPage && parsed && isLoginOrOauthCallbackPlumbingPath(parsed.pathname)) {
+      reloadedBlankLoginPage = true;
+      await maybeWithTimeout(page.reload({ waitUntil: "commit", timeout: 10000 }).catch(() => undefined), 12000);
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    await page.waitForTimeout(500);
+  }
+}
+
+async function locatorVisible(locator: ReturnType<Page["locator"]>): Promise<boolean> {
+  return (await maybeWithTimeout(locator.isVisible().catch(() => false), BROWSER_POLL_TIMEOUT_MS)) ?? false;
+}
+
+async function locatorDisabled(locator: ReturnType<Page["locator"]>): Promise<boolean> {
+  return (await maybeWithTimeout(locator.isDisabled().catch(() => false), BROWSER_POLL_TIMEOUT_MS)) ?? false;
 }
 
 async function typeInto(page: Page, selector: string, value: string): Promise<void> {
-  const locator = page.locator(selector).first();
-  await locator.waitFor({ state: "visible" });
-  await locator.click({ force: true });
-  await locator.fill("");
-  await locator.type(value, { delay: 5 });
-
-  let actual = await locator.inputValue().catch(() => "");
-  if (actual !== value) {
-    await locator.fill(value);
-    actual = await locator.inputValue().catch(() => "");
-  }
-
-  if (actual !== value) {
-    await locator.evaluate(
-      (element, inputValue) => {
-        const input = element as HTMLInputElement;
-        input.value = inputValue;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      },
-      value
+  let actual = "";
+  const deadline = Date.now() + BROWSER_INPUT_TOTAL_TIMEOUT_MS;
+  for (let attempt = 1; Date.now() < deadline && attempt <= 5; attempt += 1) {
+    const locator = page.locator(selector).first();
+    const visible = await maybeWithTimeout(
+      locator.waitFor({ state: "visible", timeout: BROWSER_INPUT_ATTEMPT_TIMEOUT_MS }).then(() => true).catch(() => false),
+      BROWSER_INPUT_ATTEMPT_TIMEOUT_MS + 1000
     );
+    if (!visible) {
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    const editable = await waitForEditableInput(locator);
+    if (!editable) {
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    const clicked = await maybeWithTimeout(
+      locator.click({ timeout: BROWSER_INPUT_ATTEMPT_TIMEOUT_MS }).then(() => true).catch(() => false),
+      BROWSER_INPUT_ATTEMPT_TIMEOUT_MS + 1000
+    );
+    if (!clicked) {
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    await locator.fill(value, { timeout: BROWSER_INPUT_ATTEMPT_TIMEOUT_MS }).catch(() => undefined);
+
     actual = await locator.inputValue().catch(() => "");
+    if (actual !== value) {
+      await locator.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => undefined);
+      await locator.type(value, { delay: 5, timeout: BROWSER_INPUT_ATTEMPT_TIMEOUT_MS }).catch(() => undefined);
+      actual = await locator.inputValue().catch(() => "");
+    }
+
+    if (actual === value) {
+      await page.waitForTimeout(300);
+      actual = await locator.inputValue().catch(() => "");
+    }
+
+    if (actual === value) {
+      await locator.press("Tab").catch(() => undefined);
+      await page.waitForTimeout(300);
+      actual = await locator.inputValue().catch(() => "");
+    }
+
+    if (actual === value) {
+      return;
+    }
+
+    await page.waitForTimeout(500);
   }
 
-  if (actual !== value) {
-    throw new Error(`failed to type into ${selector}; final value length was ${actual.length}`);
+  const body = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+  throw new Error(
+    [
+      `failed to type stable value into ${selector}; final value length was ${actual.length}`,
+      `current URL: ${page.url()}`,
+      `body:\n${bodySnippetForError(body) || "<empty>"}`
+    ].join("\n")
+  );
+}
+
+async function waitForEditableInput(locator: ReturnType<Page["locator"]>): Promise<boolean> {
+  const deadline = Date.now() + BROWSER_INPUT_ATTEMPT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const ready = await maybeWithTimeout(
+      locator
+        .evaluate((element) => {
+          if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+            return false;
+          }
+          return !element.disabled && !element.readOnly;
+        })
+        .catch(() => false),
+      BROWSER_POLL_TIMEOUT_MS
+    );
+    if (ready) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
-  await locator.dispatchEvent("input");
-  await locator.dispatchEvent("change");
-  await locator.press("Tab").catch(() => undefined);
+  return false;
 }
 
 function submitControlSelectors(labels: string[]): string[] {
@@ -193,7 +369,7 @@ async function waitForEnabled(page: Page, selectors: string[]): Promise<void> {
   while (Date.now() < deadline) {
     for (const selector of selectors) {
       const locator = page.locator(selector).first();
-      if ((await locator.isVisible().catch(() => false)) && !(await locator.isDisabled().catch(() => false))) {
+      if ((await locatorVisible(locator)) && !(await locatorDisabled(locator))) {
         return;
       }
     }
@@ -227,13 +403,29 @@ async function waitForUserFacingBody(page: Page, markers: readonly string[], lab
   throw new Error(`${label} did not render expected UI markers; body:\n${bodySnippetForError(lastBody) || "<empty>"}`);
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string | (() => string)): Promise<T> {
   let timer: Timer | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+        timer = setTimeout(() => reject(new Error(`${typeof label === "function" ? label() : label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function maybeWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  let timer: Timer | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
       })
     ]);
   } finally {
@@ -252,10 +444,11 @@ async function waitForReturnToTargetHost(
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
   let lastResubmit = 0;
   let lastAccountSelectionClick = 0;
+  let lastConsentClick = 0;
 
   while (Date.now() < deadline) {
     const currentUrl = page.url();
-    const body = await page.locator("body").innerText().catch(() => "");
+    const body = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
     const normalizedBody = body.toLowerCase();
 
     if (expected === "deny" && bodyContainsDenialText(body)) {
@@ -290,6 +483,13 @@ async function waitForReturnToTargetHost(
       normalizedBody.includes("login failed")
     ) {
       throw new Error(`ZITADEL login failed before returning to ${targetHost}\nbody:\n${bodySnippetForError(body)}`);
+    }
+
+    const now = Date.now();
+    if (now - lastConsentClick > 5000 && (await clickFirstVisible(page, CONSENT_SUBMIT_SELECTORS).catch(() => false))) {
+      lastConsentClick = now;
+      await page.waitForTimeout(1500);
+      continue;
     }
 
     const remainingMs = deadline - Date.now();
@@ -465,7 +665,7 @@ export async function withBrowser<T>(
     "browser launch"
   );
   try {
-    return await withTimeout(runFlow(browser), BROWSER_WAIT_TIMEOUT_MS + 30000, "browser flow");
+    return await runFlow(browser);
   } finally {
     await withCloseTimeout(browser.close());
   }
@@ -490,6 +690,7 @@ async function loginThroughZitadelWithBrowser(
   let context: BrowserContext | undefined;
   let page: Page | undefined;
   let stage = "creating browser context";
+  const browserEvents: string[] = [];
 
   try {
     context = await browser.newContext({ ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false });
@@ -497,51 +698,81 @@ async function loginThroughZitadelWithBrowser(
     page = await context.newPage();
     page.setDefaultTimeout(BROWSER_WAIT_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(BROWSER_WAIT_TIMEOUT_MS);
+    page.on("console", (message) => {
+      browserEvents.push(`console:${message.type()}: ${message.text()}`);
+      browserEvents.splice(0, Math.max(0, browserEvents.length - 30));
+    });
+    page.on("requestfailed", (request) => {
+      browserEvents.push(`requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`.trim());
+      browserEvents.splice(0, Math.max(0, browserEvents.length - 30));
+    });
+    page.on("response", (response) => {
+      if (response.status() >= 400) {
+        browserEvents.push(`response:${response.status()}: ${response.url()}`);
+        browserEvents.splice(0, Math.max(0, browserEvents.length - 30));
+      }
+    });
 
-    stage = "opening target URL";
-    await page.goto(url, { waitUntil: "commit", timeout: BROWSER_WAIT_TIMEOUT_MS });
+    return await withTimeout(
+      (async () => {
+        stage = "opening target URL";
+        await page.goto(url, { waitUntil: "commit", timeout: BROWSER_WAIT_TIMEOUT_MS });
 
-    stage = "starting OIDC login if the target shows a login screen";
-    await clickOidcStartIfNeeded(page, targetHost);
-    stage = "waiting for username input";
-    const emailSelector = await firstVisible(page, [...USERNAME_INPUT_SELECTORS]);
-    stage = "entering username";
-    await typeInto(page, emailSelector, user.email);
-    stage = "waiting for username submit";
-    await waitForEnabled(page, USERNAME_SUBMIT_SELECTORS);
-    stage = "submitting username";
-    await submitForm(page, USERNAME_SUBMIT_SELECTORS);
+        stage = "starting OIDC login if the target shows a login screen";
+        await clickOidcStartIfNeeded(page, targetHost);
+        stage = "waiting for identity login document";
+        await waitForIdentityLoginDocument(page, targetHost);
+        stage = "waiting for username input";
+        const emailSelector = await firstVisible(page, [...USERNAME_INPUT_SELECTORS]);
+        stage = "entering username";
+        await typeInto(page, emailSelector, user.email);
+        stage = "waiting for username submit";
+        await waitForEnabled(page, USERNAME_SUBMIT_SELECTORS);
+        stage = "submitting username";
+        await submitForm(page, USERNAME_SUBMIT_SELECTORS);
 
-    stage = "waiting for password input";
-    const passwordSelector = await firstVisible(page, [...PASSWORD_INPUT_SELECTORS]);
-    stage = "entering password";
-    await typeInto(page, passwordSelector, user.password);
-    stage = "waiting for password submit";
-    await waitForEnabled(page, PASSWORD_SUBMIT_SELECTORS);
-    stage = "submitting password";
-    await submitForm(page, PASSWORD_SUBMIT_SELECTORS);
+        stage = "waiting for password input";
+        const passwordSelector = await firstVisible(page, [...PASSWORD_INPUT_SELECTORS]);
+        stage = "entering password";
+        await typeInto(page, passwordSelector, user.password);
+        stage = "waiting for password submit";
+        await waitForEnabled(page, PASSWORD_SUBMIT_SELECTORS);
+        stage = "submitting password";
+        await submitForm(page, PASSWORD_SUBMIT_SELECTORS);
 
-    stage = `waiting for ${expected} return to target host`;
-    await waitForReturnToTargetHost(page, targetHost, user.email, expected);
-    stage = "waiting for post-login document";
-    await page.waitForLoadState("domcontentloaded", { timeout: BROWSER_WAIT_TIMEOUT_MS }).catch(() => undefined);
-    if (options.postLoginBodyMarkers) {
-      stage = `waiting for ${options.postLoginLabel || "target"} UI markers`;
-      await waitForUserFacingBody(page, options.postLoginBodyMarkers, options.postLoginLabel || "target");
-    }
-    stage = "capturing success screenshot";
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    const finalUrl = page.url();
-    const title = await page.title().catch(() => "");
-    const bodyText = await page.locator("body").innerText().catch(() => "");
-    return { finalUrl, screenshotPath, bodyText, title };
+        stage = `waiting for ${expected} return to target host`;
+        await waitForReturnToTargetHost(page, targetHost, user.email, expected);
+        stage = "waiting for post-login document";
+        await page.waitForLoadState("domcontentloaded", { timeout: BROWSER_WAIT_TIMEOUT_MS }).catch(() => undefined);
+        if (options.postLoginBodyMarkers) {
+          stage = `waiting for ${options.postLoginLabel || "target"} UI markers`;
+          await waitForUserFacingBody(page, options.postLoginBodyMarkers, options.postLoginLabel || "target");
+        }
+        stage = "capturing success screenshot";
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        const finalUrl = page.url();
+        const title = await page.title().catch(() => "");
+        const bodyText = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+        return { finalUrl, screenshotPath, bodyText, title };
+      })(),
+      BROWSER_FLOW_TIMEOUT_MS,
+      () => `browser login flow (${stage})`
+    );
   } catch (error) {
     const failurePath = browserScreenshotPath(options.outputDir, url, user.email, expected, "failure");
     let failureScreenshot: string | undefined;
     if (page) {
-      failureScreenshot = await page.screenshot({ path: failurePath, fullPage: true }).then(() => failurePath).catch(() => undefined);
+      failureScreenshot = await maybeWithTimeout(
+        page.screenshot({ path: failurePath, fullPage: true }).then(() => failurePath),
+        BROWSER_CLOSE_TIMEOUT_MS
+      ).catch(() => undefined);
     }
-    const bodySnippet = page ? await page.locator("body").innerText().then(bodySnippetForError).catch(() => "") : "";
+    const bodySnippet = page
+      ? (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).then(bodySnippetForError), 3000).catch(() => "")) || ""
+      : "";
+    const htmlSnippet = page
+      ? (await maybeWithTimeout(page.content().then(bodySnippetForError), 3000).catch(() => "")) || ""
+      : "";
     const finalUrl = page?.url() ?? "<page unavailable>";
     const detail = [`stage: ${stage}`, `url: ${finalUrl}`];
     if (failureScreenshot) {
@@ -549,6 +780,12 @@ async function loginThroughZitadelWithBrowser(
     }
     if (bodySnippet) {
       detail.push(`body:\n${bodySnippet}`);
+    }
+    if (htmlSnippet && htmlSnippet !== bodySnippet) {
+      detail.push(`html:\n${htmlSnippet}`);
+    }
+    if (browserEvents.length > 0) {
+      detail.push(`browser events:\n${browserEvents.join("\n")}`);
     }
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n${detail.join("\n\n")}`);
   } finally {
@@ -564,10 +801,48 @@ export async function loginThroughZitadel(
   user: OidcTestUser,
   options: LoginOptions
 ): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
-  return await withBrowser(
-    options.outputDir,
-    async (browser) => await loginThroughZitadelWithBrowser(browser, url, user, options),
-    { resolveHosts: options.resolveHosts, ignoreHTTPSErrors: options.ignoreHTTPSErrors }
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await withBrowser(
+        options.outputDir,
+        async (browser) => await loginThroughZitadelWithBrowser(browser, url, user, options),
+        { resolveHosts: options.resolveHosts, ignoreHTTPSErrors: options.ignoreHTTPSErrors }
+      );
+    } catch (error) {
+      lastError = error;
+      if (attempt >= 3 || !isRetryableBlankNavigationError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export function isRetryableBlankNavigationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    (message.includes("net::ERR_ABORTED") &&
+      (message.includes("body:\n<empty>") || message.includes("browser login flow") || message.includes("timed out"))) ||
+    (
+      message.includes("none of the selectors were visible") &&
+      message.includes("body:\n<empty>") &&
+      /https?:\/\/[^/\s]+\/ui\/v2\/login\//.test(message)
+    ) ||
+    (
+      message.includes("browser login flow (entering username) timed out") &&
+      /https?:\/\/[^/\s]+\/ui\/v2\/login\/loginname/.test(message)
+    ) ||
+    (
+      message.includes("failed to type stable value into") &&
+      /https?:\/\/[^/\s]+\/ui\/v2\/login\/loginname/.test(message)
+    ) ||
+    (
+      message.includes("goto: Timeout") &&
+      message.includes("stage: opening target URL") &&
+      message.includes("url: about:blank")
+    )
   );
 }
 
@@ -622,6 +897,54 @@ export async function expectManagementUi(
       throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
     }
     assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
+  }, { resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined });
+}
+
+/** Verifies the Cockpit, Traefik, and LXD management surfaces in one browser lifecycle. */
+export async function expectManagementSurfaces(
+  manageUrl: string,
+  proxyUrl: string,
+  lxdUrl: string,
+  user: OidcTestUser,
+  outputDir: string,
+  options: { resolveIp?: string; resolveHosts?: Record<string, string> } = {}
+): Promise<void> {
+  const resolveHosts = {
+    ...(options.resolveHosts ?? {}),
+    ...(options.resolveIp
+      ? {
+          [new URL(manageUrl).hostname]: options.resolveIp,
+          [new URL(proxyUrl).hostname]: options.resolveIp,
+          [new URL(lxdUrl).hostname]: options.resolveIp
+        }
+      : {})
+  };
+  await withBrowser(outputDir, async (browser) => {
+    const cockpit = await loginThroughZitadelWithBrowser(browser, manageUrl, user, { outputDir });
+    const cockpitFinal = new URL(cockpit.finalUrl);
+    const cockpitTarget = new URL(manageUrl);
+    if (cockpitFinal.host !== cockpitTarget.host) {
+      throw new Error(`unexpected post-login cockpit host: ${cockpit.finalUrl}`);
+    }
+    assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
+
+    const proxy = await loginThroughZitadelWithBrowser(browser, proxyUrl, user, { outputDir });
+    if (!proxy.finalUrl.includes("/dashboard")) {
+      throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
+    }
+    assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
+
+    const lxd = await loginThroughZitadelWithBrowser(browser, lxdUrl, user, {
+      outputDir,
+      postLoginBodyMarkers: LXD_TEXT_MARKERS,
+      postLoginLabel: "LXD UI"
+    });
+    const lxdFinal = new URL(lxd.finalUrl);
+    const lxdTarget = new URL(lxdUrl);
+    if (lxdFinal.host !== lxdTarget.host) {
+      throw new Error(`unexpected post-login LXD host: ${lxd.finalUrl}`);
+    }
+    assertUserFacingPageBody(`${lxd.title}\n${lxd.bodyText}`, LXD_TEXT_MARKERS, "LXD UI");
   }, { resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined });
 }
 

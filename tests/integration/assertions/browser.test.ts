@@ -6,6 +6,7 @@ import {
   bodyContainsHttpErrorText,
   browserScreenshotPath,
   formatDeniedTargetRouteFailure,
+  isRetryableBlankNavigationError,
   isLoginOrOauthCallbackPlumbingPath,
   isTargetApplicationPage
 } from "./browser";
@@ -21,6 +22,7 @@ describe("browser assertion helpers", () => {
     expect(bodyContainsHttpErrorText("502 Bad Gateway")).toBe(true);
     expect(bodyContainsHttpErrorText("Cockpit\nUsername\nPassword")).toBe(false);
     expect(bodyContainsAnyMarker("Traefik Dashboard", ["Traefik", "Routers"])).toBe(true);
+    expect(bodyContainsAnyMarker("terrarium-primary\nUbuntu 24.04.3 LTS", ["Cockpit", "Ubuntu 24.04"])).toBe(true);
     expect(bodyContainsAnyMarker("blank page", ["Traefik", "Routers"])).toBe(false);
   });
 
@@ -53,5 +55,56 @@ describe("browser assertion helpers", () => {
     expect(message).toContain("browser reached the target host without denial text");
     expect(message).toContain("final url: https://app.example.test/protected");
     expect(message).toContain("terrarium-proxy-ok");
+  });
+
+  test("retries blank ZITADEL login documents without retrying visible form failures", () => {
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "none of the selectors were visible: input[type=\"password\"]",
+            "current URL: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123",
+            "body:\n<empty>"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "none of the selectors were visible: input[type=\"password\"]",
+            "current URL: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123",
+            "body:\nLogin failed"
+          ].join("\n")
+        )
+      )
+    ).toBe(false);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "browser login flow (entering username) timed out after 180000ms",
+            "stage: entering username",
+            "url: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "goto: Timeout 120000ms exceeded.",
+            'Call log: - navigating to "https://group.example.test/", waiting until "commit"',
+            "stage: opening target URL",
+            "url: about:blank"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
   });
 });

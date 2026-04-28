@@ -20,6 +20,8 @@ export type HetznerVolumeCreated = { id: number; name: string; linuxDevice?: str
 
 const VOLUME_DELETE_ATTEMPTS = 12;
 const VOLUME_DELETE_RETRY_MS = 5000;
+const SERVER_CREATE_ATTEMPTS = 5;
+const SERVER_CREATE_RETRY_MS = 15000;
 
 function normalizePublicKey(value: string): string {
   return value
@@ -27,6 +29,10 @@ function normalizePublicKey(value: string): string {
     .split(/\s+/)
     .slice(0, 2)
     .join(" ");
+}
+
+function isPlacementUnavailable(status: number, body: string): boolean {
+  return status === 412 && body.includes("resource_unavailable");
 }
 
 /**
@@ -42,6 +48,7 @@ export class HetznerCloudProvider {
   private readonly requestTimeoutMs = 30000;
   private readonly maxAttempts = 8;
   private resolvedLocationName = "";
+  private resolvedLocationNames: string[] = [];
 
   constructor(config: IntegrationConfig, logger: IntegrationLogger) {
     this.token = config.hcloudToken;
@@ -84,17 +91,18 @@ export class HetznerCloudProvider {
     return (await response.json()) as T;
   }
 
-  private async resolveLocationName(): Promise<string> {
-    if (this.resolvedLocationName) {
-      return this.resolvedLocationName;
+  private async resolveLocationNames(): Promise<string[]> {
+    if (this.resolvedLocationNames.length > 0) {
+      return this.resolvedLocationNames;
     }
 
     const response = await this.request<{ locations?: HetznerLocation[] }>("GET", "/locations");
     const locations = response.locations ?? [];
     const exact = locations.find((location) => location.name === this.requestedLocation);
     if (exact) {
+      this.resolvedLocationNames = [exact.name];
       this.resolvedLocationName = exact.name;
-      return this.resolvedLocationName;
+      return this.resolvedLocationNames;
     }
 
     const matchingZone = locations
@@ -102,12 +110,20 @@ export class HetznerCloudProvider {
       .sort((left, right) => left.name.localeCompare(right.name));
     if (matchingZone.length > 0) {
       const preferred = matchingZone.find((location) => location.name === "nbg1") ?? matchingZone[0];
-      this.resolvedLocationName = preferred.name;
-      this.logger.info(`resolved Hetzner network zone ${this.requestedLocation} to location ${this.resolvedLocationName}`);
-      return this.resolvedLocationName;
+      this.resolvedLocationNames = [preferred, ...matchingZone.filter((location) => location.name !== preferred.name)].map(
+        (location) => location.name
+      );
+      this.resolvedLocationName = this.resolvedLocationNames[0] ?? "";
+      this.logger.info(`resolved Hetzner network zone ${this.requestedLocation} to locations ${this.resolvedLocationNames.join(", ")}`);
+      return this.resolvedLocationNames;
     }
 
     throw new Error(`unable to resolve Hetzner location ${this.requestedLocation}`);
+  }
+
+  private async resolveLocationName(): Promise<string> {
+    const locations = await this.resolveLocationNames();
+    return this.resolvedLocationName || locations[0] || "";
   }
 
   async createSshKey(name: string, publicKey: string): Promise<HetznerSshKeyHandle> {
@@ -153,15 +169,41 @@ export class HetznerCloudProvider {
     labels: Record<string, string>,
     onCreated?: (server: HetznerServerCreated) => void | Promise<void>
   ): Promise<ServerRecord> {
-    const resolvedLocation = await this.resolveLocationName();
-    const response = await this.request<HetznerServerResponse>("POST", "/servers", {
-      name,
-      server_type: serverType,
-      image: "ubuntu-24.04",
-      location: resolvedLocation || location,
-      ssh_keys: sshKeyIds,
-      labels
-    });
+    const locationCandidates = await this.resolveLocationNames();
+
+    let response: HetznerServerResponse | null = null;
+    for (let attempt = 1; attempt <= SERVER_CREATE_ATTEMPTS; attempt += 1) {
+      const candidateLocation = locationCandidates[(attempt - 1) % locationCandidates.length] || location;
+      const body = {
+        name,
+        server_type: serverType,
+        image: "ubuntu-24.04",
+        location: candidateLocation,
+        ssh_keys: sshKeyIds,
+        labels
+      };
+      const raw = await this.requestResponse("POST", "/servers", body);
+      if (raw.ok) {
+        response = (await raw.json()) as HetznerServerResponse;
+        this.resolvedLocationName = candidateLocation;
+        break;
+      }
+
+      const errorBody = await raw.text();
+      if (attempt < SERVER_CREATE_ATTEMPTS && isPlacementUnavailable(raw.status, errorBody)) {
+        this.logger.warn(
+          `Hetzner server placement unavailable in ${candidateLocation}; retrying create in ${SERVER_CREATE_RETRY_MS}ms`
+        );
+        await Bun.sleep(SERVER_CREATE_RETRY_MS);
+        continue;
+      }
+      throw new Error(`Hetzner API POST /servers failed with HTTP ${raw.status}: ${errorBody}`);
+    }
+
+    if (!response) {
+      throw new Error("Hetzner API POST /servers failed without a response");
+    }
+
     if (response.action) {
       this.logger.info(
         `created Hetzner server ${response.server.id} with action ${response.action.id}; waiting for server readiness instead of action completion`

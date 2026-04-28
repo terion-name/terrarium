@@ -213,9 +213,27 @@
         (
           terrarium_lxd_zitadel_outputs.lxd_client_id.value
           if terrarium_idp_mode == 'local'
-          else terrarium_oidc_client_id
+          else ((terrarium_lxd_oidc_client_id | default('', true)) or terrarium_oidc_client_id)
         ) | default('', true)
       }}
+
+- name: Resolve LXD OIDC client secret
+  ansible.builtin.set_fact:
+    terrarium_lxd_oidc_client_secret_effective: >-
+      {{
+        (
+          (
+            terrarium_lxd_oidc_client_secret | default('', true)
+          ) or (
+            terrarium_oidc_client_secret
+            if (terrarium_lxd_oidc_client_id | default('', true) | length == 0)
+            else ''
+          )
+        )
+        if terrarium_idp_mode == 'oidc'
+        else ''
+      }}
+  no_log: true
 
 - name: Configure OIDC client ID when provided
   ansible.builtin.command: "/snap/bin/lxc config set oidc.client.id {{ terrarium_lxd_oidc_client_id_effective }}"
@@ -229,7 +247,7 @@
       ansible.builtin.copy:
         dest: /run/terrarium-lxd-oidc-client-secret.json
         mode: "0600"
-        content: "{{ {'config': {'oidc.client.secret': terrarium_oidc_client_secret}} | to_json }}"
+        content: "{{ {'config': {'oidc.client.secret': terrarium_lxd_oidc_client_secret_effective}} | to_json }}"
 
     - name: Apply LXD OIDC client secret patch
       ansible.builtin.command:
@@ -253,12 +271,12 @@
         state: absent
   when:
     - terrarium_idp_mode == 'oidc'
-    - terrarium_oidc_client_secret | length > 0
+    - terrarium_lxd_oidc_client_secret_effective | length > 0
   no_log: true
 
-- name: Clear external OIDC client secret when using local IDP
+- name: Clear LXD OIDC client secret when not configured
   ansible.builtin.command: /snap/bin/lxc config unset oidc.client.secret
-  when: terrarium_idp_mode == 'local'
+  when: terrarium_idp_mode == 'local' or terrarium_lxd_oidc_client_secret_effective | default('', true) | length == 0
   changed_when: false
   failed_when: false
 

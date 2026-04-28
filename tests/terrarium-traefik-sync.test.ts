@@ -116,8 +116,11 @@ describe("terrarium route auth generation", () => {
       `redirect_url = "https://app.example.test${adminProfile.callbackPath}"`
     );
     expect(profileConfigs[adminProfile.containerName]).toContain('allowed_groups = [ "admins" ]');
+    expect(profileConfigs[adminProfile.containerName]).toContain(`cookie_name = "_terrarium_route_${adminProfile.containerName.replace(/^route-/, "")}"`);
     expect(profileConfigs[signedInProfile.containerName]).toContain(`proxy_prefix = "${signedInProfile.proxyPrefix}"`);
+    expect(profileConfigs[signedInProfile.containerName]).toContain(`cookie_name = "_terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
     expect(profileConfigs[signedInProfile.containerName]).not.toContain("allowed_groups");
+    expect(profileConfigs[adminProfile.containerName]).not.toContain(`cookie_name = "_terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
   });
 
   test("generates policy-specific forwardAuth middleware and oauth callback routes without query policy", () => {
