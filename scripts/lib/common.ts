@@ -62,7 +62,7 @@ export function writeIfChanged(path: string, content: string, options: WriteIfCh
   // Write into a sibling temp directory outside the watched target directory so
   // file watchers such as Traefik do not try to parse half-written temp files.
   const parentDir = dirname(targetDir);
-  const tempRoot = join(parentDir === targetDir ? targetDir : parentDir, ".codex-tmp");
+  const tempRoot = join(parentDir === targetDir ? targetDir : parentDir, ".terrarium-tmp");
   mkdirSync(tempRoot, { recursive: true, mode: options.directoryMode });
   applyMode(tempRoot, options.directoryMode);
   const tempPath = join(tempRoot, `.${basename(path)}.${process.pid}.tmp`);
