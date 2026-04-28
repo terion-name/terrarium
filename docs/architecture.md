@@ -29,7 +29,7 @@ Terrarium is split into four layers:
 - Traefik is the only public web entrypoint.
 - Cockpit listens on loopback and is reverse-proxied through Traefik.
 - A host-level `oauth2-proxy` instance also listens on loopback and is published through same-domain `/oauth2/*` routes on both the Cockpit and Traefik dashboard hostnames.
-- LXD listens on loopback and is exposed through Traefik TCP passthrough so LXD keeps control of its own API/UI auth model.
+- LXD listens on loopback and is reverse-proxied through Traefik on the public LXD hostname. LXD still owns its native API/UI OIDC auth model.
 - Self-hosted ZITADEL, when enabled, is also published through Traefik.
 - UFW defaults to deny incoming and allow outgoing. Terrarium explicitly opens only the expected public ports, then adds or removes dynamic TCP/UDP rules for container-level proxy exposure.
 
@@ -51,7 +51,7 @@ This is especially useful for complex or messy environments. Even when a workloa
 - Cockpit is now gated by host-level OIDC through Traefik `ForwardAuth` and `oauth2-proxy`.
 - Only members of `terrarium_admin_group` are allowed through the OIDC gate for Cockpit and LXD management access.
 - Cockpit still authenticates against the host's local PAM accounts after the OIDC gate, so `root` needs a usable local password for Cockpit login.
-- If root does not already have one, Terrarium prompts for a password during interactive install or requires `--root-pwd` in non-interactive mode.
+- If root does not already have one, Terrarium prompts for a password during interactive install or requires `--root-pwd-file` or `--root-pwd` in non-interactive mode.
 - IDP mode has two variants:
   - `local`: Terrarium deploys ZITADEL and derives the OIDC issuer from the Terrarium auth domain.
   - `oidc`: Terrarium uses an external OIDC issuer and stores the issuer URL plus client credentials.
@@ -74,10 +74,10 @@ This is especially useful for complex or messy environments. Even when a workloa
   - `tcp://hostport:containerport`
   - `udp://hostport:containerport`
 - The sync job renders Traefik dynamic config, extends static Traefik entrypoints when raw TCP/UDP ports are needed, and reconciles Terrarium-managed UFW rules for those dynamic ports.
-- For auth-protected published routes, the sync job also reconciles a host-side oauth2-proxy route-auth stack and publishes a shared callback under `https://manage.<domain>/oauth2/app/callback`.
+- For auth-protected published routes, the sync job also reconciles a host-side oauth2-proxy route-auth stack and publishes per-route callbacks under `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
 - `@auth` means “any authenticated user”.
 - `@auth:group1,group2` means “any authenticated user in at least one listed group”.
-- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so that the shared callback and cookie domain remain valid. If no root domain is configured, only the `manage` hostname qualifies.
+- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so the shared cookie domain remains valid. If no root domain is configured, only the `manage` hostname qualifies.
 
 The key behavior for non-experts is simple:
 

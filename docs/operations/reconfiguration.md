@@ -8,6 +8,8 @@ Terrarium is meant to be changed in place. You do not reinstall the host every t
 - persisted config: `/etc/terrarium/config.yaml`
 
 `terrariumctl set ...` updates the persisted config and then runs local reconciliation.
+Those day-2 updates skip the heavy OS hardening pass, because hardening is
+already applied during install and full `terrariumctl reconfigure` runs.
 
 ## Main Reconfiguration Commands
 
@@ -63,23 +65,32 @@ terrariumctl set idp local
 External OIDC:
 
 ```bash
+install -m 600 /dev/null /root/terrarium-oidc-secret
+printf '%s\n' 'super-secret' > /root/terrarium-oidc-secret
+
 terrariumctl set idp oidc \
   --oidc https://issuer.example.com \
   --oidc-client terrarium \
-  --oidc-secret 'super-secret' \
+  --oidc-secret-file /root/terrarium-oidc-secret \
   --admin-group terrarium-admins
 ```
+
+If LXD needs a separate OIDC client, add `--lxd-oidc-client` and
+`--lxd-oidc-secret-file`.
 
 ### Enable S3 Backups
 
 ```bash
+install -m 600 /dev/null /root/terrarium-s3-secret
+printf '%s\n' 'replace-with-real-secret' > /root/terrarium-s3-secret
+
 terrariumctl set s3 \
   --enable \
   --s3-endpoint https://nbg1.your-objectstorage.com \
   --s3-bucket terrarium-backups \
   --s3-region eu-central \
   --s3-access-key ... \
-  --s3-secret-key ...
+  --s3-secret-key-file /root/terrarium-s3-secret
 ```
 
 ### Enable Syncoid

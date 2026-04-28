@@ -62,7 +62,7 @@ That means:
 If `root` does not already have one:
 
 - interactive install prompts for it
-- non-interactive install requires `--root-pwd`
+- non-interactive install requires `--root-pwd-file` or `--root-pwd`
 
 Terrarium uses that password during provisioning and does not store the plaintext in `/etc/terrarium/config.yaml`.
 
@@ -100,14 +100,14 @@ You must provide:
 
 - `--oidc`
 - `--oidc-client`
-- `--oidc-secret`
+- `--oidc-secret-file` or `--oidc-secret`
 - `--admin-group`
 
 Requirements for the external provider:
 
 - allow `https://<manage-domain>/oauth2/callback`
-- allow `https://<manage-domain>/oauth2/app/callback` if you want to protect published app routes with `@auth`
 - allow `https://<lxd-domain>/oidc/callback`
+- allow each generated `https://<route-host>/oauth2/route/<generated-route-id>/callback` if you want to protect published app routes with `@auth`
 - emit a `groups` claim as a JSON string array containing the configured admin group
 
 Terrarium reuses the same external OIDC client for:
@@ -115,6 +115,10 @@ Terrarium reuses the same external OIDC client for:
 - Cockpit's oauth2-proxy
 - LXD
 - published HTTP(S) routes protected with `@auth`
+
+If your identity provider requires a separate client for LXD, pass
+`--lxd-oidc-client` and `--lxd-oidc-secret-file`. For automation, prefer
+secret-file flags over argv secrets.
 
 ## Admin Group
 

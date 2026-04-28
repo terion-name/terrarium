@@ -38,7 +38,7 @@ When you add `@auth` to a route, Terrarium automatically:
 - keeps Traefik in front of the container
 - adds OIDC sign-in through the host's configured identity provider
 - reuses the Terrarium auth stack instead of asking you to deploy your own
-- handles callback routing on the management domain
+- handles callback routing on the protected route hostname
 - applies group checks if you listed groups
 
 So the workflow is just:
@@ -97,20 +97,28 @@ terrariumctl proxy sync
 
 ### If you use `--idp=oidc`
 
-Terrarium can still protect published routes, but your external OIDC client must allow this callback:
+Terrarium can still protect published routes, but your external OIDC client must allow each protected route callback:
 
 ```text
-https://manage.<your-domain>/oauth2/app/callback
+https://<route-host>/oauth2/route/<generated-route-id>/callback
 ```
 
-Terrarium reuses the same external OIDC client for Cockpit, LXD, and route protection, so this callback is an addition to the normal management callbacks rather than a separate app.
+Terrarium reuses the same external OIDC client for Cockpit and route
+protection, so these route callbacks are additions to the normal management
+callback rather than separate apps. The route id is deterministic for the route
+host and group policy, but the safest operator workflow is to read the rendered
+`redirect_url` values after `terrariumctl proxy sync`:
+
+```bash
+grep -R '^redirect_url' /var/lib/terrarium/oauth2-proxy-routes/*.cfg
+```
 
 If you use group-restricted routes, your provider must also include a `groups` claim.
 
 One-time checklist for external OIDC:
 
 1. set the issuer, client ID, and client secret in Terrarium
-2. allow `https://manage.<your-domain>/oauth2/app/callback` in your OIDC client
+2. add the rendered route `redirect_url` values to your OIDC client
 3. make sure your provider sends a `groups` claim if you use `@auth:group1,group2`
 
 ## Group-Based Access
@@ -134,10 +142,10 @@ Use groups when:
 
 ## Important Limitation
 
-Published-route auth currently works only for hosts on your Terrarium root domain or its subdomains, because Terrarium uses the shared callback:
+Published-route auth currently works only for hosts on your Terrarium root domain or its subdomains, because Terrarium uses a shared cookie domain across protected route hosts:
 
 ```text
-https://manage.<domain>/oauth2/app/callback
+https://<route-host>/oauth2/route/<generated-route-id>/callback
 ```
 
 So routes like these are fine:
@@ -153,26 +161,20 @@ One important default to keep in mind: if you installed Terrarium without a cust
 
 ## How the Callback Works
 
-The callback does not need to live on the same hostname as the protected app.
-
-With Terrarium, the sign-in callback for published apps lives on:
+With Terrarium, the sign-in callback for a protected app lives on that app's hostname under a Terrarium-owned path:
 
 ```text
-https://manage.<domain>/oauth2/app/callback
+https://app.example.com/oauth2/route/<generated-route-id>/callback
 ```
-
-That does not mean users stay on `manage.<domain>`.
 
 The flow is:
 
 1. a user opens `https://app.example.com`
 2. Terrarium redirects them to sign in
-3. the identity provider sends them back to `https://manage.example.com/oauth2/app/callback`
+3. the identity provider sends them back to `https://app.example.com/oauth2/route/<generated-route-id>/callback`
 4. Terrarium finishes the login and then sends them back to the original app URL
 
-So a user can start on `https://app.example.com`, briefly pass through the shared callback on `https://manage.example.com`, and then land back on `https://app.example.com`.
-
-This shared callback is exactly why route protection works well for `*.your-domain` apps, but is not meant for unrelated domains.
+The callback path is handled by Terrarium's route-auth oauth2-proxy, not by the app running inside the container.
 
 ## Quick Example
 
@@ -202,7 +204,7 @@ If a protected route does not work:
 - make sure the route host is on your Terrarium root domain
 - run `terrariumctl proxy sync`
 - check `terrariumctl status`
-- if you use external OIDC, verify that `https://manage.<domain>/oauth2/app/callback` is allowed in the client config
+- if you use external OIDC, verify that every rendered route `redirect_url` is allowed in the client config
 - if you use group restrictions, verify your token includes a `groups` claim with the expected group names
 
 ## Practical Advice

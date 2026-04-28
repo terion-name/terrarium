@@ -45,11 +45,15 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/ins
 Non-interactive mode is for automation, templates, or repeated installs:
 
 ```bash
+install -m 600 /dev/null /root/terrarium-root-password
+printf '%s\n' 'replace-with-a-real-root-password' > /root/terrarium-root-password
+
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
   --non-interactive \
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \
+  --root-pwd-file /root/terrarium-root-password \
   --storage-mode file \
   --yes
 ```
@@ -77,6 +81,7 @@ Important notes:
 The installer will guide you through:
 
 - contact email and ACME email
+- root password setup for Cockpit when the host does not already have a usable local root password
 - domain setup
 - IDP mode:
   - `local` for self-hosted ZITADEL
@@ -87,10 +92,19 @@ The installer will guide you through:
 
 Terrarium also verifies the most failure-prone integrations while you configure them:
 
+- password and secret prompts are masked in interactive mode
 - external OIDC settings are probed against the issuer, callback flow, and client credentials before install continues
 - S3 settings are tested with a real write/delete probe against the configured bucket
 
 In interactive mode, failed verification sends you back to the relevant prompts. In non-interactive mode, install exits with an error instead of persisting broken settings.
+
+For non-interactive automation, prefer file-based secret inputs so secrets do not
+travel through shell history or process arguments:
+
+- `--root-pwd-file`
+- `--oidc-secret-file`
+- `--lxd-oidc-secret-file` when using a separate LXD OIDC client
+- `--s3-secret-key-file`
 
 ## After Install
 

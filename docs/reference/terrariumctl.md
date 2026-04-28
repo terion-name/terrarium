@@ -42,6 +42,9 @@
 | `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
 | `--oidc-secret` | client secret | yes when `--idp=oidc` and `--oidc-secret-file` is omitted; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy, LXD, and published-route auth. Prefer `--oidc-secret-file` for automation. |
 | `--oidc-secret-file` | path | yes when `--idp=oidc` and `--oidc-secret` is omitted; no otherwise | none | Reads the external OIDC client secret from a root-readable file. |
+| `--lxd-oidc-client` | client ID | no | falls back to `--oidc-client` | Uses a separate external OIDC client for LXD. |
+| `--lxd-oidc-secret` | client secret | no | falls back to `--oidc-secret` | Sets the separate LXD OIDC client secret. Prefer `--lxd-oidc-secret-file` for automation. |
+| `--lxd-oidc-secret-file` | path | no | none | Reads the separate LXD OIDC client secret from a root-readable file. |
 | `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
 | `--root-pwd` | password | yes in non-interactive mode when root has no usable local password; no otherwise | existing root password if already set, otherwise prompted in interactive mode | Sets or updates the root password used for Cockpit login. |
@@ -57,16 +60,18 @@
 | `--s3-access-key` | access key | yes if `--enable-s3` is set | none | Sets the S3 access key. |
 | `--s3-secret-key` | secret key | yes if `--enable-s3` is set and `--s3-secret-key-file` is omitted | none | Sets the S3 secret key. Prefer `--s3-secret-key-file` for automation. |
 | `--s3-secret-key-file` | path | yes if `--enable-s3` is set and `--s3-secret-key` is omitted | none | Reads the S3 secret key from a root-readable file. |
-
-Install verification notes:
-
-- In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials.
-- In interactive mode, S3 is not accepted until Terrarium can reach the bucket and complete a write/delete verification object cycle.
-- In non-interactive mode, the same checks run once and the install exits on failure.
 | `--enable-syncoid` | none | no | disabled | Enables syncoid replication to a second ZFS host. |
 | `--syncoid-target` | host | yes if `--enable-syncoid` is set | none | Sets the remote SSH target for syncoid replication. |
 | `--syncoid-target-dataset` | dataset | yes if `--enable-syncoid` is set | `backup/terrarium` in interactive prompts | Sets the remote target dataset for syncoid replication. |
 | `--syncoid-ssh-key` | path | yes if `--enable-syncoid` is set | `/root/.ssh/id_ed25519` in interactive prompts | Sets the SSH key used for syncoid replication. |
+
+Install verification notes:
+
+- Interactive password and secret prompts are masked.
+- For automation, prefer `--root-pwd-file`, `--oidc-secret-file`, `--lxd-oidc-secret-file`, and `--s3-secret-key-file` over argv secrets.
+- In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials.
+- In interactive mode, S3 is not accepted until Terrarium can reach the bucket and complete a write/delete verification object cycle.
+- In non-interactive mode, the same checks run once and the install exits on failure.
 
 ## backup restore
 
@@ -169,7 +174,11 @@ Behavior:
 | `--admin-group` | group name | required when mode is `oidc`; optional otherwise | existing configured value, or `terrarium-admins` when mode is `local` | Sets the management admin group for Cockpit and LXD authorization. |
 | `--oidc` | issuer URL | required when mode is `oidc` and no issuer is already configured | existing configured issuer, or derived from `auth-domain` when mode is `local` | Sets the OIDC issuer URL. |
 | `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID shared by Cockpit's oauth2-proxy, LXD, and published-route auth. |
-| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured | existing configured value | Sets the external OIDC client secret shared by Cockpit's oauth2-proxy, LXD, and published-route auth. |
+| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured and `--oidc-secret-file` is omitted | existing configured value | Sets the external OIDC client secret shared by Cockpit's oauth2-proxy, LXD, and published-route auth. Prefer `--oidc-secret-file` for automation. |
+| `--oidc-secret-file` | path | required when mode is `oidc`, no client secret is already configured, and `--oidc-secret` is omitted | none | Reads the external OIDC client secret from a root-readable file. |
+| `--lxd-oidc-client` | client ID | no | falls back to `--oidc-client` | Uses a separate external OIDC client for LXD. |
+| `--lxd-oidc-secret` | client secret | no | falls back to `--oidc-secret` | Sets the separate LXD OIDC client secret. Prefer `--lxd-oidc-secret-file` for automation. |
+| `--lxd-oidc-secret-file` | path | no | none | Reads the separate LXD OIDC client secret from a root-readable file. |
 | `--zitadel-admin-email` | email address | no | existing configured value or `--email` | Updates the ZITADEL bootstrap admin email when mode is `local`. |
 
 External OIDC notes:
@@ -177,10 +186,11 @@ External OIDC notes:
 - Terrarium configures both Cockpit's oauth2-proxy and LXD from the same external issuer and client settings.
 - The external client must allow:
   - `https://<manage-domain>/oauth2/callback`
-  - `https://<manage-domain>/oauth2/app/callback` if you want published-route auth with `@auth`
   - `https://<lxd-domain>/oidc/callback`
+- Published-route auth with `@auth` also requires the external client to allow each generated route callback, rendered as `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
 - The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
 - `terrariumctl set idp oidc ...` verifies the issuer, callback flow, and client credentials before persisting the new settings.
+- If your provider needs separate OIDC clients for Cockpit/published routes and LXD, pass `--lxd-oidc-client` plus `--lxd-oidc-secret-file`.
 
 Local ZITADEL notes:
 
@@ -199,7 +209,8 @@ Local ZITADEL notes:
 | `--s3-region` | region name | no | existing configured value | Updates the S3 region. |
 | `--s3-prefix` | prefix | no | existing configured value or `terrarium` | Updates the S3 object prefix. |
 | `--s3-access-key` | access key | required when S3 is enabled | existing configured value | Updates the S3 access key. |
-| `--s3-secret-key` | secret key | required when S3 is enabled | existing configured value | Updates the S3 secret key. |
+| `--s3-secret-key` | secret key | required when S3 is enabled and no existing secret is configured and `--s3-secret-key-file` is omitted | existing configured value | Updates the S3 secret key. Prefer `--s3-secret-key-file` for automation. |
+| `--s3-secret-key-file` | path | required when S3 is enabled, no existing secret is configured, and `--s3-secret-key` is omitted | none | Reads the S3 secret key from a root-readable file. |
 
 S3 verification notes:
 
