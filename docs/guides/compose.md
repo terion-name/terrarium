@@ -81,6 +81,19 @@ You do not need a separate reverse-proxy stack inside every container unless the
 5. Add a `user.proxy` label for the route you want to expose.
 6. Snapshot the container once the deployment reaches a stable state.
 
+## When You Outgrow Hand-Managed Compose
+
+The pattern above is intentionally simple: one container, one Docker daemon, one Compose stack or a small group of related services.
+
+If you want to manage many stacks from a browser UI, add remote Docker hosts, trigger deploys from Git, inspect logs, and hand app deployment to a higher-level control plane, use [Dokploy on Terrarium](./dokploy).
+
+The useful mental model is:
+
+- plain Compose guide: each LXC is the app boundary
+- Dokploy guide: each LXC can become a Dokploy “server” that runs many Docker deployments
+
+That lets you keep Terrarium's isolation and time-machine model while using Dokploy for day-to-day app deployment.
+
 ## If You Want To Disable Docker-Friendly Features
 
 Some people will prefer a stricter baseline for containers that should never run nested container runtimes.

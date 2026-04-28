@@ -69,6 +69,7 @@ export default defineConfig({
           { text: "Hermes", link: "/guides/hermes" },
           { text: "VSCodium Web IDE", link: "/guides/vscode" },
           { text: "Isolated Docker Compose deployments", link: "/guides/compose" },
+          { text: "Dokploy", link: "/guides/dokploy" },
           { text: "Protecting published services with OIDC", link: "/guides/auth-protection" }
         ]
       },
