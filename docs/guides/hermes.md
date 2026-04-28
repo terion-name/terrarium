@@ -19,14 +19,14 @@ In the LXD UI:
 
 1. Open `https://lxd.<your-domain>` and log in.
 2. Create a new instance from the `images:ubuntu/24.04` image.
-3. Attach the `terrarium` profile so the container gets Terrarium's storage and isolation settings.
+3. Use the default profile so the container gets Terrarium's storage and isolation settings.
 4. Name it `hermes`.
 5. Start the container.
 
 From the CLI:
 
 ```bash
-lxc launch images:ubuntu/24.04 hermes --profile terrarium
+lxc launch images:ubuntu/24.04 hermes
 ```
 
 ## Recommended setup: enter the container and do the human part there
@@ -129,7 +129,7 @@ systemctl enable --now hermes-gateway.service
 If you want the same setup condensed into host-side commands, this is the scriptable path:
 
 ```bash
-lxc launch images:ubuntu/24.04 hermes --profile terrarium
+lxc launch images:ubuntu/24.04 hermes
 lxc exec hermes -- bash -lc 'apt-get update && apt-get install -y git curl'
 lxc exec hermes -- bash -lc 'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
 lxc exec hermes -- bash -lc "cat >> ~/.hermes/.env <<'EOF'

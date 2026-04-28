@@ -69,17 +69,25 @@ Terrarium also hardens the host itself:
 
 Cockpit and LXD are not just left open on default ports. They are routed and controlled through the Terrarium management layer.
 
-## Docker In Containers
+## Container Profiles
 
-Terrarium enables a Docker-friendly LXD profile by default.
+Terrarium makes the Docker-friendly profile the LXD `default` profile, so a
+normal launch uses it automatically:
 
-That means the baseline `terrarium` profile includes:
+```bash
+lxc launch images:ubuntu/24.04 devbox
+```
+
+The compatibility alias `terrarium` has the same settings, so older commands
+that pass `--profile terrarium` still work.
+
+The baseline `default` and `terrarium` profiles include:
 
 - `security.nesting=true`
 - `security.syscalls.intercept.mknod=true`
 - `security.syscalls.intercept.setxattr=true`
 
-Why Terrarium does this:
+Why Terrarium does this by default:
 
 - running Docker Compose inside its own LXC is a very common Terrarium use case
 - it keeps complex app stacks away from the host
@@ -90,16 +98,27 @@ Tradeoff:
 - this is more permissive than a minimal non-nested container profile
 - it is a convenience and compatibility choice, not the narrowest possible baseline
 
-If you do not want Docker-friendly features for a given workload, create a stricter profile and launch that container with it:
+Terrarium also creates a `strict` profile for workloads that should not need
+nested container runtimes:
 
 ```bash
-lxc profile copy terrarium terrarium-strict
-lxc profile set terrarium-strict security.nesting false
-lxc profile unset terrarium-strict security.syscalls.intercept.mknod
-lxc profile unset terrarium-strict security.syscalls.intercept.setxattr
+lxc launch images:ubuntu/24.04 locked-down --profile strict
 ```
 
-That way you can keep the general Terrarium experience friendly for common real-world workloads, while still choosing stricter containers when you want them.
+The `strict` profile keeps isolated ID maps, the Terrarium ZFS root disk, and
+the private bridge NIC, but omits the Docker-friendly nesting and syscall
+intercept settings.
+
+When the host exposes `/dev/kvm`, Terrarium additionally creates a layered
+`kvm` profile for workloads that need nested virtualization:
+
+```bash
+lxc launch images:ubuntu/24.04 vm-lab --profile default --profile kvm
+```
+
+The `kvm` profile passes `/dev/kvm` into the container and enables nesting. It
+does not make KVM appear on providers that do not expose hardware
+virtualization to the VPS.
 
 ## The Time Machine As A Security Feature
 

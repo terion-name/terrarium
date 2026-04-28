@@ -102,11 +102,20 @@ Pool behavior:
 - Dedup is not enabled.
 - Terrarium does not attempt to shrink the mounted root filesystem.
 
-## Default Container Profile
+## Container Profiles
 
-Terrarium creates an LXD profile named `terrarium` and expects user workloads to use it.
+Terrarium manages a small set of LXD profiles:
 
-Current baseline profile behavior:
+- `default`
+  The normal Terrarium profile. Users can omit `--profile` for ordinary containers.
+- `terrarium`
+  Compatibility alias with the same settings as `default`.
+- `strict`
+  Stricter full profile for workloads that do not need Docker-friendly nesting.
+- `kvm`
+  Layered profile created only when `/dev/kvm` exists on the host.
+
+Baseline `default` and `terrarium` profile behavior:
 
 - `security.idmap.isolated=true`
 - `security.nesting=true`
@@ -117,7 +126,10 @@ Current baseline profile behavior:
 
 This is an intentional product choice: Terrarium optimizes for isolated environments that can still run realistic developer and agent workloads, including Docker Compose stacks, instead of optimizing for the narrowest possible LXC feature surface.
 
-If you want stricter containers for selected workloads, create a derived profile and turn those settings back off there.
+The `strict` profile keeps the Terrarium root disk and bridge NIC but omits
+nesting and syscall intercepts. The `kvm` profile adds `/dev/kvm` as a
+`unix-char` device and can be combined with `default` when the provider exposes
+hardware virtualization.
 
 ## Backup Model
 

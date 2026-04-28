@@ -6,13 +6,17 @@ That gives the stack a real Linux environment to live in, while keeping host-lev
 
 This is especially useful for complex projects that want their own dependencies, databases, helper services, and network assumptions without interfering with other Docker workloads on the same VPS.
 
-Terrarium's default LXD profile enables the settings that Docker-in-LXC usually needs:
+Terrarium's LXD `default` profile enables the settings that Docker-in-LXC usually needs:
 
 - `security.nesting=true`
 - `security.syscalls.intercept.mknod=true`
 - `security.syscalls.intercept.setxattr=true`
 
-That means Compose stacks work with the normal Terrarium container profile instead of needing a separate special-case setup.
+That means Compose stacks work with a normal launch and do not need a separate special-case setup:
+
+```bash
+lxc launch images:ubuntu/24.04 my-stack
+```
 
 ## Why this setup works
 
@@ -70,7 +74,7 @@ You do not need a separate reverse-proxy stack inside every container unless the
 
 ## Suggested workflow
 
-1. Create a dedicated LXC container for the project with the normal `terrarium` profile.
+1. Create a dedicated LXC container for the project with the default Terrarium profile.
 2. Install Docker and Compose inside that container.
 3. Place the Compose files and environment config inside the container.
 4. Start the stack and verify the main service binds to `0.0.0.0:<port>`.
@@ -81,20 +85,17 @@ You do not need a separate reverse-proxy stack inside every container unless the
 
 Some people will prefer a stricter baseline for containers that should never run nested container runtimes.
 
-You can create a stricter profile like this:
+Terrarium pre-creates a `strict` profile for this:
 
 ```bash
-lxc profile copy terrarium terrarium-strict
-lxc profile set terrarium-strict security.nesting false
-lxc profile unset terrarium-strict security.syscalls.intercept.mknod
-lxc profile unset terrarium-strict security.syscalls.intercept.setxattr
+lxc launch images:ubuntu/24.04 static-site --profile strict
 ```
 
-Then launch selected containers with that stricter profile instead of the default Terrarium one.
+Use it for selected containers instead of the Docker-friendly default.
 
 That gives you a practical split:
 
-- `terrarium` for the general Terrarium experience, including Docker/Compose-friendly environments
-- `terrarium-strict` for containers that should never need nested container features
+- `default` for the general Terrarium experience, including Docker/Compose-friendly environments
+- `strict` for containers that should never need nested container features
 
 This keeps the project self-contained, safer to operate, and much easier to step backward when changes do not go as planned.

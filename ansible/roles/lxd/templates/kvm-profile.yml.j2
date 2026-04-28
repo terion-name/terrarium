@@ -1,0 +1,9 @@
+config:
+  security.nesting: "true"
+description: Terrarium layered profile for nested KVM access
+devices:
+  kvm:
+    path: /dev/kvm
+    source: /dev/kvm
+    type: unix-char
+name: kvm

@@ -14,8 +14,12 @@ storage_pools:
       source: {{ terrarium_lxd_pool_name }}
 profiles:
   - name: default
-    description: Default LXD profile
-    config: {}
+    description: Terrarium default container profile
+    config:
+      security.idmap.isolated: "true"
+      security.nesting: "true"
+      security.syscalls.intercept.mknod: "true"
+      security.syscalls.intercept.setxattr: "true"
     devices:
       eth0:
         type: nic

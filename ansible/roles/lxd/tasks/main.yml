@@ -355,23 +355,67 @@
     mode: "0600"
   when: terrarium_admin_group | length > 0
 
-- name: Check whether terrarium profile exists
-  ansible.builtin.command: /snap/bin/lxc profile show terrarium
-  register: terrarium_lxd_profile
+- name: Check whether Terrarium-managed LXD profiles exist
+  ansible.builtin.command: "/snap/bin/lxc profile show {{ item.name }}"
+  loop:
+    - { name: "default", template: "default-profile.yml.j2", path: "{{ terrarium_state_dir }}/default-profile.yml" }
+    - { name: "terrarium", template: "terrarium-profile.yml.j2", path: "{{ terrarium_state_dir }}/terrarium-profile.yml" }
+    - { name: "strict", template: "strict-profile.yml.j2", path: "{{ terrarium_state_dir }}/strict-profile.yml" }
+  register: terrarium_lxd_profiles
   failed_when: false
   changed_when: false
 
-- name: Render terrarium profile
+- name: Render Terrarium-managed LXD profiles
   ansible.builtin.template:
-    src: terrarium-profile.yml.j2
-    dest: "{{ terrarium_state_dir }}/terrarium-profile.yml"
+    src: "{{ item.template }}"
+    dest: "{{ item.path }}"
     mode: "0600"
+  loop:
+    - { name: "default", template: "default-profile.yml.j2", path: "{{ terrarium_state_dir }}/default-profile.yml" }
+    - { name: "terrarium", template: "terrarium-profile.yml.j2", path: "{{ terrarium_state_dir }}/terrarium-profile.yml" }
+    - { name: "strict", template: "strict-profile.yml.j2", path: "{{ terrarium_state_dir }}/strict-profile.yml" }
 
-- name: Create terrarium profile
-  ansible.builtin.command: /snap/bin/lxc profile create terrarium
-  when: terrarium_lxd_profile.rc != 0
+- name: Create missing Terrarium-managed LXD profiles
+  ansible.builtin.command: "/snap/bin/lxc profile create {{ item.item.name }}"
+  loop: "{{ terrarium_lxd_profiles.results }}"
+  when: item.rc != 0
 
-- name: Apply terrarium profile
-  ansible.builtin.shell: "/snap/bin/lxc profile edit terrarium < {{ terrarium_state_dir }}/terrarium-profile.yml"
+- name: Apply Terrarium-managed LXD profiles
+  ansible.builtin.shell: "/snap/bin/lxc profile edit {{ item.name }} < {{ item.path }}"
   args:
     executable: /bin/bash
+  loop:
+    - { name: "default", template: "default-profile.yml.j2", path: "{{ terrarium_state_dir }}/default-profile.yml" }
+    - { name: "terrarium", template: "terrarium-profile.yml.j2", path: "{{ terrarium_state_dir }}/terrarium-profile.yml" }
+    - { name: "strict", template: "strict-profile.yml.j2", path: "{{ terrarium_state_dir }}/strict-profile.yml" }
+
+- name: Check whether host exposes KVM
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: terrarium_lxd_kvm_device
+
+- name: Check whether Terrarium KVM profile exists
+  ansible.builtin.command: /snap/bin/lxc profile show kvm
+  register: terrarium_lxd_kvm_profile
+  failed_when: false
+  changed_when: false
+  when: terrarium_lxd_kvm_device.stat.exists
+
+- name: Render Terrarium KVM profile
+  ansible.builtin.template:
+    src: kvm-profile.yml.j2
+    dest: "{{ terrarium_state_dir }}/kvm-profile.yml"
+    mode: "0600"
+  when: terrarium_lxd_kvm_device.stat.exists
+
+- name: Create Terrarium KVM profile
+  ansible.builtin.command: /snap/bin/lxc profile create kvm
+  when:
+    - terrarium_lxd_kvm_device.stat.exists
+    - terrarium_lxd_kvm_profile.rc | default(1) != 0
+
+- name: Apply Terrarium KVM profile
+  ansible.builtin.shell: "/snap/bin/lxc profile edit kvm < {{ terrarium_state_dir }}/kvm-profile.yml"
+  args:
+    executable: /bin/bash
+  when: terrarium_lxd_kvm_device.stat.exists

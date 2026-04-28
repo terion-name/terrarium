@@ -1,0 +1,13 @@
+config:
+  security.idmap.isolated: "true"
+description: Terrarium stricter container profile without Docker-friendly nesting
+devices:
+  eth0:
+    name: eth0
+    network: lxdbr0
+    type: nic
+  root:
+    path: /
+    pool: {{ terrarium_lxd_pool_name }}
+    type: disk
+name: strict

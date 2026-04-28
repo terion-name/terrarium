@@ -51,7 +51,7 @@ async function verifySharedCifsStorage(context: IntegrationContext, fileSsh: Ret
       );
     }
 
-    await fileSsh.exec(`lxc launch ubuntu:24.04 ${sharedContainer} --profile terrarium`);
+    await fileSsh.exec(`lxc launch ubuntu:24.04 ${sharedContainer}`);
     await fileSsh.exec(`lxc config device add ${sharedContainer} shared disk source=${shellArg(sharedRunPath)} path=/mnt/shared`);
     await fileSsh.exec(`lxc exec ${sharedContainer} -- cat ${shellArg(`/mnt/shared/${sharedNoteName}`)}`);
   } finally {

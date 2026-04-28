@@ -376,7 +376,7 @@ export async function createHttpFixtureContainer(
   const setupStatusPath = `/root/${containerName}-setup.exit`;
   const setupCommand = [
     `echo '[fixture] launch ${containerName}'`,
-    `timeout 300s lxc launch ubuntu:24.04 ${shellArg(containerName)} --profile terrarium`,
+    `timeout 300s lxc launch ubuntu:24.04 ${shellArg(containerName)}`,
     `echo '[fixture] wait-running ${containerName}'`,
     `timeout 300s bash -lc ${shellArg(
       `until lxc info ${shellArg(containerName)} | grep -F 'Status: RUNNING' >/dev/null 2>&1; do sleep 2; done`

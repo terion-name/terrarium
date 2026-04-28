@@ -3,7 +3,7 @@ config:
   security.nesting: "true"
   security.syscalls.intercept.mknod: "true"
   security.syscalls.intercept.setxattr: "true"
-description: Terrarium baseline container profile, kept as an explicit alias for default
+description: Terrarium default container profile
 devices:
   eth0:
     name: eth0
@@ -13,4 +13,4 @@ devices:
     path: /
     pool: {{ terrarium_lxd_pool_name }}
     type: disk
-name: terrarium
+name: default

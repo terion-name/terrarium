@@ -30,14 +30,14 @@ In the LXD UI:
 
 1. Open `https://lxd.<your-domain>` and log in.
 2. Create a new instance from the `images:ubuntu/24.04` image.
-3. Attach the `terrarium` profile so the container gets Terrarium's storage and isolation settings.
+3. Use the default profile so the container gets Terrarium's storage and isolation settings.
 4. Name it `openclaw`.
 5. Start the container.
 
 From the CLI:
 
 ```bash
-lxc launch images:ubuntu/24.04 openclaw --profile terrarium
+lxc launch images:ubuntu/24.04 openclaw
 ```
 
 ## Recommended setup: enter the container and use OpenClaw the way it expects
@@ -144,7 +144,7 @@ That gives you:
 If you want the setup condensed into host-side commands, this is the scriptable path:
 
 ```bash
-lxc launch images:ubuntu/24.04 openclaw --profile terrarium
+lxc launch images:ubuntu/24.04 openclaw
 lxc exec openclaw -- bash -lc 'apt-get update && apt-get install -y curl'
 lxc exec openclaw -- bash -lc 'curl -fsSL https://openclaw.ai/install.sh | bash'
 lxc exec openclaw -- bash -lc 'openclaw onboard --install-daemon'
