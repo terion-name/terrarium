@@ -193,9 +193,72 @@ So if you want to combine OpenClaw with an identity-aware proxy, follow OpenClaw
 
 That keeps the initial setup simpler and safer, while still giving you a clear upgrade path to a public or SSO-gated deployment later.
 
+## Advanced: store memory and artifacts on a Storage Box
+
+OpenClaw's upstream memory model is file-friendly: the agent workspace is the source of truth, and memory is plain Markdown inside that workspace. By default that workspace is `~/.openclaw/workspace`, with long-term memory in `MEMORY.md` and daily notes in `memory/YYYY-MM-DD.md`.
+
+That makes OpenClaw a good fit for external shared storage when you want to:
+
+- keep long-lived memory outside the container root disk
+- browse or edit memory files from your own computer
+- keep generated notes, exports, and working artifacts in a place that survives container replacement
+
+Keep `~/.openclaw/` itself local to the container. It contains config, credentials, provider auth, and session state. The part that is pleasant to share is the workspace, not the private runtime state.
+
+First mount the Storage Box on the Terrarium host. The general workflow is documented in [External Shared Storage](../getting-started/external-shared-storage), but the short version is:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
+```
+
+If you have not onboarded OpenClaw yet, mount the external directory directly where OpenClaw already expects its workspace:
+
+```bash
+mkdir -p /srv/shared/storage-box/openclaw/workspace
+lxc exec openclaw -- mkdir -p /root/.openclaw
+lxc config device add openclaw openclaw-workspace disk \
+  source=/srv/shared/storage-box/openclaw/workspace \
+  path=/root/.openclaw/workspace
+```
+
+Then continue with `openclaw onboard --install-daemon` normally. There is no extra OpenClaw config to change, because the mounted path is still the default workspace path.
+
+If OpenClaw is already set up, copy the existing workspace to the Storage Box before adding the disk device. Mounting a disk over `/root/.openclaw/workspace` hides the old directory contents, so do the copy first:
+
+```bash
+mkdir -p /srv/shared/storage-box/openclaw/workspace
+lxc exec openclaw -- systemctl stop openclaw 2>/dev/null || true
+lxc exec openclaw -- systemctl stop openclaw-gateway 2>/dev/null || true
+lxc exec openclaw -- tar -C /root/.openclaw/workspace -cf - . | tar -C /srv/shared/storage-box/openclaw/workspace -xf -
+lxc config device add openclaw openclaw-workspace disk \
+  source=/srv/shared/storage-box/openclaw/workspace \
+  path=/root/.openclaw/workspace
+lxc exec openclaw -- openclaw gateway restart
+lxc exec openclaw -- openclaw memory status
+```
+
+A useful Storage Box layout is:
+
+```text
+/srv/shared/storage-box/openclaw/
+  workspace/
+    MEMORY.md
+    memory/
+    AGENTS.md
+    artifacts/
+    exports/
+```
+
+Use `artifacts/` or `exports/` as the place where you ask OpenClaw to write documents, reports, generated files, or other outputs you want to inspect from outside Terrarium. Because the same Storage Box can also be mounted on your laptop or desktop, you can open `MEMORY.md`, `memory/`, `artifacts/`, and `exports/` in a normal editor.
+
+Be careful with concurrent editing. Markdown memory files are easy to inspect, but OpenClaw can also write them while a session is running. For manual edits, stop the gateway or pause active sessions first, then restart and run `openclaw memory index --force` if you use semantic memory search.
+
 ## Upstream docs used for this guide
 
 - [OpenClaw getting started](https://docs.openclaw.ai/start/getting-started)
+- [OpenClaw agent workspace](https://docs.openclaw.ai/concepts/agent-workspace)
+- [OpenClaw memory overview](https://docs.openclaw.ai/concepts/memory)
+- [OpenClaw memory configuration reference](https://docs.openclaw.ai/reference/memory-config)
 - [OpenClaw Linux server guide](https://docs.openclaw.ai/vps)
 - [OpenClaw web and Control UI security notes](https://docs.openclaw.ai/web)
 - [OpenClaw remote access](https://docs.openclaw.ai/gateway/remote)

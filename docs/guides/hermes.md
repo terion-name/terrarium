@@ -171,7 +171,100 @@ Use that only if you already know your Hermes config inputs and do not need the 
 - When binding to a non-loopback address like `0.0.0.0`, `API_SERVER_KEY` is required.
 - Browser CORS is off by default, so you should set `API_SERVER_CORS_ORIGINS` explicitly when exposing it through a browser-facing hostname.
 
+## Advanced: store memory and artifacts on a Storage Box
+
+Hermes separates a few kinds of state:
+
+- curated memory lives in `~/.hermes/memories/`, especially `MEMORY.md` and `USER.md`
+- session search uses SQLite at `~/.hermes/state.db`
+- gateway transcripts live under `~/.hermes/sessions/`
+- skills live under `~/.hermes/skills/`
+
+The best Storage Box target is the human-editable material: `memories/`, optional skills, and a convention-based `artifacts/` directory for outputs you want to browse from another machine. Keep the active SQLite database local to the container. SQLite over SMB/CIFS is a tempting little foot-gun because locking and WAL behavior depend on the network filesystem.
+
+First mount the Storage Box on the Terrarium host. The general workflow is documented in [External Shared Storage](../getting-started/external-shared-storage), but the short version is:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
+```
+
+Create Hermes directories on the host-mounted share:
+
+```bash
+mkdir -p /srv/shared/storage-box/hermes/{memories,skills,artifacts,exports}
+```
+
+If you have not run `hermes setup` yet, attach those directories directly where Hermes already expects them:
+
+```bash
+lxc exec hermes -- mkdir -p /root/.hermes
+lxc config device add hermes hermes-memories disk \
+  source=/srv/shared/storage-box/hermes/memories \
+  path=/root/.hermes/memories
+lxc config device add hermes hermes-skills disk \
+  source=/srv/shared/storage-box/hermes/skills \
+  path=/root/.hermes/skills
+lxc config device add hermes hermes-artifacts disk \
+  source=/srv/shared/storage-box/hermes/artifacts \
+  path=/root/hermes-artifacts
+```
+
+Then run `hermes setup` normally. Hermes will read and write memory at its normal path, while the actual files live on the Storage Box.
+
+If Hermes is already set up, stop the gateway and copy the existing directories to the Storage Box before adding the disk devices. Mounting a disk over an existing directory hides the old directory contents.
+
+```bash
+lxc exec hermes -- systemctl stop hermes-gateway.service 2>/dev/null || true
+if lxc exec hermes -- test -d /root/.hermes/memories; then
+  lxc exec hermes -- tar -C /root/.hermes/memories -cf - . | tar -C /srv/shared/storage-box/hermes/memories -xf -
+fi
+if lxc exec hermes -- test -d /root/.hermes/skills; then
+  lxc exec hermes -- tar -C /root/.hermes/skills -cf - . | tar -C /srv/shared/storage-box/hermes/skills -xf -
+fi
+lxc exec hermes -- mkdir -p /root/.hermes
+lxc config device add hermes hermes-memories disk \
+  source=/srv/shared/storage-box/hermes/memories \
+  path=/root/.hermes/memories
+lxc config device add hermes hermes-skills disk \
+  source=/srv/shared/storage-box/hermes/skills \
+  path=/root/.hermes/skills
+lxc config device add hermes hermes-artifacts disk \
+  source=/srv/shared/storage-box/hermes/artifacts \
+  path=/root/hermes-artifacts
+```
+
+Use `/root/hermes-artifacts` as the place where you ask Hermes to write long-lived reports, datasets, plans, generated documents, or research output:
+
+```bash
+lxc exec hermes -- systemctl start hermes-gateway.service
+```
+
+A useful Storage Box layout is:
+
+```text
+/srv/shared/storage-box/hermes/
+  memories/
+    MEMORY.md
+    USER.md
+  skills/
+  artifacts/
+  exports/
+```
+
+You can mount the same Storage Box on your laptop or desktop and edit `MEMORY.md`, `USER.md`, skills, or artifacts directly. For memory edits, stop Hermes or avoid active sessions while editing; Hermes loads memory as a snapshot at session start, so changes normally appear in the next session.
+
+For session history, prefer Hermes' export commands instead of moving `state.db` to SMB:
+
+```bash
+lxc exec hermes -- hermes sessions export /root/hermes-artifacts/hermes-sessions.jsonl
+```
+
+That gives you portable transcripts on the Storage Box while keeping the live database on local container storage.
+
 ## Upstream docs used for this guide
 
 - [Hermes installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation/)
 - [Hermes API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/)
+- [Hermes persistent memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
+- [Hermes sessions](https://hermes-agent.nousresearch.com/docs/user-guide/sessions/)
+- [Hermes skills system](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/)
