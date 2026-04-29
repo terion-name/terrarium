@@ -8,16 +8,18 @@ import {
   loadMutableConfig,
   localIdpEnabled,
   MutableConfig,
+  saveMutableConfig,
   setConfigValue,
   success
 } from "./context";
 import { configBoolean, configString, normalizeS3Endpoint } from "../lib/common";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { verifyOidcConfig, verifyS3Config, type OidcVerificationOptions } from "./verify";
+import { exportClusterStoreToConfigFile, importConfigFileToClusterStore } from "../lib/config-store";
 
 const LOCAL_IDP_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
 
-/** Callback bundle used after any persisted config change that affects the running host. */
+/** Callback bundle used after any saved config change that affects the running host. */
 export type ReconcileActions = {
   reconfigure: () => Promise<void>;
   syncProxy: () => Promise<void>;
@@ -107,7 +109,7 @@ function secretCliOption(
 /**
  * Writes a config document and converges the live host to match it.
  *
- * Every `set ...` command should go through this helper so the persisted config
+ * Every `set ...` command should go through this helper so the saved config
  * and the actual host state never drift for long.
  */
 async function readLocalIdpOutputs(actions: ReconcileActions): Promise<string> {
@@ -142,9 +144,23 @@ export async function runReconcileActions(config: MutableConfig, actions: Reconc
 }
 
 async function persistAndReconcile(config: MutableConfig, summary: string, actions: ReconcileActions): Promise<void> {
-  writeFileSync(CONFIG_PATH, stringify(config), "utf8");
+  saveMutableConfig(stringify(config));
   await runReconcileActions(config, actions);
   console.log(success(summary));
+}
+
+/** Imports the local YAML export into the dqlite-backed LXD project store. */
+export function configImportCmd(): void {
+  importConfigFileToClusterStore(CONFIG_PATH, "terrariumctl config import");
+  console.log(success("Imported config into the LXD dqlite store"));
+}
+
+/** Recreates the local YAML export from the dqlite-backed LXD project store. */
+export function configExportCmd(): void {
+  if (!exportClusterStoreToConfigFile(CONFIG_PATH, "terrariumctl config export")) {
+    throw new Error("Terrarium config was not found in the LXD dqlite store");
+  }
+  console.log(success(`Exported config to ${CONFIG_PATH}`));
 }
 
 /** Updates Terrarium’s management and public domains, then converges the host. */

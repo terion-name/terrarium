@@ -13,6 +13,17 @@ describe("base role packages", () => {
   });
 });
 
+describe("config store reconciliation", () => {
+  test("imports the local config export into the LXD dqlite store before proxy sync", () => {
+    const site = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
+    const importIndex = site.indexOf("terrariumctl config import");
+    const proxyIndex = site.indexOf("terrariumctl proxy sync");
+
+    expect(importIndex).toBeGreaterThan(0);
+    expect(proxyIndex).toBeGreaterThan(importIndex);
+  });
+});
+
 describe("terrariumctl mount defaults", () => {
   test("disable client-side CIFS permission checks for single-credential managed mounts", () => {
     const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");

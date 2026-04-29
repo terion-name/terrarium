@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { CONFIG_PATH, PREFIX } from "./context";
 import { runText } from "../lib/common";
+import { exportClusterStoreToConfigFile } from "../lib/config-store";
 
 export type ReconfigureOptions = {
   applyHardening?: boolean;
@@ -18,6 +19,8 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
   if (!existsSync("/opt/terrarium/dist/terrariumctl")) {
     throw new Error("compiled Terrarium binaries are missing from /opt/terrarium/dist; rerun install.sh");
   }
+
+  exportClusterStoreToConfigFile(CONFIG_PATH, PREFIX);
 
   const args = ["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`];
   if (options.applyHardening === false) {

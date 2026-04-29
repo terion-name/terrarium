@@ -11,7 +11,7 @@ Terrarium is split into four layers:
 2. `terrariumctl`
    Single Terrarium binary. It owns install-time prompting, config rendering, status and maintenance commands, backup/restore flows, proxy sync, IDP sync, and config updates through `terrariumctl set ...`.
 3. Ansible
-   Owns host provisioning and idempotent reconciliation. The Terrarium config is persisted at `/etc/terrarium/config.yaml`, then Ansible converges the host into that state.
+   Owns host provisioning and idempotent reconciliation. Terrarium exports the current config to `/etc/terrarium/config.yaml`, then Ansible converges the host into that state.
 4. Host helpers
    Systemd timers and services invoke `terrariumctl` subcommands for recurring host-side work such as Traefik proxy sync, S3 export, and optional syncoid replication.
 
@@ -20,9 +20,24 @@ Terrarium is split into four layers:
 - `terrariumctl install` is interactive by default.
 - Non-interactive installs require explicit flags for the critical choices such as IDP mode and storage mode.
 - The installer clones or updates the Terrarium repo into `/opt/terrarium`, stages the compiled binary into that checkout, writes a temporary config payload, and invokes Ansible locally.
-- The resolved long-lived configuration is stored in `/etc/terrarium/config.yaml`.
+- During first bootstrap, the resolved configuration is written as `/etc/terrarium/config.yaml` because LXD is not initialized yet.
+- After LXD is ready, Terrarium publishes the same document into the LXD dqlite-backed project `terrarium-system` under `user.terrarium.config_b64`.
+- After that point, `terrariumctl` treats the LXD dqlite-backed value as canonical and keeps `/etc/terrarium/config.yaml` as a local YAML export for Ansible and operator inspection.
 - Sensitive one-time values that should not live in the persisted config, such as a root password supplied for Cockpit login, are passed to Ansible through a temporary secrets file and then removed.
 - Post-install changes are handled through `terrariumctl set domains`, `set emails`, `set idp`, `set s3`, and `set syncoid`, followed by a local reconciliation run.
+
+## Config Store
+
+Terrarium deliberately reuses LXD's existing dqlite cluster store instead of running a second consensus database on the host.
+
+- LXD already runs a dqlite node on each cluster member.
+- LXD project configuration is cluster metadata, so it is replicated with the rest of LXD's dqlite state.
+- Terrarium stores its config payload as base64-encoded YAML in the `terrarium-system` project key `user.terrarium.config_b64`.
+- `terrariumctl config import` copies `/etc/terrarium/config.yaml` into that store.
+- `terrariumctl config export` recreates `/etc/terrarium/config.yaml` from that store.
+- `terrariumctl reconfigure` exports from the store before invoking Ansible, so a node converges from the cluster copy when the dqlite store is present.
+
+This is preparation for multi-node Terrarium. It does not by itself turn single-host Terrarium into a full cluster manager yet; node admission, storage placement, and cross-node service ownership still need explicit product workflows.
 
 ## Control Plane
 
@@ -188,7 +203,8 @@ S3 as-new restore:
 Important runtime paths in the current implementation:
 
 - Repo checkout: `/opt/terrarium`
-- Persisted config: `/etc/terrarium/config.yaml`
+- Canonical config store: LXD dqlite-backed project `terrarium-system`, key `user.terrarium.config_b64`
+- Local config export: `/etc/terrarium/config.yaml`
 - Secrets directory: `/etc/terrarium/secrets`
 - General state: `/var/lib/terrarium`
 - oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy`

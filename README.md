@@ -173,9 +173,9 @@ Cockpit login:
 
 ## Reconfiguration
 
-The installer keeps the checked out repository at `/opt/terrarium` and writes the resolved config to `/etc/terrarium/config.yaml`.
+The installer keeps the checked out repository at `/opt/terrarium`. During first bootstrap it writes the resolved config to `/etc/terrarium/config.yaml`; after LXD is initialized, Terrarium syncs that document into the LXD dqlite-backed project `terrarium-system`.
 
-Changing settings through `terrariumctl set ...` always rewrites `/etc/terrarium/config.yaml` and re-runs the local Ansible reconciliation.
+Changing settings through `terrariumctl set ...` updates the dqlite-backed config store, refreshes `/etc/terrarium/config.yaml` as the local Ansible/export file, and re-runs the local Ansible reconciliation.
 
 What gets updated on change:
 
@@ -196,7 +196,9 @@ Top-level commands:
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
 | `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
-| `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the persisted config. |
+| `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the saved config. |
+| `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
+| `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
 | `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=0`, `gid=0`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |

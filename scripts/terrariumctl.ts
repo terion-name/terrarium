@@ -7,6 +7,8 @@ import { TERRARIUM_VERSION } from "./generated/build-info";
 import { backupActionCmd } from "./ctl/backup";
 import { normalizedArgv, parseBooleanOption, PREFIX } from "./ctl/context";
 import {
+  configExportCmd,
+  configImportCmd,
   parseSetCommandOptions,
   setDomainsCmd,
   setEmailsCmd,
@@ -70,6 +72,21 @@ cli
 cli.command("reconfigure", "Re-run the Ansible reconciliation with the installed binary").action(async () => {
   await reconfigureCmd();
 });
+
+cli
+  .command("config <action>", "Config storage operations")
+  .usage("config import | config export")
+  .action((action) => {
+    if (action === "import") {
+      configImportCmd();
+      return;
+    }
+    if (action === "export") {
+      configExportCmd();
+      return;
+    }
+    throw new Error(`unsupported config action: ${action}`);
+  });
 
 cli
   .command("proxy <action>", "Proxy operations")
@@ -142,7 +159,7 @@ cli
   });
 
 cli
-  .command("set <section> [value]", "Update persisted Terrarium configuration")
+  .command("set <section> [value]", "Update saved Terrarium configuration")
   .option("--manage-domain <domain>", "Override the Cockpit domain", STRING_OPTION)
   .option("--proxy-domain <domain>", "Override the Traefik dashboard domain", STRING_OPTION)
   .option("--lxd-domain <domain>", "Override the LXD domain", STRING_OPTION)

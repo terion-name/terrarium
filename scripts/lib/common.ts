@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parse, stringify } from "yaml";
+import { readConfigYaml } from "./config-store";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -177,7 +178,7 @@ export function shellEscape(value: string): string {
 
 /** Loads the canonical Terrarium YAML config file. */
 export function loadConfig(path: string, prefix: string): Record<string, unknown> {
-  return readYamlFile<Record<string, unknown>>(path, prefix);
+  return readConfigYaml<Record<string, unknown>>(path, prefix);
 }
 
 /** Resolves a dotted configuration path from a YAML-backed config object. */

@@ -5,9 +5,10 @@ Terrarium is meant to be changed in place. You do not reinstall the host every t
 ## Where Terrarium Stores State
 
 - repo checkout: `/opt/terrarium`
-- persisted config: `/etc/terrarium/config.yaml`
+- canonical config store: LXD dqlite-backed project `terrarium-system`, key `user.terrarium.config_b64`
+- local config export: `/etc/terrarium/config.yaml`
 
-`terrariumctl set ...` updates the persisted config and then runs local reconciliation.
+`terrariumctl set ...` updates the dqlite-backed config, refreshes the local YAML export, and then runs local reconciliation.
 Those day-2 updates skip the heavy OS hardening pass, because hardening is
 already applied during install and full `terrariumctl reconfigure` runs.
 
@@ -22,8 +23,14 @@ already applied during install and full `terrariumctl reconfigure` runs.
 There is also:
 
 - `terrariumctl reconfigure`
+- `terrariumctl config import`
+- `terrariumctl config export`
 
-That re-runs the local Ansible reconciliation using the current saved config.
+`terrariumctl reconfigure` re-runs the local Ansible reconciliation using the current saved config. When the LXD dqlite-backed store is present, it exports that config to `/etc/terrarium/config.yaml` first so Ansible sees the cluster copy.
+
+`terrariumctl config import` publishes the local YAML export into the LXD dqlite-backed store. Terrarium runs this automatically after install/reconfigure once LXD exists.
+
+`terrariumctl config export` recreates `/etc/terrarium/config.yaml` from the dqlite-backed store. This is mostly useful for cluster admission and debugging workflows.
 
 ## What Gets Updated On Change
 

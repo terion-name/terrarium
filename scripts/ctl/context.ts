@@ -1,13 +1,18 @@
 import chalk from "chalk";
-import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { configString, loadConfig } from "../lib/common";
+import {
+  configStoreSummary,
+  DEFAULT_CONFIG_PATH,
+  readConfigDocument,
+  writeConfigDocument
+} from "../lib/config-store";
 
 /** Shared command prefix used in CLI error messages and subprocess output. */
 export const PREFIX = "terrariumctl";
 
 /** Canonical persisted Terrarium config path on managed hosts. */
-export const CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
+export const CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? DEFAULT_CONFIG_PATH;
 
 /** System fstab path used by the managed host-mount subsystem. */
 export const FSTAB_PATH = "/etc/fstab";
@@ -80,15 +85,22 @@ export function success(text: string): string {
  * guardrail against running stateful commands before install has completed.
  */
 export function requireConfig(): MutableConfig {
-  if (!existsSync(CONFIG_PATH)) {
-    throw new Error(`config not found: ${CONFIG_PATH}`);
-  }
   return loadConfig(CONFIG_PATH, PREFIX);
 }
 
 /** Loads the mutable YAML config document so callers can update and re-write it. */
 export function loadMutableConfig(): MutableConfig {
-  return parse(readFileSync(CONFIG_PATH, "utf8")) as MutableConfig;
+  return parse(readConfigDocument(CONFIG_PATH, PREFIX)) as MutableConfig;
+}
+
+/** Persists the mutable config to the cluster-backed store and local YAML export. */
+export function saveMutableConfig(content: string): void {
+  writeConfigDocument(CONFIG_PATH, content, { requireClusterStore: true });
+}
+
+/** Returns the active config storage backend for human-readable status output. */
+export function activeConfigStore(): string {
+  return configStoreSummary(CONFIG_PATH);
 }
 
 /** Returns the configured OIDC issuer URL, or an empty string when unset. */

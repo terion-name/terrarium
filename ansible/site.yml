@@ -90,7 +90,7 @@
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_admin_group | default('') | length == 0
-    - name: Refresh persisted config bundle with resolved admin group
+    - name: Refresh config bundle with resolved admin group
       ansible.builtin.set_fact:
         terrarium_config_bundle: "{{ terrarium_config_bundle | combine({'terrarium_admin_group': terrarium_admin_group}) }}"
   roles:
@@ -106,6 +106,11 @@
     - role: hardening
       when: terrarium_apply_hardening | bool
   post_tasks:
+    - name: Import config export into the LXD dqlite store
+      ansible.builtin.command: /usr/local/bin/terrariumctl config import
+      changed_when: false
+      no_log: true
+
     - name: Run Traefik sync after all dependent services are configured
       ansible.builtin.command: /usr/local/bin/terrariumctl proxy sync
       register: terrarium_post_proxy_sync

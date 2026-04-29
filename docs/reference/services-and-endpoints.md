@@ -40,7 +40,8 @@ These can be overridden with:
 ## Runtime Paths
 
 - repo checkout: `/opt/terrarium`
-- persisted config: `/etc/terrarium/config.yaml`
+- canonical config store: LXD dqlite-backed project `terrarium-system`, key `user.terrarium.config_b64`
+- local config export: `/etc/terrarium/config.yaml`
 - secrets: `/etc/terrarium/secrets`
 - general state: `/var/lib/terrarium`
 - oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy`

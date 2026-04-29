@@ -111,7 +111,8 @@ travel through shell history or process arguments:
 Terrarium keeps:
 
 - the repo checkout at `/opt/terrarium`
-- the resolved host config at `/etc/terrarium/config.yaml`
+- the canonical config in LXD's dqlite-backed `terrarium-system` project after LXD is initialized
+- a local config export at `/etc/terrarium/config.yaml`
 
 From there, the main commands you will use are:
 

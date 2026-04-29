@@ -11,7 +11,9 @@
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
 | `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
-| `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the persisted config. |
+| `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the saved config. |
+| `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
+| `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
 | `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=0`, `gid=0`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
@@ -72,6 +74,20 @@ Install verification notes:
 - In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials.
 - In interactive mode, S3 is not accepted until Terrarium can reach the bucket and complete a write/delete verification object cycle.
 - In non-interactive mode, the same checks run once and the install exits on failure.
+
+## config import/export
+
+Terrarium keeps its canonical day-2 config in LXD's dqlite-backed project metadata:
+
+- project: `terrarium-system`
+- key: `user.terrarium.config_b64`
+- value: base64-encoded YAML
+
+`/etc/terrarium/config.yaml` remains a root-only local export because Ansible consumes YAML files directly and operators still need a readable recovery/debug artifact.
+
+Use `terrariumctl config import` to copy the local export into the dqlite-backed store. Terrarium runs this automatically after LXD has been initialized during install and reconfigure.
+
+Use `terrariumctl config export` to recreate the local export from the dqlite-backed store. `terrariumctl reconfigure` does this automatically before invoking Ansible when the dqlite-backed store exists.
 
 ## backup restore
 
