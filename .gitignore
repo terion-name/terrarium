@@ -4,3 +4,4 @@ bun.lockb
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 tests/integration/output/
+tests/integration/.env
