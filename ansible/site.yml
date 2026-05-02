@@ -45,6 +45,10 @@
     terrarium_lxd_oidc_client_secret: ""
     terrarium_admin_group: ""
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
+    terrarium_zitadel_instance_name: terrarium-idp
+    terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
+    terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"
+    terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
     terrarium_email: ""
     terrarium_acme_email: "{{ terrarium_email }}"
     terrarium_enable_s3: false
@@ -79,6 +83,10 @@
       terrarium_lxd_oidc_client_secret: "{{ terrarium_lxd_oidc_client_secret }}"
       terrarium_admin_group: "{{ terrarium_admin_group }}"
       terrarium_zitadel_admin_email: "{{ terrarium_zitadel_admin_email }}"
+      terrarium_zitadel_instance_name: "{{ terrarium_zitadel_instance_name }}"
+      terrarium_zitadel_dir: "{{ terrarium_zitadel_dir }}"
+      terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_bootstrap_dir }}"
+      terrarium_zitadel_outputs_path: "{{ terrarium_zitadel_outputs_path }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
       terrarium_cluster_enabled: "{{ terrarium_cluster_enabled }}"
       terrarium_cluster_peer_cidrs: "{{ terrarium_cluster_peer_cidrs }}"
@@ -137,9 +145,9 @@
     - role: cockpit
     - role: cockpit_plugins
     - role: traefik
+    - role: lxd
     - role: idp_zitadel
     - role: oauth2_proxy
-    - role: lxd
     - role: backups
     - role: hardening
       when: terrarium_apply_hardening | bool

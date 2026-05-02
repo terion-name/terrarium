@@ -19,6 +19,7 @@ const OAUTH2_PROXY_UID = 65532;
 const OAUTH2_PROXY_GID = 65532;
 const ROUTE_AUTH_READY_ATTEMPTS = 12;
 const ROUTE_AUTH_READY_INTERVAL_MS = 1000;
+const DEFAULT_ZITADEL_INSTANCE_NAME = "terrarium-idp";
 const ZITADEL_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
 const ZITADEL_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
 const SYSTEM_CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
@@ -481,6 +482,33 @@ function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST"
   return cmd;
 }
 
+async function lxcInstanceExists(instanceName: string): Promise<boolean> {
+  if (!instanceName) {
+    return false;
+  }
+  const result = await runAllowFailure(["lxc", "info", instanceName]);
+  return result.exitCode === 0;
+}
+
+async function readLocalZitadelPat(config: Record<string, unknown>): Promise<{ pat?: string; error?: string }> {
+  const instanceName = configString(config, "terrarium_zitadel_instance_name", DEFAULT_ZITADEL_INSTANCE_NAME);
+  const bootstrapDir = configString(config, "terrarium_zitadel_bootstrap_dir") || ZITADEL_BOOTSTRAP_DIR;
+  const patPath = `${bootstrapDir}/admin-sa.pat`;
+
+  if (await lxcInstanceExists(instanceName)) {
+    const result = await runAllowFailure(["lxc", "exec", instanceName, "--", "cat", patPath]);
+    if (result.exitCode !== 0) {
+      return { error: `route auth local IDP sync requires ${patPath} inside ${instanceName}` };
+    }
+    return { pat: result.stdout.trim() };
+  }
+
+  if (!existsSync(patPath)) {
+    return { error: `route auth local IDP sync requires ${patPath}` };
+  }
+  return { pat: readFileSync(patPath, "utf8").trim() };
+}
+
 async function zitadelApi<T>(
   authDomain: string,
   pat: string,
@@ -561,12 +589,10 @@ async function syncLocalRoutesClient(config: Record<string, unknown>, profiles: 
     return ["route auth local IDP sync requires terrarium_auth_domain and terrarium_manage_domain"];
   }
 
-  const patPath = `${ZITADEL_BOOTSTRAP_DIR}/admin-sa.pat`;
-  if (!existsSync(patPath)) {
-    return ["route auth local IDP sync requires /var/lib/terrarium/zitadel/bootstrap/admin-sa.pat"];
+  const { pat: adminPat = "", error } = await readLocalZitadelPat(config);
+  if (error) {
+    return [error];
   }
-
-  const adminPat = readFileSync(patPath, "utf8").trim();
   if (!adminPat) {
     return ["route auth local IDP sync requires a non-empty bootstrap PAT"];
   }

@@ -45,7 +45,7 @@ Terrarium provisions the host with:
 - [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
 - [Traefik](https://github.com/traefik/traefik) with the built-in dashboard for public management endpoints
 - [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping, defaulting to a Docker Hardened Image
-- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`
+- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`, running as a Terrarium-managed LXD system instance
 - External OIDC issuer support when you do not want to self-host the IDP
 - [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
 
@@ -181,7 +181,7 @@ What gets updated on change:
 - Traefik config changes trigger a Traefik restart.
 - `oauth2-proxy` is rendered and restarted when IDP, admin-group, or management-domain settings change.
 - LXD domain, ACME, OIDC issuer/client settings, and IdP group mappings are applied directly through `lxc config set` and `lxc auth`; they do not require a full LXD restart.
-- Self-hosted ZITADEL is enabled, disabled, restarted, and reconciled when its rendered config changes.
+- Self-hosted ZITADEL runs in the managed `terrarium-idp` LXD instance and is enabled, disabled, restarted, and reconciled when its rendered config changes.
 - Terrarium then re-runs `terrariumctl proxy sync`, and when IDP mode is `local`, also re-runs `terrariumctl idp sync`.
 
 ## Clustering
@@ -241,6 +241,10 @@ Top-level commands:
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
 | `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
 | `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
+| `terrariumctl idp status` | none | n/a | Shows the managed `terrarium-idp` instance and its ZITADEL compose services. |
+| `terrariumctl idp logs` | optional: `--lines` | `120` | Prints recent ZITADEL compose logs from inside the managed IDP instance. |
+| `terrariumctl idp backup` | none | local snapshot; exports to S3 when enabled | Creates a manual recursive snapshot of the managed IDP instance. |
+| `terrariumctl idp restore` | optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores the managed IDP instance through the normal Terrarium backup/restore flow. |
 | `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, re-verifies external OIDC when needed, and re-runs reconciliation. |
 | `terrariumctl set emails` | optional flags | existing values when omitted | Updates Terrarium contact, ACME, and ZITADEL admin emails. |
 | `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, verifies external OIDC settings when applicable, and reconfigures oauth2-proxy plus LXD management auth together. |
@@ -384,6 +388,7 @@ External OIDC note:
 
 Local ZITADEL note:
 
+- Local ZITADEL runs in the `terrarium-idp` LXD system instance, so its data is part of the LXD/ZFS backup set instead of host Docker state.
 - Terrarium auto-provisions a management role named after `terrarium_admin_group`, defaulting to `terrarium-admins`.
 - The bootstrap admin is granted that role automatically.
 - Terrarium also installs a small ZITADEL Action that flattens Terrarium role assignments into a `groups` claim for oauth2-proxy and LXD.
@@ -420,7 +425,7 @@ S3 verification notes:
 
 `terrariumctl set domains` updates the persisted root domain, derives `manage.`, `lxd.`, and `auth.` subdomains unless you override them, and then re-runs the full Ansible reconciliation so Traefik, LXD, and ZITADEL pick up the new external hostnames.
 
-When self-hosted ZITADEL is enabled, Terrarium generates the initial admin password at `/etc/terrarium/secrets/zitadel_admin_password`.
+When self-hosted ZITADEL is enabled, Terrarium generates the initial admin password inside the managed IDP instance. Read it with `lxc exec terrarium-idp -- cat /etc/terrarium/secrets/zitadel_admin_password`.
 
 
 ## LXC Proxy Labels

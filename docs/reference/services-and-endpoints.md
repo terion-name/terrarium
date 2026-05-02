@@ -12,7 +12,7 @@ Terrarium provisions the host with:
 - [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
 - [Traefik](https://github.com/traefik/traefik) with the built-in dashboard
 - [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy), defaulting to a Docker Hardened Image
-- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel), with a Docker Hardened Image Postgres sidecar
+- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel), running as the `terrarium-idp` LXD system instance with a Docker Hardened Image Postgres sidecar
 - Open vSwitch/OVN for the Terrarium LXD workload network
 - [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening)
 
@@ -47,6 +47,8 @@ These can be overridden with:
 - general state: `/var/lib/terrarium`
 - oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy`
 - route-auth oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy-routes`
+- local ZITADEL instance: `terrarium-idp`
+- local ZITADEL bootstrap password: `lxc exec terrarium-idp -- cat /etc/terrarium/secrets/zitadel_admin_password`
 - S3 catalog: `/var/lib/terrarium/catalog`
 - last exported snapshots: `/var/lib/terrarium/lastsnapshots`
 

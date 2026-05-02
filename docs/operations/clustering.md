@@ -124,6 +124,11 @@ through the tunnel address, exports the shared config from LXD's dqlite-backed
 store to `/etc/terrarium/config.yaml`, and runs `terrariumctl reconfigure` on
 that node.
 
+When local ZITADEL is enabled, it is a single Terrarium-managed LXD system
+instance named `terrarium-idp`. Joined nodes see that instance through the
+shared LXD cluster state and reconcile against it; they do not bootstrap their
+own independent ZITADEL databases.
+
 ## OVN Networking
 
 Terrarium creates an OVN workload network named `terrarium-ovn` and points the
@@ -298,5 +303,6 @@ Current Terrarium clustering intentionally stops at safe primitives:
   the same logical network.
 - ZFS storage is still local to each member unless you separately add shared or
   replicated storage workflows.
-- Traefik, Cockpit, ZITADEL, and backup timers are reconciled locally on each
-  node; public entrypoint failover is a separate load-balancing/DNS decision.
+- Traefik, Cockpit, and backup timers are reconciled locally on each node; the
+  local ZITADEL deployment is one managed LXD instance named `terrarium-idp`.
+  Public entrypoint failover is still a separate load-balancing/DNS decision.

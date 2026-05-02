@@ -1,8 +1,3 @@
 - name: reload terrarium zitadel systemd
   ansible.builtin.systemd:
     daemon_reload: true
-
-- name: restart terrarium zitadel
-  ansible.builtin.systemd:
-    name: terrarium-zitadel.service
-    state: restarted

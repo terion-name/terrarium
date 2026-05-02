@@ -33,11 +33,14 @@ export async function statusCmd(): Promise<void> {
   const mode = idpMode(config);
   const idp = idpEnabled(config);
   const adminRole = adminGroup(config);
+  const zitadelInstance = configString(config, "terrarium_zitadel_instance_name", "terrarium-idp");
 
   const traefik = await runAllowFailure(["systemctl", "is-active", "traefik"]);
   const cockpit = await runAllowFailure(["systemctl", "is-active", "cockpit.socket"]);
   const lxdState = await runAllowFailure(["systemctl", "is-active", "snap.lxd.daemon"]);
-  const zitadel = localIdpEnabled(config) ? await runAllowFailure(["systemctl", "is-active", "terrarium-zitadel.service"]) : null;
+  const zitadel = localIdpEnabled(config)
+    ? await runAllowFailure(["lxc", "exec", zitadelInstance, "--", "systemctl", "is-active", "terrarium-zitadel.service"])
+    : null;
   const oauth2Proxy = idp ? await runAllowFailure(["systemctl", "is-active", "terrarium-oauth2-proxy.service"]) : null;
   const s3Timer = await runAllowFailure(["systemctl", "is-active", "terrarium-s3-backup.timer"]);
   const syncoidTimer = await runAllowFailure(["systemctl", "is-active", "terrarium-syncoid.timer"]);
@@ -58,7 +61,12 @@ export async function statusCmd(): Promise<void> {
   }
   if (localIdpEnabled(config)) {
     console.log(`  ${label("ZITADEL:")} ${value(`https://${auth}`)}`);
-    console.log(`  ${label("ZITADEL bootstrap password:")} ${value("/etc/terrarium/secrets/zitadel_admin_password")}`);
+    console.log(`  ${label("ZITADEL instance:")} ${value(zitadelInstance)}`);
+    console.log(
+      `  ${label("ZITADEL bootstrap password:")} ${value(
+        `lxc exec ${zitadelInstance} -- cat /etc/terrarium/secrets/zitadel_admin_password`
+      )}`
+    );
   }
   console.log(`  ${label("traefik:")} ${value(traefik.stdout.trim())}`);
   console.log(`  ${label("cockpit.socket:")} ${value(cockpit.stdout.trim())}`);
@@ -67,7 +75,7 @@ export async function statusCmd(): Promise<void> {
     console.log(`  ${label("terrarium-oauth2-proxy.service:")} ${value(oauth2Proxy.stdout.trim())}`);
   }
   if (zitadel) {
-    console.log(`  ${label("terrarium-zitadel.service:")} ${value(zitadel.stdout.trim())}`);
+    console.log(`  ${label("terrarium-zitadel.service in LXD:")} ${value(zitadel.stdout.trim())}`);
   }
   console.log(`  ${label("terrarium-s3-backup.timer:")} ${value(s3Timer.stdout.trim())}`);
   console.log(`  ${label("terrarium-syncoid.timer:")} ${value(syncoidTimer.stdout.trim())}`);

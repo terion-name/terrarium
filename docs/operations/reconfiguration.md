@@ -43,7 +43,7 @@ exact member CIDRs to the peer firewall list.
 - Traefik config changes trigger a Traefik restart
 - `oauth2-proxy` is rendered and restarted when IDP, admin-group, or management-domain settings change
 - LXD domain, ACME, OIDC issuer/client settings, and IdP group mappings are applied directly through `lxc config set` and `lxc auth`
-- self-hosted ZITADEL is enabled, disabled, or restarted when its rendered config changes
+- self-hosted ZITADEL is enabled, disabled, or restarted inside the managed `terrarium-idp` LXD instance when its rendered config changes
 - Terrarium then re-runs `terrariumctl proxy sync`
 - when IDP mode is `local`, Terrarium also re-runs `terrariumctl idp sync`
 
@@ -73,6 +73,7 @@ Local ZITADEL:
 
 ```bash
 terrariumctl set idp local
+terrariumctl idp status
 ```
 
 External OIDC:

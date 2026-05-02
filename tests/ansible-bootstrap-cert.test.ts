@@ -65,12 +65,32 @@ describe("Traefik bootstrap certificate template", () => {
     expect(tasks).toContain("retries: 6");
   });
 
+  test("runs local ZITADEL as a protected LXD system instance", () => {
+    const site = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/tasks/main.yml"), "utf8");
+    const defaults = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/defaults/main.yml"), "utf8");
+
+    expect(site.indexOf("- role: lxd")).toBeLessThan(site.indexOf("- role: idp_zitadel"));
+    expect(site.indexOf("- role: idp_zitadel")).toBeLessThan(site.indexOf("- role: oauth2_proxy"));
+    expect(site).toContain("terrarium_zitadel_instance_name: terrarium-idp");
+    expect(site).toContain('terrarium_zitadel_instance_name: "{{ terrarium_zitadel_instance_name }}"');
+    expect(defaults).toContain("terrarium_zitadel_instance_name: terrarium-idp");
+    expect(tasks).toContain("Launch ZITADEL system instance");
+    expect(tasks).toContain("Resolve local LXD member for first ZITADEL placement");
+    expect(tasks).toContain("--target {{ terrarium_zitadel_instance_target | default(ansible_hostname) }}");
+    expect(tasks).toContain("user.terrarium.system");
+    expect(tasks).toContain("lxc exec {{ terrarium_zitadel_instance_name }} -- bash -lc");
+    expect(tasks).toContain("Migrate legacy host ZITADEL data into system instance when present");
+    expect(tasks).toContain("Ensure host loopback proxies reach the ZITADEL system instance");
+    expect(tasks).not.toContain("- name: Install ZITADEL runtime packages");
+  });
+
   test("keeps local ZITADEL secret material out of world-readable paths and logs", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/tasks/main.yml"), "utf8");
     const playbook = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
 
     expect(tasks).toContain('mode: "0700"');
-    expect(tasks).toContain("Read ZITADEL master key");
+    expect(tasks).toContain("Read ZITADEL master key from system instance");
     expect(tasks.match(/no_log: true/g)?.length).toBeGreaterThanOrEqual(4);
     expect(playbook).toContain("Refresh config bundle with resolved admin group");
     expect(playbook).toContain("no_log: true");

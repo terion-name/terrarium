@@ -30,6 +30,7 @@ import {
   setSyncoidCmd
 } from "./ctl/config";
 import { mountAddCmd, mountListCmd, mountRemoveCmd } from "./ctl/mount";
+import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
 
@@ -280,12 +281,38 @@ cli
 
 cli
   .command("idp <action>", "Identity provider operations")
-  .usage("idp sync")
-  .action(async (action) => {
-    if (action !== "sync") {
-      throw new Error(`unsupported idp action: ${action}`);
+  .option("--source <source>", "Restore source: local or s3")
+  .option("--at <snapshotOrTimestamp>", "Snapshot name fragment or timestamp")
+  .option("--as-new <name>", "Restore as a new instance")
+  .option("--lines <count>", "Log lines to show", { ...STRING_OPTION, default: "120" })
+  .usage("idp sync | idp status | idp logs [--lines N] | idp backup | idp restore [--source local|s3] [--at SNAPSHOT|TIMESTAMP] [--as-new NAME]")
+  .action(async (action, options) => {
+    const rawOptions = options as Record<string, unknown>;
+    if (action === "sync") {
+      await syncIdpConfig();
+      return;
     }
-    await syncIdpConfig();
+    if (action === "status") {
+      await idpStatusCmd();
+      return;
+    }
+    if (action === "logs") {
+      await idpLogsCmd(cliOption(rawOptions, "lines"));
+      return;
+    }
+    if (action === "backup") {
+      await idpBackupCmd();
+      return;
+    }
+    if (action === "restore") {
+      await idpRestoreCmd({
+        source: cliOption(rawOptions, "source"),
+        at: cliOption(rawOptions, "at"),
+        asNew: cliOption(rawOptions, "asNew", ["as-new"])
+      });
+      return;
+    }
+    throw new Error(`unsupported idp action: ${action}`);
   });
 
 cli

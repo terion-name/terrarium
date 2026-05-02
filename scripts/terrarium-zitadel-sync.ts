@@ -5,6 +5,7 @@ import { configString, loadConfig, readJsonFile, runAllowFailure, runText, write
 
 const PREFIX = "terrariumctl idp sync";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
+const DEFAULT_ZITADEL_INSTANCE_NAME = "terrarium-idp";
 const DEFAULT_ZITADEL_DIR = "/var/lib/terrarium/zitadel";
 const DEFAULT_BOOTSTRAP_DIR = "/var/lib/terrarium/zitadel/bootstrap";
 const DEFAULT_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
@@ -41,6 +42,28 @@ async function waitForFile(path: string, label: string): Promise<void> {
   throw new Error(`timed out waiting for ${label}: ${path}`);
 }
 
+async function lxcInstanceExists(instanceName: string): Promise<boolean> {
+  if (!Bun.which("lxc")) {
+    return false;
+  }
+  return (await runAllowFailure(["lxc", "info", instanceName])).exitCode === 0;
+}
+
+async function waitForContainerFile(instanceName: string, path: string, label: string): Promise<void> {
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(["lxc", "exec", instanceName, "--", "test", "-f", path]);
+    if (result.exitCode === 0) {
+      return;
+    }
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  throw new Error(`timed out waiting for ${label}: ${instanceName}${path}`);
+}
+
+async function readContainerFile(instanceName: string, path: string): Promise<string> {
+  return await runText(["lxc", "exec", instanceName, "--", "cat", path], PREFIX);
+}
+
 function trustedCaArgs(): string[] {
   return existsSync(DEFAULT_SYSTEM_CA_BUNDLE_PATH) ? ["--cacert", DEFAULT_SYSTEM_CA_BUNDLE_PATH] : [];
 }
@@ -71,6 +94,35 @@ async function waitForApiReady(stackDir: string): Promise<void> {
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
   throw new Error(`timed out waiting for ZITADEL API readiness: ${lastError}`);
+}
+
+async function waitForContainerApiReady(instanceName: string, stackDir: string): Promise<void> {
+  let lastError = "";
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure([
+      "lxc",
+      "exec",
+      instanceName,
+      "--",
+      "docker",
+      "compose",
+      "--project-name",
+      "terrarium-zitadel",
+      "-f",
+      `${stackDir}/docker-compose.yml`,
+      "exec",
+      "-T",
+      "zitadel-api",
+      "/app/zitadel",
+      "ready"
+    ]);
+    if (result.exitCode === 0) {
+      return;
+    }
+    lastError = result.stderr.trim() || result.stdout.trim() || "container is not ready yet";
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+  throw new Error(`timed out waiting for ZITADEL API readiness in ${instanceName}: ${lastError}`);
 }
 
 async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
@@ -613,6 +665,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   }
 
   const authDomain = configString(config, "terrarium_auth_domain");
+  const instanceName = configString(config, "terrarium_zitadel_instance_name", DEFAULT_ZITADEL_INSTANCE_NAME);
   const zitadelDir = configString(config, "terrarium_zitadel_dir") || DEFAULT_ZITADEL_DIR;
   const bootstrapDir = configString(config, "terrarium_zitadel_bootstrap_dir") || DEFAULT_BOOTSTRAP_DIR;
   const outputsPath = configString(config, "terrarium_zitadel_outputs_path") || DEFAULT_OUTPUTS_PATH;
@@ -621,12 +674,21 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
     throw new Error("terrarium_auth_domain is empty");
   }
 
-  await waitForFile(`${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
-  await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
-  await waitForApiReady(zitadelDir);
+  const useLxdInstance = await lxcInstanceExists(instanceName);
+  if (useLxdInstance) {
+    await waitForContainerFile(instanceName, `${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
+    await waitForContainerFile(instanceName, `${bootstrapDir}/login-client.pat`, "login client PAT");
+    await waitForContainerApiReady(instanceName, zitadelDir);
+  } else {
+    await waitForFile(`${bootstrapDir}/admin-sa.json`, "bootstrap machine key");
+    await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
+    await waitForApiReady(zitadelDir);
+  }
   await waitForTrustedHttpsDiscovery(authDomain);
 
-  const adminPat = readFileSync(join(bootstrapDir, "admin-sa.pat"), "utf8").trim();
+  const adminPat = (
+    useLxdInstance ? await readContainerFile(instanceName, `${bootstrapDir}/admin-sa.pat`) : readFileSync(join(bootstrapDir, "admin-sa.pat"), "utf8")
+  ).trim();
   const adminLoginName = configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
   const adminGroup = configString(config, "terrarium_admin_group", "terrarium-admins");
   if (!adminPat) {

@@ -28,6 +28,8 @@ Useful commands:
 terrariumctl backup list
 terrariumctl backup restore --instance my-app
 terrariumctl backup restore --instance my-app --at autosnap_2026-04-19_10:00:00_hourly
+terrariumctl idp backup
+terrariumctl idp restore
 ```
 
 By default, restore is:
@@ -35,6 +37,25 @@ By default, restore is:
 - source: `local`
 - restore point: latest snapshot
 - mode: in-place
+
+## Local ZITADEL
+
+When local ZITADEL is enabled, Terrarium runs it as the managed LXD instance
+`terrarium-idp`. Its database and bootstrap material live inside that instance,
+so the normal LXD/ZFS snapshot and S3 export machinery covers it.
+
+Useful commands:
+
+```bash
+terrariumctl idp status
+terrariumctl idp backup
+terrariumctl idp restore
+terrariumctl idp restore --source s3 --at autosnap_2026-04-19_10:00:00_hourly
+```
+
+`terrariumctl idp backup` creates a manual recursive snapshot of the IDP
+instance. If S3 exports are enabled, it also exports the current backup chain
+after creating that snapshot.
 
 ## In-Place Restore
 

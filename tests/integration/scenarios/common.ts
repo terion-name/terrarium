@@ -250,7 +250,14 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
 export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: string; password: string }> {
   const config = await host.read("/etc/terrarium/config.yaml");
   const emailMatch = config.match(/terrarium_zitadel_admin_email:\s*(.+)/);
-  const password = (await host.read("/etc/terrarium/secrets/zitadel_admin_password")).trim();
+  const instanceMatch = config.match(/terrarium_zitadel_instance_name:\s*(.+)/);
+  const instance = (instanceMatch?.[1] || "terrarium-idp").trim().replace(/^["']|["']$/g, "");
+  const passwordResult = await host.execAllowFailure(
+    `if lxc info ${shellArg(instance)} >/dev/null 2>&1; then lxc exec ${shellArg(
+      instance
+    )} -- cat /etc/terrarium/secrets/zitadel_admin_password; else cat /etc/terrarium/secrets/zitadel_admin_password; fi`
+  );
+  const password = passwordResult.stdout.trim();
   if (!emailMatch?.[1] || !password) {
     throw new Error("failed to read local ZITADEL bootstrap credentials");
   }

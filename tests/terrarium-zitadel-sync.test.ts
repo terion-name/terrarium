@@ -65,6 +65,14 @@ describe("terrarium local ZITADEL sync", () => {
     expect(source).toContain("runAllowFailure(cmd, { stdin })");
   });
 
+  test("can reconcile against the managed LXD ZITADEL instance", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-zitadel-sync.ts"), "utf8");
+
+    expect(source).toContain('const DEFAULT_ZITADEL_INSTANCE_NAME = "terrarium-idp"');
+    expect(source).toContain("waitForContainerApiReady(instanceName, zitadelDir)");
+    expect(source).toContain("readContainerFile(instanceName, `${bootstrapDir}/admin-sa.pat`)");
+  });
+
   test("treats ZITADEL no-op updates as idempotent success responses", () => {
     expect(isZitadelNoChangesResponse(400, '{"code":9,"message":"No changes"}')).toBe(true);
     expect(isZitadelNoChangesResponse(400, '{"code":3,"message":"bad request"}')).toBe(false);

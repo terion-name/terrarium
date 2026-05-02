@@ -65,6 +65,14 @@ describe("terrarium route auth generation", () => {
     });
   });
 
+  test("reads local ZITADEL bootstrap material from the managed LXD instance", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+
+    expect(source).toContain('const DEFAULT_ZITADEL_INSTANCE_NAME = "terrarium-idp"');
+    expect(source).toContain('runAllowFailure(["lxc", "exec", instanceName, "--", "cat", patPath])');
+    expect(source).toContain("readLocalZitadelPat(config)");
+  });
+
   test("treats ZITADEL no-op updates as successful idempotent responses", () => {
     expect(
       isZitadelNoChangesResponse(

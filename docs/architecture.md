@@ -47,7 +47,7 @@ bootstrap, token, and join flows instead of running a second membership system.
 - Cockpit listens on loopback and is reverse-proxied through Traefik.
 - A host-level `oauth2-proxy` instance also listens on loopback and is published through same-domain `/oauth2/*` routes on both the Cockpit and Traefik dashboard hostnames.
 - LXD listens on loopback and is reverse-proxied through Traefik on the public LXD hostname. LXD still owns its native API/UI OIDC auth model.
-- Self-hosted ZITADEL, when enabled, is also published through Traefik.
+- Self-hosted ZITADEL, when enabled, runs as the Terrarium-managed `terrarium-idp` LXD system instance and is published through Traefik.
 - UFW defaults to deny incoming and allow outgoing. Terrarium explicitly opens only the expected public ports, then adds or removes dynamic TCP/UDP rules for container-level proxy exposure.
 
 ## Network Isolation Model
@@ -116,7 +116,7 @@ workload design decisions.
 - If root does not already have one, Terrarium prompts for a password during interactive install or requires `--generate-root-pwd` or `--root-pwd-file` in non-interactive mode.
 - Generated Cockpit root passwords are saved under `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions and are not written to `/etc/terrarium/config.yaml`.
 - IDP mode has two variants:
-  - `local`: Terrarium deploys ZITADEL and derives the OIDC issuer from the Terrarium auth domain.
+  - `local`: Terrarium deploys ZITADEL in the `terrarium-idp` LXD system instance and derives the OIDC issuer from the Terrarium auth domain.
   - `oidc`: Terrarium uses an external OIDC issuer and stores the issuer URL plus client credentials.
 - Terrarium persists `terrarium_admin_group`, defaulting to `terrarium-admins` in local mode.
 - For self-hosted ZITADEL, Terrarium provisions the management role and a token-complement Action that emits a flat `groups` claim.

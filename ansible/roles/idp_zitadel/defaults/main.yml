@@ -3,6 +3,10 @@ terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
 terrarium_zitadel_postgres_dir: "{{ terrarium_zitadel_dir }}/postgres"
 terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"
 terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
+terrarium_zitadel_stage_dir: "{{ terrarium_state_dir }}/zitadel-container"
+terrarium_zitadel_instance_name: terrarium-idp
+terrarium_zitadel_instance_image: images:ubuntu/24.04
+terrarium_zitadel_instance_profile: terrarium
 terrarium_zitadel_api_port: 8082
 terrarium_zitadel_login_port: 8083
 terrarium_zitadel_version: v4.13.0

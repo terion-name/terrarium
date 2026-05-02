@@ -1176,7 +1176,7 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   console.log(`${chalk.cyan("LXD UI/API:")} ${chalk.white(`https://${options.lxdDomain}`)}`);
   if (options.idpMode === "local") {
     console.log(`${chalk.cyan("ZITADEL:")} ${chalk.white(`https://${options.authDomain}`)}`);
-    console.log(`${chalk.cyan("ZITADEL bootstrap password:")} ${chalk.white("/etc/terrarium/secrets/zitadel_admin_password")}`);
+    console.log(`${chalk.cyan("ZITADEL bootstrap password:")} ${chalk.white("lxc exec terrarium-idp -- cat /etc/terrarium/secrets/zitadel_admin_password")}`);
   }
   console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
   console.log(`${chalk.cyan("Management admin group:")} ${chalk.white(options.adminGroup)}`);

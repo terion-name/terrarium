@@ -545,6 +545,8 @@
   ansible.builtin.slurp:
     src: "{{ terrarium_zitadel_outputs_path }}"
   register: terrarium_lxd_zitadel_outputs_raw
+  failed_when: false
+  changed_when: false
   when:
     - terrarium_idp_mode == 'local'
     - terrarium_zitadel_outputs_path is defined
@@ -562,7 +564,7 @@
     terrarium_lxd_oidc_client_id_effective: >-
       {{
         (
-          terrarium_lxd_zitadel_outputs.lxd_client_id.value
+          (terrarium_lxd_zitadel_outputs | default({})).get('lxd_client_id', {}).get('value', '')
           if terrarium_idp_mode == 'local'
           else ((terrarium_lxd_oidc_client_id | default('', true)) or terrarium_oidc_client_id)
         ) | default('', true)

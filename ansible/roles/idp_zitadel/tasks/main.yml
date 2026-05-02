@@ -1,106 +1,258 @@
 - name: Configure self-hosted ZITADEL
   when: terrarium_zitadel_enabled | bool
   block:
-    - name: Install ZITADEL runtime packages
-      ansible.builtin.apt:
-        name:
-          - docker.io
-        state: present
-
-    - name: Install Docker Compose v2 package
-      ansible.builtin.apt:
-        name: docker-compose-v2
-        state: present
-      register: terrarium_compose_v2_install
-      ignore_errors: true
-
-    - name: Install Docker Compose plugin fallback
-      ansible.builtin.apt:
-        name: docker-compose-plugin
-        state: present
-      when: terrarium_compose_v2_install is failed
-
-    - name: Enable Docker
+    - name: Stop legacy host ZITADEL compose service
       ansible.builtin.systemd:
-        name: docker
-        state: started
-        enabled: true
+        name: terrarium-zitadel.service
+        state: stopped
+        enabled: false
+      failed_when: false
 
-    - name: Create ZITADEL directories
+    - name: Remove legacy host ZITADEL systemd unit
       ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        mode: "0700"
+        path: /etc/systemd/system/terrarium-zitadel.service
+        state: absent
+      notify: reload terrarium zitadel systemd
+
+    - name: Check whether ZITADEL system instance exists
+      ansible.builtin.command: "/snap/bin/lxc info {{ terrarium_zitadel_instance_name }}"
+      register: terrarium_zitadel_instance_info
+      failed_when: false
+      changed_when: false
+
+    - name: Resolve local LXD member for first ZITADEL placement
+      ansible.builtin.command: /snap/bin/lxc query /1.0
+      register: terrarium_zitadel_local_lxd_info
+      changed_when: false
+      when:
+        - terrarium_cluster_enabled | bool
+        - terrarium_zitadel_instance_info.rc != 0
+
+    - name: Parse local LXD member for first ZITADEL placement
+      ansible.builtin.set_fact:
+        terrarium_zitadel_instance_target: "{{ (terrarium_zitadel_local_lxd_info.stdout | from_json).environment.server_name | default('') }}"
+      when:
+        - terrarium_cluster_enabled | bool
+        - terrarium_zitadel_instance_info.rc != 0
+
+    - name: Assert local LXD member was resolved for first ZITADEL placement
+      ansible.builtin.assert:
+        that:
+          - terrarium_zitadel_instance_target | default('') | length > 0
+        fail_msg: "failed to resolve local LXD cluster member for {{ terrarium_zitadel_instance_name }} placement"
+      when:
+        - terrarium_cluster_enabled | bool
+        - terrarium_zitadel_instance_info.rc != 0
+
+    - name: Launch ZITADEL system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc launch {{ terrarium_zitadel_instance_image }}
+        {{ terrarium_zitadel_instance_name }}
+        --profile {{ terrarium_zitadel_instance_profile }}
+        {% if terrarium_cluster_enabled | bool %}--target {{ terrarium_zitadel_instance_target | default(ansible_hostname) }}{% endif %}
+      when: terrarium_zitadel_instance_info.rc != 0
+
+    - name: Mark ZITADEL system instance
+      ansible.builtin.command: "/snap/bin/lxc config set {{ terrarium_zitadel_instance_name }} {{ item.key }} {{ item.value }}"
       loop:
-        - "{{ terrarium_zitadel_dir }}"
-        - "{{ terrarium_zitadel_postgres_dir }}"
-        - "{{ terrarium_zitadel_bootstrap_dir }}"
+        - { key: "boot.autostart", value: "true" }
+        - { key: "user.terrarium.system", value: "idp" }
+      changed_when: false
 
-    - name: Generate ZITADEL master key
-      ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 > /etc/terrarium/secrets/zitadel_masterkey"
-      args:
-        creates: /etc/terrarium/secrets/zitadel_masterkey
+    - name: Wait for ZITADEL system instance to accept commands
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- true"
+      register: terrarium_zitadel_instance_ready
+      until: terrarium_zitadel_instance_ready.rc == 0
+      retries: 30
+      delay: 4
+      changed_when: false
 
-    - name: Generate ZITADEL Postgres password
-      ansible.builtin.shell: "umask 077 && tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48 > /etc/terrarium/secrets/zitadel_postgres_password"
-      args:
-        creates: /etc/terrarium/secrets/zitadel_postgres_password
+    - name: Wait for cloud-init in ZITADEL system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- cloud-init status --wait"
+      register: terrarium_zitadel_cloud_init
+      failed_when: false
+      changed_when: false
 
-    - name: Generate ZITADEL bootstrap admin password
+    - name: Install Docker runtime inside ZITADEL system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- bash -lc
+        'set -euo pipefail;
+        export DEBIAN_FRONTEND=noninteractive;
+        apt-get update;
+        apt-get install -y docker.io docker-compose-v2 || apt-get install -y docker.io docker-compose-plugin;
+        systemctl enable --now docker'
+      register: terrarium_zitadel_container_docker_install
+      until: terrarium_zitadel_container_docker_install.rc == 0
+      retries: 5
+      delay: 10
+      changed_when: false
+
+    - name: Create ZITADEL directories inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- install -d -m 0700
+        /etc/terrarium/secrets
+        {{ terrarium_zitadel_dir }}
+        {{ terrarium_zitadel_postgres_dir }}
+        {{ terrarium_zitadel_bootstrap_dir }}
+      changed_when: false
+
+    - name: Migrate legacy host ZITADEL data into system instance when present
       ansible.builtin.shell: |
-        umask 077
-        pw="$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)!$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 28)"
-        printf '%s' "$pw" > /etc/terrarium/secrets/zitadel_admin_password
-      args:
-        creates: /etc/terrarium/secrets/zitadel_admin_password
+        set -euo pipefail
+        instance={{ terrarium_zitadel_instance_name | quote }}
+        source_dir={{ terrarium_zitadel_dir | quote }}
+        target_dir={{ terrarium_zitadel_dir | quote }}
 
-    - name: Read ZITADEL master key
-      ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_masterkey
+        if [ ! -d "$source_dir" ]; then
+          exit 0
+        fi
+        if ! find "$source_dir" -mindepth 1 -maxdepth 1 | grep -q .; then
+          exit 0
+        fi
+        if /snap/bin/lxc exec "$instance" -- test -f "$target_dir/postgres/PG_VERSION"; then
+          exit 0
+        fi
+
+        tar -C "$source_dir" -cpf - . | /snap/bin/lxc exec "$instance" -- tar -C "$target_dir" -xpf -
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Migrate legacy host ZITADEL secrets into system instance when present
+      ansible.builtin.shell: |
+        set -euo pipefail
+        instance={{ terrarium_zitadel_instance_name | quote }}
+        for name in zitadel_masterkey zitadel_postgres_password zitadel_admin_password; do
+          source="/etc/terrarium/secrets/$name"
+          target="/etc/terrarium/secrets/$name"
+          if [ -f "$source" ] && ! /snap/bin/lxc exec "$instance" -- test -f "$target"; then
+            /snap/bin/lxc file push "$source" "$instance$target"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Generate ZITADEL secrets inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- bash -lc
+        'set -eu;
+        umask 077;
+        [ -f /etc/terrarium/secrets/zitadel_masterkey ] || tr -dc "A-Za-z0-9" </dev/urandom | head -c 32 > /etc/terrarium/secrets/zitadel_masterkey;
+        [ -f /etc/terrarium/secrets/zitadel_postgres_password ] || tr -dc "A-Za-z0-9" </dev/urandom | head -c 48 > /etc/terrarium/secrets/zitadel_postgres_password;
+        if [ ! -f /etc/terrarium/secrets/zitadel_admin_password ]; then
+          pw="$(tr -dc "A-Z" </dev/urandom | head -c 1)$(tr -dc "a-z" </dev/urandom | head -c 1)$(tr -dc "0-9" </dev/urandom | head -c 1)!$(tr -dc "A-Za-z0-9" </dev/urandom | head -c 28)";
+          printf "%s" "$pw" > /etc/terrarium/secrets/zitadel_admin_password;
+        fi'
+      changed_when: false
+      no_log: true
+
+    - name: Copy Docker registry credentials into ZITADEL system instance when present
+      ansible.builtin.shell: |
+        set -euo pipefail
+        source=/root/.docker/config.json
+        instance={{ terrarium_zitadel_instance_name | quote }}
+        if [ ! -f "$source" ]; then
+          exit 0
+        fi
+        /snap/bin/lxc exec "$instance" -- install -d -m 0700 /root/.docker
+        /snap/bin/lxc file push "$source" "$instance/root/.docker/config.json"
+        /snap/bin/lxc exec "$instance" -- chmod 0600 /root/.docker/config.json
+      args:
+        executable: /bin/bash
+      changed_when: false
+      no_log: true
+
+    - name: Read ZITADEL master key from system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- cat /etc/terrarium/secrets/zitadel_masterkey"
       register: terrarium_zitadel_masterkey_raw
       changed_when: false
       no_log: true
 
-    - name: Read ZITADEL Postgres password
-      ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_postgres_password
+    - name: Read ZITADEL Postgres password from system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- cat /etc/terrarium/secrets/zitadel_postgres_password"
       register: terrarium_zitadel_postgres_password_raw
       changed_when: false
       no_log: true
 
-    - name: Read ZITADEL bootstrap admin password
-      ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_admin_password
+    - name: Read ZITADEL bootstrap admin password from system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- cat /etc/terrarium/secrets/zitadel_admin_password"
       register: terrarium_zitadel_admin_password_raw
       changed_when: false
       no_log: true
 
-    - name: Render ZITADEL compose stack
+    - name: Create local ZITADEL staging directory
+      ansible.builtin.file:
+        path: "{{ terrarium_zitadel_stage_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Render ZITADEL compose stack for system instance
       ansible.builtin.template:
         src: docker-compose.yml.j2
-        dest: "{{ terrarium_zitadel_dir }}/docker-compose.yml"
+        dest: "{{ terrarium_zitadel_stage_dir }}/docker-compose.yml"
         mode: "0600"
       vars:
         terrarium_zitadel_masterkey: "{{ terrarium_zitadel_masterkey_raw.stdout }}"
         terrarium_zitadel_postgres_password: "{{ terrarium_zitadel_postgres_password_raw.stdout }}"
         terrarium_zitadel_admin_password: "{{ terrarium_zitadel_admin_password_raw.stdout }}"
+      register: terrarium_zitadel_compose_render
       no_log: true
-      notify: restart terrarium zitadel
 
-    - name: Render ZITADEL systemd unit
+    - name: Render ZITADEL systemd unit for system instance
       ansible.builtin.template:
         src: terrarium-zitadel.service.j2
-        dest: /etc/systemd/system/terrarium-zitadel.service
-        mode: "0644"
-      notify:
-        - reload terrarium zitadel systemd
-        - restart terrarium zitadel
+        dest: "{{ terrarium_zitadel_stage_dir }}/terrarium-zitadel.service"
+        mode: "0600"
+      register: terrarium_zitadel_unit_render
 
-    - name: Flush ZITADEL handlers
-      ansible.builtin.meta: flush_handlers
+    - name: Push ZITADEL compose stack into system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc file push
+        {{ terrarium_zitadel_stage_dir }}/docker-compose.yml
+        {{ terrarium_zitadel_instance_name }}{{ terrarium_zitadel_dir }}/docker-compose.yml
+      changed_when: terrarium_zitadel_compose_render.changed
+      no_log: true
 
-    - name: Enable ZITADEL compose service
-      ansible.builtin.systemd:
-        name: terrarium-zitadel.service
-        state: started
-        enabled: true
+    - name: Push ZITADEL systemd unit into system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc file push
+        {{ terrarium_zitadel_stage_dir }}/terrarium-zitadel.service
+        {{ terrarium_zitadel_instance_name }}/etc/systemd/system/terrarium-zitadel.service
+      changed_when: terrarium_zitadel_unit_render.changed
+
+    - name: Enable ZITADEL compose service inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- bash -lc
+        'systemctl daemon-reload && systemctl enable --now terrarium-zitadel.service'
+      changed_when: false
+
+    - name: Restart ZITADEL compose service after managed file changes
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- systemctl restart terrarium-zitadel.service"
+      when: terrarium_zitadel_compose_render.changed or terrarium_zitadel_unit_render.changed
+
+    - name: Ensure host loopback proxies reach the ZITADEL system instance
+      ansible.builtin.shell: |
+        set -euo pipefail
+        instance={{ terrarium_zitadel_instance_name | quote }}
+        ensure_proxy() {
+          name="$1"
+          port="$2"
+          listen="tcp:127.0.0.1:${port}"
+          connect="tcp:127.0.0.1:${port}"
+          current_listen="$(/snap/bin/lxc config device get "$instance" "$name" listen 2>/dev/null || true)"
+          current_connect="$(/snap/bin/lxc config device get "$instance" "$name" connect 2>/dev/null || true)"
+          if [ "$current_listen" = "$listen" ] && [ "$current_connect" = "$connect" ]; then
+            return
+          fi
+          /snap/bin/lxc config device remove "$instance" "$name" >/dev/null 2>&1 || true
+          /snap/bin/lxc config device add "$instance" "$name" proxy "listen=${listen}" "connect=${connect}" bind=host
+        }
+        ensure_proxy terrarium-zitadel-api {{ terrarium_zitadel_api_port }}
+        ensure_proxy terrarium-zitadel-login {{ terrarium_zitadel_login_port }}
+      args:
+        executable: /bin/bash
+      changed_when: false
 
     - name: Run ZITADEL reconciliation
       ansible.builtin.command: /usr/local/bin/terrariumctl idp sync
@@ -113,15 +265,21 @@
 - name: Disable self-hosted ZITADEL service when not enabled
   when: not (terrarium_zitadel_enabled | bool)
   block:
-    - name: Stop and disable ZITADEL compose service
+    - name: Stop and disable legacy host ZITADEL compose service
       ansible.builtin.systemd:
         name: terrarium-zitadel.service
         state: stopped
         enabled: false
       failed_when: false
 
-    - name: Remove ZITADEL systemd unit
+    - name: Remove legacy host ZITADEL systemd unit
       ansible.builtin.file:
         path: /etc/systemd/system/terrarium-zitadel.service
         state: absent
       notify: reload terrarium zitadel systemd
+
+    - name: Stop ZITADEL service inside system instance when present
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- systemctl disable --now terrarium-zitadel.service"
+      register: terrarium_zitadel_container_disable
+      failed_when: false
+      changed_when: terrarium_zitadel_container_disable.rc == 0
