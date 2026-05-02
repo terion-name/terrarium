@@ -35,6 +35,7 @@ What this does:
 - prefers a private/VPC address when one exists
 - opens LXD/OVN firewall rules only for exact cluster peer addresses
 - configures this node as the first OVN central member
+- generates a Terrarium-owned OVN certificate authority for mTLS
 - sets LXD's reachable cluster API listener
 - enables LXD clustering on the local server
 - stores Terrarium cluster/OVN settings in the shared config
@@ -65,6 +66,13 @@ For convenience, Terrarium accepts plain peer IPs and stores them as exact
 CIDRs.
 Only pass a subnet such as `10.0.0.0/24` when every host in that subnet is
 trusted to reach the cluster control plane.
+
+OVN database access is also mutually authenticated. Terrarium creates an OVN CA
+during cluster initialization, stores it in the root-only shared Terrarium
+config, issues a local node certificate during reconfiguration, and configures
+OVN northbound/southbound database clients to use `ssl:` remotes. The firewall
+is still important defense-in-depth, but a host in an allowed peer CIDR also
+needs a Terrarium-issued OVN certificate to talk to the OVN databases.
 
 ## Join Additional Members
 
@@ -183,7 +191,9 @@ terrariumctl cluster ovn configure \
 Use an odd number of OVN central addresses. Terrarium starts `ovn-central` on
 members whose local address is in that list, runs `ovn-host` everywhere, points
 Open vSwitch at the shared southbound database, and sets LXD's OVN northbound
-connection.
+connection. OVN database listeners use passive SSL (`pssl`) and Terrarium
+configures LXD/Open vSwitch with the shared CA plus this node's client
+certificate.
 
 `cluster ovn configure` reconciles the node where you run it. Existing members
 read the same shared config, but they still need `terrariumctl reconfigure` if

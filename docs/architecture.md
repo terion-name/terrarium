@@ -94,6 +94,11 @@ The default cluster commands use exact `/32` IPv4 or `/128` IPv6 peer entries.
 Broader CIDRs are supported only as an explicit operator choice and should be
 reserved for fully trusted private networks.
 
+OVN database access has a second boundary: Terrarium generates a cluster OVN CA
+and configures OVN central, LXD, and Open vSwitch with certificate-backed
+`ssl:` database remotes. This authenticates OVN control-plane clients; it does
+not encrypt arbitrary workload traffic or the Geneve overlay by itself.
+
 This is enough for one LXD management plane and cross-member container
 networking. It is not a blanket HA promise: storage locality, instance
 placement, public endpoint failover, and stateful app replication remain

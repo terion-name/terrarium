@@ -1,6 +1,8 @@
 import { confirm, input } from "@inquirer/prompts";
 import { createHash } from "node:crypto";
-import { dirname } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import { configString, runAllowFailure, runText, shellEscape } from "../lib/common";
 import {
@@ -33,6 +35,7 @@ const TIMEOUT = process.env.TERRARIUM_TIMEOUT_BIN ?? "timeout";
 const GETENT = process.env.TERRARIUM_GETENT_BIN ?? "getent";
 const SYSTEMD_RUN = process.env.TERRARIUM_SYSTEMD_RUN_BIN ?? "systemd-run";
 const TERRARIUMCTL = process.env.TERRARIUMCTL_BIN ?? "/usr/local/bin/terrariumctl";
+const OPENSSL = process.env.TERRARIUM_OPENSSL_BIN ?? "openssl";
 const CLUSTER_FIREWALL_RULES = [
   { port: "8443", proto: "tcp" },
   { port: "6081", proto: "udp" },
@@ -145,6 +148,11 @@ export type ClusterMovePlanItem = {
 type PendingClusterInvite = {
   peer_cidr: string;
   expires_at: string;
+};
+
+type OvnCaMaterial = {
+  cert: string;
+  key: string;
 };
 
 export function normalizeClusterEndpoint(value: string, defaultPort = DEFAULT_CLUSTER_PORT): string {
@@ -423,8 +431,12 @@ function configStringArray(config: MutableConfig, key: string): string[] {
   return [];
 }
 
-export function ovnTcpEndpoints(addresses: string[], port: "6641" | "6642"): string {
-  return addresses.map((address) => `tcp:${address}:${port}`).join(",");
+function ovnEndpointHost(address: string): string {
+  return address.includes(":") && !address.startsWith("[") ? `[${address}]` : address;
+}
+
+export function ovnDbEndpoints(addresses: string[], port: "6641" | "6642", scheme = "ssl"): string {
+  return addresses.map((address) => `${scheme}:${ovnEndpointHost(address)}:${port}`).join(",");
 }
 
 export function buildJoinPreseed(options: JoinPreseedOptions): string {
@@ -505,6 +517,53 @@ export function applyClusterConfig(config: MutableConfig, options: { network: st
   setConfigValue(config, "terrarium_lxd_network_parent", options.parent);
   setConfigValue(config, "terrarium_ovn_central_addresses", options.centralAddresses);
   setConfigValue(config, "terrarium_cluster_peer_cidrs", options.peerCidrs);
+}
+
+async function createOvnCaMaterial(): Promise<OvnCaMaterial> {
+  const dir = mkdtempSync(join(tmpdir(), "terrarium-ovn-ca-"));
+  const keyPath = join(dir, "ca.key");
+  const certPath = join(dir, "ca.crt");
+
+  try {
+    await runText(
+      [
+        OPENSSL,
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:4096",
+        "-nodes",
+        "-days",
+        "3650",
+        "-sha256",
+        "-subj",
+        "/CN=Terrarium OVN CA",
+        "-keyout",
+        keyPath,
+        "-out",
+        certPath
+      ],
+      PREFIX
+    );
+    return {
+      cert: readFileSync(certPath, "utf8"),
+      key: readFileSync(keyPath, "utf8")
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function ensureOvnCaMaterial(config: MutableConfig): Promise<void> {
+  const existingCert = configString(config, "terrarium_ovn_ca_cert");
+  const existingKey = configString(config, "terrarium_ovn_ca_key");
+  if (existingCert.trim() && existingKey.trim()) {
+    return;
+  }
+
+  const material = await createOvnCaMaterial();
+  setConfigValue(config, "terrarium_ovn_ca_cert", material.cert);
+  setConfigValue(config, "terrarium_ovn_ca_key", material.key);
 }
 
 async function converge(skipReconfigure: boolean | undefined): Promise<void> {
@@ -1058,6 +1117,9 @@ export async function clusterInitCmd(options: ClusterInitOptions): Promise<void>
 
   const config = loadMutableConfig();
   applyClusterConfig(config, { network, parent, centralAddresses, peerCidrs });
+  if (centralAddresses.length > 0) {
+    await ensureOvnCaMaterial(config);
+  }
   saveMutableConfig(stringify(config));
   await converge(options.skipReconfigure);
 
@@ -1379,6 +1441,9 @@ export async function clusterOvnConfigureCmd(options: ClusterOvnOptions): Promis
   }
 
   applyClusterConfig(config, { network, parent, centralAddresses, peerCidrs });
+  if (centralAddresses.length > 0) {
+    await ensureOvnCaMaterial(config);
+  }
   saveMutableConfig(stringify(config));
   await converge(options.skipReconfigure);
 
@@ -1387,6 +1452,6 @@ export async function clusterOvnConfigureCmd(options: ClusterOvnOptions): Promis
     console.log(success(`Auto-discovered OVN central members: ${centralAddresses.join(", ")}`));
   }
   if (centralAddresses.length > 0) {
-    console.log(success(`OVN central northbound: ${ovnTcpEndpoints(centralAddresses, "6641")}`));
+    console.log(success(`OVN central northbound: ${ovnDbEndpoints(centralAddresses, "6641")}`));
   }
 }

@@ -1,0 +1,17 @@
+[req]
+distinguished_name = req_distinguished_name
+prompt = no
+req_extensions = v3_req
+
+[req_distinguished_name]
+CN = terrarium-ovn-{{ inventory_hostname }}
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+
+[alt_names]
+IP.1 = {{ terrarium_ovn_local_address }}
+DNS.1 = {{ inventory_hostname }}

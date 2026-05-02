@@ -63,3 +63,10 @@ When clustering is enabled, Terrarium only opens these ports for configured
 Default cluster commands store exact `/32` IPv4 or `/128` IPv6 peer CIDRs.
 Broad peer subnets are an explicit trust decision because every host in the
 range can reach the LXD/OVN control-plane ports above.
+
+OVN database traffic uses Terrarium-managed TLS. Cluster initialization creates
+an OVN CA, each node receives a local OVN certificate during reconfiguration,
+and LXD/Open vSwitch connect to OVN northbound/southbound databases through
+`ssl:` remotes. Geneve overlay traffic on `6081/udp` is still plain OVN tunnel
+traffic; use a private network today, or a future WireGuard/IPsec transport if
+you need encryption for all workload east/west traffic.

@@ -155,10 +155,161 @@
       - ovn-host
     state: present
 
+- name: Resolve OVN TLS paths
+  ansible.builtin.set_fact:
+    terrarium_ovn_tls_dir: /etc/terrarium/secrets/ovn
+    terrarium_ovn_ca_cert_path: /etc/terrarium/secrets/ovn/ca.crt
+    terrarium_ovn_ca_key_path: /etc/terrarium/secrets/ovn/ca.key
+    terrarium_ovn_node_key_path: /etc/terrarium/secrets/ovn/node.key
+    terrarium_ovn_node_csr_path: /etc/terrarium/secrets/ovn/node.csr
+    terrarium_ovn_node_cert_path: /etc/terrarium/secrets/ovn/node.crt
+    terrarium_ovn_node_openssl_config_path: /etc/terrarium/secrets/ovn/node-openssl.cnf
+
 - name: Resolve OVN database connection strings
   ansible.builtin.set_fact:
-    terrarium_ovn_northbound_connection: "{{ terrarium_ovn_central_addresses | map('regex_replace', '^(.*)$', 'tcp:\\1:6641') | join(',') }}"
-    terrarium_ovn_southbound_connection: "{{ terrarium_ovn_central_addresses | map('regex_replace', '^(.*)$', 'tcp:\\1:6642') | join(',') }}"
+    terrarium_ovn_northbound_connection: >-
+      {%- set endpoints = [] -%}
+      {%- for address in terrarium_ovn_central_addresses -%}
+      {%- set host = '[' ~ address ~ ']' if ':' in address else address -%}
+      {%- set _ = endpoints.append('ssl:' ~ host ~ ':6641') -%}
+      {%- endfor -%}
+      {{ endpoints | join(',') }}
+    terrarium_ovn_southbound_connection: >-
+      {%- set endpoints = [] -%}
+      {%- for address in terrarium_ovn_central_addresses -%}
+      {%- set host = '[' ~ address ~ ']' if ':' in address else address -%}
+      {%- set _ = endpoints.append('ssl:' ~ host ~ ':6642') -%}
+      {%- endfor -%}
+      {{ endpoints | join(',') }}
+
+- name: Assert OVN CA material exists for cluster mode
+  ansible.builtin.assert:
+    that:
+      - terrarium_ovn_ca_cert | length > 0
+      - terrarium_ovn_ca_key | length > 0
+    fail_msg: Terrarium cluster mode requires OVN CA material. Run terrariumctl cluster init or terrariumctl cluster ovn configure to generate it.
+  when: terrarium_ovn_central_addresses | length > 0
+  no_log: true
+
+- name: Create OVN TLS directory
+  ansible.builtin.file:
+    path: "{{ terrarium_ovn_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: terrarium_ovn_central_addresses | length > 0
+
+- name: Install OVN CA certificate
+  ansible.builtin.copy:
+    content: "{{ terrarium_ovn_ca_cert }}"
+    dest: "{{ terrarium_ovn_ca_cert_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: terrarium_ovn_central_addresses | length > 0
+  no_log: true
+
+- name: Install OVN CA private key
+  ansible.builtin.copy:
+    content: "{{ terrarium_ovn_ca_key }}"
+    dest: "{{ terrarium_ovn_ca_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: terrarium_ovn_central_addresses | length > 0
+  no_log: true
+
+- name: Render OVN node certificate request config
+  ansible.builtin.template:
+    src: ovn-node-openssl.cnf.j2
+    dest: "{{ terrarium_ovn_node_openssl_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: terrarium_ovn_central_addresses | length > 0
+  register: terrarium_ovn_node_openssl_config
+
+- name: Check whether OVN node certificate exists
+  ansible.builtin.stat:
+    path: "{{ terrarium_ovn_node_cert_path }}"
+  when: terrarium_ovn_central_addresses | length > 0
+  register: terrarium_ovn_node_cert_stat
+
+- name: Generate OVN node private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - genrsa
+      - -out
+      - "{{ terrarium_ovn_node_key_path }}"
+      - "4096"
+    creates: "{{ terrarium_ovn_node_key_path }}"
+  when: terrarium_ovn_central_addresses | length > 0
+  register: terrarium_ovn_node_key
+  no_log: true
+
+- name: Lock down OVN node private key
+  ansible.builtin.file:
+    path: "{{ terrarium_ovn_node_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: terrarium_ovn_central_addresses | length > 0
+
+- name: Generate OVN node certificate request
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ terrarium_ovn_node_key_path }}"
+      - -out
+      - "{{ terrarium_ovn_node_csr_path }}"
+      - -config
+      - "{{ terrarium_ovn_node_openssl_config_path }}"
+  when:
+    - terrarium_ovn_central_addresses | length > 0
+    - terrarium_ovn_node_openssl_config.changed or terrarium_ovn_node_key.changed or not terrarium_ovn_node_cert_stat.stat.exists
+  register: terrarium_ovn_node_csr
+  no_log: true
+
+- name: Sign OVN node certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -req
+      - -in
+      - "{{ terrarium_ovn_node_csr_path }}"
+      - -CA
+      - "{{ terrarium_ovn_ca_cert_path }}"
+      - -CAkey
+      - "{{ terrarium_ovn_ca_key_path }}"
+      - -CAcreateserial
+      - -out
+      - "{{ terrarium_ovn_node_cert_path }}"
+      - -days
+      - "3650"
+      - -sha256
+      - -extensions
+      - v3_req
+      - -extfile
+      - "{{ terrarium_ovn_node_openssl_config_path }}"
+  when:
+    - terrarium_ovn_central_addresses | length > 0
+    - terrarium_ovn_node_csr.changed or not terrarium_ovn_node_cert_stat.stat.exists
+  register: terrarium_ovn_node_cert
+  no_log: true
+
+- name: Lock down OVN node certificate
+  ansible.builtin.file:
+    path: "{{ terrarium_ovn_node_cert_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: terrarium_ovn_central_addresses | length > 0
 
 - name: Configure clustered OVN central service
   ansible.builtin.template:
@@ -173,7 +324,7 @@
 - name: Enable OVN central on standalone or central members
   ansible.builtin.systemd:
     name: ovn-central
-    state: "{{ 'restarted' if terrarium_ovn_central_config.changed | default(false) else 'started' }}"
+    state: "{{ 'restarted' if (terrarium_ovn_central_config.changed | default(false)) or (terrarium_ovn_node_cert.changed | default(false)) else 'started' }}"
     enabled: true
   when: terrarium_ovn_central_addresses | length == 0 or terrarium_ovn_local_address in terrarium_ovn_central_addresses
 
@@ -186,11 +337,68 @@
     - terrarium_ovn_central_addresses | length > 0
     - terrarium_ovn_local_address not in terrarium_ovn_central_addresses
 
+- name: Configure OVN northbound SSL listener
+  ansible.builtin.command:
+    argv:
+      - ovn-nbctl
+      - --db=unix:/var/run/ovn/ovnnb_db.sock
+      - set-ssl
+      - "{{ terrarium_ovn_node_key_path }}"
+      - "{{ terrarium_ovn_node_cert_path }}"
+      - "{{ terrarium_ovn_ca_cert_path }}"
+      - --
+      - set-connection
+      - pssl:6641
+  register: terrarium_ovn_nb_ssl_listener
+  until: terrarium_ovn_nb_ssl_listener.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+  when:
+    - terrarium_ovn_central_addresses | length > 0
+    - terrarium_ovn_local_address in terrarium_ovn_central_addresses
+
+- name: Configure OVN southbound SSL listener
+  ansible.builtin.command:
+    argv:
+      - ovn-sbctl
+      - --db=unix:/var/run/ovn/ovnsb_db.sock
+      - set-ssl
+      - "{{ terrarium_ovn_node_key_path }}"
+      - "{{ terrarium_ovn_node_cert_path }}"
+      - "{{ terrarium_ovn_ca_cert_path }}"
+      - --
+      - set-connection
+      - pssl:6642
+  register: terrarium_ovn_sb_ssl_listener
+  until: terrarium_ovn_sb_ssl_listener.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+  when:
+    - terrarium_ovn_central_addresses | length > 0
+    - terrarium_ovn_local_address in terrarium_ovn_central_addresses
+
 - name: Enable OVN host service
   ansible.builtin.systemd:
     name: ovn-host
     state: started
     enabled: true
+
+- name: Configure Open vSwitch SSL identity for OVN
+  ansible.builtin.command:
+    argv:
+      - ovs-vsctl
+      - set-ssl
+      - "{{ terrarium_ovn_node_key_path }}"
+      - "{{ terrarium_ovn_node_cert_path }}"
+      - "{{ terrarium_ovn_ca_cert_path }}"
+  register: terrarium_ovs_ssl
+  until: terrarium_ovs_ssl.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: terrarium_ovn_central_addresses | length > 0
 
 - name: Configure Open vSwitch for Terrarium OVN
   ansible.builtin.command:
@@ -208,10 +416,58 @@
   delay: 5
   changed_when: false
 
-- name: Configure LXD OVN northbound database connection
-  ansible.builtin.command: "/snap/bin/lxc config set network.ovn.northbound_connection {{ terrarium_ovn_northbound_connection }}"
+- name: Restart OVN host after TLS identity rotation
+  ansible.builtin.systemd:
+    name: ovn-host
+    state: restarted
+  when:
+    - terrarium_ovn_central_addresses | length > 0
+    - terrarium_ovn_node_cert.changed | default(false)
+
+- name: Read OVN node certificate for LXD
+  ansible.builtin.slurp:
+    src: "{{ terrarium_ovn_node_cert_path }}"
   when: terrarium_ovn_central_addresses | length > 0
-  changed_when: false
+  register: terrarium_ovn_node_cert_raw
+  no_log: true
+
+- name: Read OVN node private key for LXD
+  ansible.builtin.slurp:
+    src: "{{ terrarium_ovn_node_key_path }}"
+  when: terrarium_ovn_central_addresses | length > 0
+  register: terrarium_ovn_node_key_raw
+  no_log: true
+
+- name: Configure LXD OVN TLS client settings
+  block:
+    - name: Write temporary LXD OVN TLS patch
+      ansible.builtin.copy:
+        dest: /run/terrarium-lxd-ovn-tls.json
+        mode: "0600"
+        content: "{{ {'config': {'network.ovn.northbound_connection': terrarium_ovn_northbound_connection, 'network.ovn.ca_cert': terrarium_ovn_ca_cert, 'network.ovn.client_cert': (terrarium_ovn_node_cert_raw.content | b64decode), 'network.ovn.client_key': (terrarium_ovn_node_key_raw.content | b64decode)}} | to_json }}"
+
+    - name: Apply LXD OVN TLS patch
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -fsS
+          - --unix-socket
+          - /var/snap/lxd/common/lxd/unix.socket
+          - -X
+          - PATCH
+          - -H
+          - "Content-Type: application/json"
+          - --data-binary
+          - "@/run/terrarium-lxd-ovn-tls.json"
+          - http://unix.socket/1.0
+      changed_when: false
+  always:
+    - name: Remove temporary LXD OVN TLS patch
+      ansible.builtin.file:
+        path: /run/terrarium-lxd-ovn-tls.json
+        state: absent
+  when: terrarium_ovn_central_addresses | length > 0
+  no_log: true
 
 - name: Configure LXD OVN parent network ranges
   ansible.builtin.command: >-

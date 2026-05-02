@@ -15,7 +15,7 @@ import {
   instancesFromLxcListJson,
   memoryLoadFromResourcesJson,
   normalizeClusterEndpoint,
-  ovnTcpEndpoints,
+  ovnDbEndpoints,
   partitionDeviceForStorageSource,
   parseCsv,
   parsePeerCidrs,
@@ -246,11 +246,15 @@ describe("terrariumctl cluster", () => {
     });
   });
 
-  test("formats OVN database endpoints from central member IPs", () => {
-    const addresses = parseCsv("10.0.0.10, 10.0.0.11,,10.0.0.12");
+  test("formats TLS OVN database endpoints from central member IPs", () => {
+    const addresses = parseCsv("10.0.0.10, 10.0.0.11,,10.0.0.12,2001:db8::12");
 
-    expect(addresses).toEqual(["10.0.0.10", "10.0.0.11", "10.0.0.12"]);
-    expect(ovnTcpEndpoints(addresses, "6641")).toBe("tcp:10.0.0.10:6641,tcp:10.0.0.11:6641,tcp:10.0.0.12:6641");
-    expect(ovnTcpEndpoints(addresses, "6642")).toBe("tcp:10.0.0.10:6642,tcp:10.0.0.11:6642,tcp:10.0.0.12:6642");
+    expect(addresses).toEqual(["10.0.0.10", "10.0.0.11", "10.0.0.12", "2001:db8::12"]);
+    expect(ovnDbEndpoints(addresses, "6641")).toBe(
+      "ssl:10.0.0.10:6641,ssl:10.0.0.11:6641,ssl:10.0.0.12:6641,ssl:[2001:db8::12]:6641"
+    );
+    expect(ovnDbEndpoints(addresses, "6642")).toBe(
+      "ssl:10.0.0.10:6642,ssl:10.0.0.11:6642,ssl:10.0.0.12:6642,ssl:[2001:db8::12]:6642"
+    );
   });
 });

@@ -17,6 +17,8 @@
     terrarium_lxd_parent_ovn_range: 10.154.0.200-10.154.0.254
     terrarium_ovn_central_addresses: []
     terrarium_ovn_local_address: "{{ ansible_default_ipv4.address }}"
+    terrarium_ovn_ca_cert: ""
+    terrarium_ovn_ca_key: ""
     terrarium_storage_mode: file
     terrarium_storage_source: ""
     terrarium_storage_size: ""
@@ -80,6 +82,8 @@
       terrarium_lxd_parent_dhcp_range: "{{ terrarium_lxd_parent_dhcp_range }}"
       terrarium_lxd_parent_ovn_range: "{{ terrarium_lxd_parent_ovn_range }}"
       terrarium_ovn_central_addresses: "{{ terrarium_ovn_central_addresses }}"
+      terrarium_ovn_ca_cert: "{{ terrarium_ovn_ca_cert }}"
+      terrarium_ovn_ca_key: "{{ terrarium_ovn_ca_key }}"
       terrarium_storage_mode: "{{ terrarium_storage_mode }}"
       terrarium_storage_source: "{{ terrarium_storage_source }}"
       terrarium_storage_size: "{{ terrarium_storage_size }}"

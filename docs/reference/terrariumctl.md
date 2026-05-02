@@ -287,6 +287,7 @@ Updates the shared Terrarium config and reconciles:
 - OVN central service membership
 - Open vSwitch southbound connection
 - LXD OVN northbound connection
+- Terrarium-managed OVN CA and per-node TLS certificates
 - `terrarium-ovn` workload network
 - UFW rules for peer-only cluster traffic
 
@@ -311,6 +312,10 @@ OVN setting.
 This command reconciles the node where it runs. If the central set changes
 after other members have already joined, run `terrariumctl reconfigure` on
 those members so their local OVN services consume the shared config.
+
+OVN database remotes are rendered as `ssl:` endpoints and require certificates
+issued by the Terrarium OVN CA. The peer firewall rules remain necessary, but
+they are no longer the only control protecting `6641/tcp` and `6642/tcp`.
 
 ## backup restore
 
