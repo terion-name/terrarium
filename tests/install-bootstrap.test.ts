@@ -8,7 +8,8 @@ describe("install.sh bootstrap", () => {
   test("fails closed when the latest release cannot be resolved", () => {
     const source = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
-    expect(source).toContain('resolved_ref="$(resolve_latest_tag)" || die "failed to resolve latest Terrarium release tag"');
+    expect(source).toContain('resolved_ref="$(resolve_latest_tag "${arch}")" || die "failed to resolve latest Terrarium release tag"');
+    expect(source).toContain('TERRARIUM_ASSET="terrarium-linux-${arch}.zip"');
     expect(source).toContain('[[ -n "${resolved_ref}" ]] || die "failed to resolve latest Terrarium release tag"');
     expect(source).not.toContain("head -n1 || true");
     expect(source).not.toContain("} || true");
