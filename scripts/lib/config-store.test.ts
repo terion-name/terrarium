@@ -49,12 +49,36 @@ if [[ "$1 $2 $3 $4" == "project get terrarium-system user.terrarium.config_b64" 
   [[ -f "$store" ]] && cat "$store"
   exit 0
 fi
-if [[ "$1 $2 $3 $4" == "project set terrarium-system user.terrarium.config_b64" ]]; then
-  printf '%s' "$5" > "$store"
-  exit 0
-fi
 echo "unexpected lxc args: $*" >&2
 exit 1
+`
+  );
+  chmodSync(binary, 0o755);
+  return binary;
+}
+
+function fakeCurl(tempDir: string): string {
+  const binary = join(tempDir, "curl");
+  const store = join(tempDir, "cluster-value");
+  const argsLog = join(tempDir, "curl-args");
+  const bodyLog = join(tempDir, "curl-body");
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env bash
+set -euo pipefail
+store=${JSON.stringify(store)}
+args_log=${JSON.stringify(argsLog)}
+body_log=${JSON.stringify(bodyLog)}
+printf '%s\\n' "$*" > "$args_log"
+body="$(cat)"
+printf '%s' "$body" > "$body_log"
+encoded="$(printf '%s' "$body" | sed -n 's/.*"user\\.terrarium\\.config_b64":"\\([^"]*\\)".*/\\1/p')"
+if [[ -z "$encoded" ]]; then
+  echo "missing config body" >&2
+  exit 1
+fi
+printf '%s' "$encoded" > "$store"
+printf '{"type":"sync","status":"Success","status_code":200}\\n'
 `
   );
   chmodSync(binary, 0o755);
@@ -88,17 +112,22 @@ describe("Terrarium config store", () => {
     try {
       const configPath = join(tempDir, "config.yaml");
       const lxc = fakeLxc(tempDir);
+      const curl = fakeCurl(tempDir);
       writeFileSync(configPath, "terrarium_root_domain: example.test\n", "utf8");
 
       withEnv(
         {
           TERRARIUM_CONFIG_BACKEND: "lxd-dqlite",
           TERRARIUM_CONFIG_PATH: configPath,
-          TERRARIUM_LXC_BIN: lxc
+          TERRARIUM_LXC_BIN: lxc,
+          TERRARIUM_CURL_BIN: curl,
+          TERRARIUM_LXD_SOCKET: join(tempDir, "lxd.sock")
         },
         () => {
           importConfigFileToClusterStore(configPath, "test");
           expect(readConfigDocument(configPath, "test")).toBe("terrarium_root_domain: example.test\n");
+          expect(readFileSync(join(tempDir, "curl-args"), "utf8")).not.toContain(Buffer.from("terrarium_root_domain: example.test\n").toString("base64"));
+          expect(readFileSync(join(tempDir, "curl-body"), "utf8")).toContain("user.terrarium.config_b64");
         }
       );
     } finally {
@@ -111,12 +140,15 @@ describe("Terrarium config store", () => {
     try {
       const configPath = join(tempDir, "config.yaml");
       const lxc = fakeLxc(tempDir);
+      const curl = fakeCurl(tempDir);
 
       withEnv(
         {
           TERRARIUM_CONFIG_BACKEND: "lxd-dqlite",
           TERRARIUM_CONFIG_PATH: configPath,
-          TERRARIUM_LXC_BIN: lxc
+          TERRARIUM_LXC_BIN: lxc,
+          TERRARIUM_CURL_BIN: curl,
+          TERRARIUM_LXD_SOCKET: join(tempDir, "lxd.sock")
         },
         () => {
           writeConfigDocument(configPath, "terrarium_email: ops@example.test\n", { requireClusterStore: true });

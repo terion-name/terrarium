@@ -6,6 +6,7 @@ import { parse } from "yaml";
 export const DEFAULT_CONFIG_PATH = "/etc/terrarium/config.yaml";
 export const TERRARIUM_CONFIG_PROJECT = process.env.TERRARIUM_CONFIG_PROJECT ?? "terrarium-system";
 export const TERRARIUM_CONFIG_KEY = process.env.TERRARIUM_CONFIG_KEY ?? "user.terrarium.config_b64";
+const DEFAULT_LXD_SOCKET_PATHS = ["/var/snap/lxd/common/lxd/unix.socket", "/var/lib/lxd/unix.socket"];
 
 type ConfigBackend = "auto" | "file" | "lxd-dqlite";
 
@@ -48,6 +49,30 @@ function lxcBinary(): string {
   return "/snap/bin/lxc";
 }
 
+function curlBinary(): string {
+  const configured = process.env.TERRARIUM_CURL_BIN;
+  if (configured) {
+    return configured;
+  }
+  const fromPath = Bun.which("curl");
+  if (fromPath) {
+    return fromPath;
+  }
+  return "/usr/bin/curl";
+}
+
+function lxdSocketPath(): string {
+  const configured = process.env.TERRARIUM_LXD_SOCKET;
+  if (configured) {
+    return configured;
+  }
+  const existing = DEFAULT_LXD_SOCKET_PATHS.find((path) => existsSync(path));
+  if (existing) {
+    return existing;
+  }
+  return DEFAULT_LXD_SOCKET_PATHS[0];
+}
+
 function runLxc(args: string[]): LxcResult {
   const binary = lxcBinary();
   if (!existsSync(binary) && binary.includes("/")) {
@@ -64,6 +89,52 @@ function runLxc(args: string[]): LxcResult {
     maxBuffer: 1024 * 1024 * 4,
     timeout: 15_000
   });
+
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? result.error?.message ?? "",
+    status: result.status
+  };
+}
+
+function patchLxdProjectConfig(config: Record<string, string>): LxcResult {
+  const binary = curlBinary();
+  if (!existsSync(binary) && binary.includes("/")) {
+    return {
+      ok: false,
+      stdout: "",
+      stderr: `missing curl binary: ${binary}`,
+      status: null
+    };
+  }
+
+  const body = JSON.stringify({ config });
+  const result = spawnSync(
+    binary,
+    [
+      "-fsS",
+      "--unix-socket",
+      lxdSocketPath(),
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "20",
+      "-X",
+      "PATCH",
+      "-H",
+      "Content-Type: application/json",
+      "--data-binary",
+      "@-",
+      `http://lxd/1.0/projects/${encodeURIComponent(TERRARIUM_CONFIG_PROJECT)}`
+    ],
+    {
+      encoding: "utf8",
+      input: body,
+      maxBuffer: 1024 * 1024 * 4,
+      timeout: 15_000
+    }
+  );
 
   return {
     ok: result.status === 0,
@@ -107,7 +178,7 @@ function readClusterConfigDocument(): string | null {
 function writeClusterConfigDocument(content: string): void {
   ensureTerrariumProject();
   const encoded = Buffer.from(content, "utf8").toString("base64");
-  const result = runLxc(["project", "set", TERRARIUM_CONFIG_PROJECT, TERRARIUM_CONFIG_KEY, encoded]);
+  const result = patchLxdProjectConfig({ [TERRARIUM_CONFIG_KEY]: encoded });
   if (!result.ok) {
     const details = (result.stderr || "unknown LXD error").trim();
     throw new Error(`failed to write Terrarium config to LXD dqlite store: ${details}`);
