@@ -63,10 +63,4 @@ jobs:
           else
             bun run tests/integration/index.ts --suite smoke
           fi
-      - name: Upload integration artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-smoke-artifacts
-          path: tests/integration/output
-          if-no-files-found: warn
+      
