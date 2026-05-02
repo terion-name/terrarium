@@ -519,6 +519,7 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
         lxdClientId: options.lxdOidcClientId || options.oidcClientId,
         lxdClientSecret: options.lxdOidcClientId ? options.lxdOidcClientSecret : options.oidcClientSecret,
         manageDomain: options.manageDomain,
+        proxyDomain: options.proxyDomain,
         lxdDomain: options.lxdDomain
       });
       info("OIDC verification passed.");
@@ -582,6 +583,7 @@ async function verifyConfiguredIntegrations(options: InstallOptions): Promise<vo
       lxdClientId: options.lxdOidcClientId || options.oidcClientId,
       lxdClientSecret: options.lxdOidcClientId ? options.lxdOidcClientSecret : options.oidcClientSecret,
       manageDomain: options.manageDomain,
+      proxyDomain: options.proxyDomain,
       lxdDomain: options.lxdDomain
     });
   }

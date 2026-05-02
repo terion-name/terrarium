@@ -375,8 +375,8 @@ terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/
 External OIDC note:
 
 - Terrarium auto-provisions OIDC clients only for self-hosted ZITADEL.
-- When you use external OIDC, Terrarium persists the issuer URL, client ID, client secret, and admin group, and configures Cockpit's oauth2-proxy, LXD, and published-route auth from them.
-- The external client must allow both `https://<manage-domain>/oauth2/callback` and `https://<lxd-domain>/oidc/callback`.
+- When you use external OIDC, Terrarium persists the issuer URL, client ID, client secret, and admin group, and configures the management oauth2-proxy hosts, LXD, and published-route auth from them.
+- The external client must allow `https://<manage-domain>/oauth2/callback`, `https://<proxy-domain>/oauth2/callback`, and `https://<lxd-domain>/oidc/callback`.
 - If you want to use `@auth` on published routes, the external client must also allow each generated `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
 - The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
 - `terrariumctl set idp oidc --oidc ... --oidc-client ... --oidc-secret-file ... --admin-group ...` verifies the external issuer and credentials before reconfiguring both the Cockpit OIDC gate and LXD management authorization.

@@ -225,7 +225,10 @@ describe("ZITADEL Cloud provider", () => {
       {
         appType: "OIDC_APP_TYPE_WEB",
         authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
-        redirectUris: expect.arrayContaining(["https://manage.example.test/oauth2/callback"])
+        redirectUris: expect.arrayContaining([
+          "https://manage.example.test/oauth2/callback",
+          "https://proxy.example.test/oauth2/callback"
+        ])
       },
       {
         appType: "OIDC_APP_TYPE_NATIVE",
@@ -316,7 +319,12 @@ describe("ZITADEL Cloud provider", () => {
       .filter((call) => call.init?.method === "POST" && callPath(call) === "/management/v1/projects/project-1/apps/oidc")
       .map((call) => jsonBody(call));
     expect(appBodies[0].redirectUris).toEqual(
-      expect.arrayContaining(["https://seed-manage.example.test/oauth2/callback", "https://join-manage.example.test/oauth2/callback"])
+      expect.arrayContaining([
+        "https://seed-manage.example.test/oauth2/callback",
+        "https://seed-proxy.example.test/oauth2/callback",
+        "https://join-manage.example.test/oauth2/callback",
+        "https://join-proxy.example.test/oauth2/callback"
+      ])
     );
     expect(appBodies[1].redirectUris).toEqual(
       expect.arrayContaining(["https://seed-lxd.example.test/oidc/callback", "https://join-lxd.example.test/oidc/callback"])

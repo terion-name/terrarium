@@ -455,56 +455,6 @@ function parseProxyItem(item: string): HttpProxyItem | TransportProxyItem {
   };
 }
 
-function deriveSharedCookieDomain(config: Record<string, unknown>): string {
-  const explicitRoot = configString(config, "terrarium_root_domain");
-  if (explicitRoot) {
-    return explicitRoot;
-  }
-
-  const domains = [
-    configString(config, "terrarium_manage_domain"),
-    configString(config, "terrarium_proxy_domain"),
-    configString(config, "terrarium_auth_domain")
-  ].filter((value) => value.length > 0);
-
-  if (domains.length === 0) {
-    return "";
-  }
-
-  let suffix = domains[0].split(".");
-  for (const domain of domains.slice(1)) {
-    const labels = domain.split(".");
-    const common: string[] = [];
-    for (let index = 1; index <= Math.min(suffix.length, labels.length); index += 1) {
-      const left = suffix[suffix.length - index];
-      const right = labels[labels.length - index];
-      if (left !== right) {
-        break;
-      }
-      common.unshift(left);
-    }
-    suffix = common;
-    if (suffix.length === 0) {
-      break;
-    }
-  }
-
-  const candidate = suffix.join(".");
-  if (candidate && candidate !== domains[0]) {
-    return candidate;
-  }
-
-  const fallback = domains[0].split(".");
-  return fallback.length > 1 ? fallback.slice(1).join(".") : domains[0];
-}
-
-function normalizeCookieDomain(domain: string): string {
-  if (!domain) {
-    return domain;
-  }
-  return domain.startsWith(".") ? domain : `.${domain}`;
-}
-
 function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string): string[] {
   const cmd = [
     "curl",
@@ -996,7 +946,7 @@ async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ target
   return { targets, errors };
 }
 
-function routeHostAllowedForSharedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
+function routeHostAllowedForManagedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
   if (!rootDomain) {
     return host === manageDomain;
   }
@@ -1049,7 +999,7 @@ export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record
         continue;
       }
 
-      if (!routeHostAllowedForSharedAuth(parsed.host, rootDomain, manageDomain)) {
+      if (!routeHostAllowedForManagedAuth(parsed.host, rootDomain, manageDomain)) {
         errors.push(`${name}: auth-protected route host ${parsed.host} must be ${manageDomain} or a subdomain of ${rootDomain}`);
         continue;
       }
@@ -1104,9 +1054,6 @@ export function buildRouteAuthComposeArtifacts(
   cookieSecret: string
 ): RouteAuthComposeArtifacts {
   const issuer = configString(config, "terrarium_oidc_issuer");
-  const manageDomain = configString(config, "terrarium_manage_domain");
-  const rootDomain = deriveSharedCookieDomain(config) || manageDomain;
-  const sharedCookieDomain = normalizeCookieDomain(rootDomain);
   const localIdp = configString(config, "terrarium_idp_mode") === "local";
   const profileConfigs: Record<string, string> = {};
 
@@ -1117,16 +1064,16 @@ export function buildRouteAuthComposeArtifacts(
         'provider_display_name = "Terrarium"',
         `http_address = "127.0.0.1:${profile.port}"`,
         `proxy_prefix = "${profile.proxyPrefix}"`,
-        `redirect_url = "https://${profile.host}${profile.callbackPath}"`,
+        `redirect_url = "${profile.callbackPath}"`,
         `oidc_issuer_url = "${issuer}"`,
         'oidc_groups_claim = "groups"',
         `client_id = "${clientId}"`,
         `client_secret = "${clientSecret}"`,
         `cookie_secret = "${cookieSecret}"`,
-        `cookie_name = "_terrarium_route_${profile.containerName.replace(/^route-/, "")}"`,
+        `cookie_name = "__Host-terrarium_route_${profile.containerName.replace(/^route-/, "")}"`,
         "cookie_secure = true",
-        `cookie_domains = [ "${sharedCookieDomain}" ]`,
-        `whitelist_domains = [ "${sharedCookieDomain}", "${manageDomain}", "${profile.host}" ]`,
+        'cookie_path = "/"',
+        `whitelist_domains = [ "${profile.host}" ]`,
         'email_domains = [ "*" ]',
         'upstreams = [ "static://202" ]',
         'scope = "openid profile email"',

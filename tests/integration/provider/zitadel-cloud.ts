@@ -100,6 +100,7 @@ export function buildZitadelCloudManagementRedirectUris(
   const redirectUris = new Set<string>();
   for (const domainBundle of [domains, ...extraDomains]) {
     redirectUris.add(`https://${domainBundle.manage}/oauth2/callback`);
+    redirectUris.add(`https://${domainBundle.proxy}/oauth2/callback`);
     redirectUris.add(`https://${domainBundle.manage}/oauth2/app/callback`);
   }
   for (const callbackUri of routeCallbackUris) {

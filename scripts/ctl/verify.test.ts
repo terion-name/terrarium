@@ -27,6 +27,7 @@ function oidcOptions() {
     clientId: "client-id",
     clientSecret: "client-secret",
     manageDomain: "manage.example.test",
+    proxyDomain: "proxy.example.test",
     lxdDomain: "lxd.example.test"
   };
 }
@@ -67,18 +68,25 @@ describe("OIDC verification", () => {
   });
 
   test("accepts invalid_grant after client authentication succeeds", async () => {
+    const probedRedirectUris: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/.well-known/openid-configuration")) {
         return discoveryResponse();
       }
       if (url.includes("/oauth/v2/authorize")) {
+        probedRedirectUris.push(new URL(url).searchParams.get("redirect_uri") ?? "");
         return authResponse();
       }
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }) as typeof fetch;
 
     await expect(verifyOidcConfig(oidcOptions())).resolves.toBeUndefined();
+    expect(probedRedirectUris).toEqual([
+      "https://manage.example.test/oauth2/callback",
+      "https://proxy.example.test/oauth2/callback",
+      "https://lxd.example.test/oidc/callback"
+    ]);
   });
 
   test("accepts ZITADEL invalid-code responses after client authentication succeeds", async () => {

@@ -398,15 +398,16 @@ function oidcAppConfigBody(authDomain: string, spec: LocalOidcAppSpec): Record<s
   };
 }
 
-function localOidcAppSpecs(config: Record<string, unknown>, authDomain: string): LocalOidcAppSpec[] {
+export function localOidcAppSpecs(config: Record<string, unknown>, authDomain: string): LocalOidcAppSpec[] {
   const manageDomain = configString(config, "terrarium_manage_domain");
+  const proxyDomain = configString(config, "terrarium_proxy_domain");
   const lxdDomain = configString(config, "terrarium_lxd_domain");
   return [
     {
       outputPrefix: "cockpit",
       name: "terrarium-cockpit",
-      redirectUris: [`https://${manageDomain}/oauth2/callback`],
-      postLogoutRedirectUris: [`https://${manageDomain}/`],
+      redirectUris: [`https://${manageDomain}/oauth2/callback`, `https://${proxyDomain}/oauth2/callback`],
+      postLogoutRedirectUris: [`https://${manageDomain}/`, `https://${proxyDomain}/`],
       appType: "OIDC_APP_TYPE_WEB",
       authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
       grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],

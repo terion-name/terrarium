@@ -103,14 +103,15 @@ Terrarium can still protect published routes, but your external OIDC client must
 https://<route-host>/oauth2/route/<generated-route-id>/callback
 ```
 
-Terrarium reuses the same external OIDC client for Cockpit and route
-protection, so these route callbacks are additions to the normal management
-callback rather than separate apps. The route id is deterministic for the route
-host and group policy, but the safest operator workflow is to read the rendered
-`redirect_url` values after `terrariumctl proxy sync`:
+Terrarium reuses the same external OIDC client for management oauth2-proxy hosts
+and route protection, so these route callbacks are additions to the normal
+management callbacks for `manage` and `proxy` rather than separate apps. The
+route id is deterministic for the route host and group policy. The rendered
+oauth2-proxy config stores a path-only `redirect_url` so cookies stay host-only;
+combine that path with the protected route host to form the full callback URL.
 
 ```bash
-grep -R '^redirect_url' /var/lib/terrarium/oauth2-proxy-routes/*.cfg
+grep -R -E '^(redirect_url|whitelist_domains)' /var/lib/terrarium/oauth2-proxy-routes/*.cfg
 ```
 
 If you use group-restricted routes, your provider must also include a `groups` claim.
@@ -118,7 +119,7 @@ If you use group-restricted routes, your provider must also include a `groups` c
 One-time checklist for external OIDC:
 
 1. set the issuer, client ID, and client secret in Terrarium
-2. add the rendered route `redirect_url` values to your OIDC client
+2. add each full route callback URL to your OIDC client
 3. make sure your provider sends a `groups` claim if you use `@auth:group1,group2`
 
 ## Group-Based Access
@@ -142,7 +143,10 @@ Use groups when:
 
 ## Important Limitation
 
-Published-route auth currently works only for hosts on your Terrarium root domain or its subdomains, because Terrarium uses a shared cookie domain across protected route hosts:
+Published-route auth currently works only for hosts on your Terrarium root
+domain or its subdomains. If no custom root domain is configured, auth-protected
+routes are limited to the `manage` hostname. Route-auth cookies are still scoped
+to the exact protected route host.
 
 ```text
 https://<route-host>/oauth2/route/<generated-route-id>/callback
@@ -157,7 +161,7 @@ This is not a good fit:
 
 - `https://totally-other-domain.net@auth`
 
-One important default to keep in mind: if you installed Terrarium without a custom root domain and stayed on the default IP-based management domains, route auth is effectively limited to the `manage` hostname. For arbitrary protected app hostnames, use a real `--domain`.
+For arbitrary protected app hostnames, use a real `--domain`.
 
 ## How the Callback Works
 
@@ -204,7 +208,7 @@ If a protected route does not work:
 - make sure the route host is on your Terrarium root domain
 - run `terrariumctl proxy sync`
 - check `terrariumctl status`
-- if you use external OIDC, verify that every rendered route `redirect_url` is allowed in the client config
+- if you use external OIDC, verify that every full route callback URL is allowed in the client config
 - if you use group restrictions, verify your token includes a `groups` claim with the expected group names
 
 ## Practical Advice

@@ -4,6 +4,7 @@ import {
   isZitadelAlreadyExistsError,
   isRetriableZitadelApiError,
   isZitadelNoChangesResponse,
+  localOidcAppSpecs,
   lookupUserId,
   mergedRoleKeys,
   parseZitadelHttpOutput
@@ -73,6 +74,21 @@ describe("terrarium local ZITADEL sync", () => {
   test("preserves existing grant roles when adding the local admin group", () => {
     expect(mergedRoleKeys(["auditor", "operators"], "terrarium-admins")).toEqual(["auditor", "operators", "terrarium-admins"]);
     expect(mergedRoleKeys(["terrarium-admins"], "terrarium-admins")).toEqual(["terrarium-admins"]);
+  });
+
+  test("registers local management callbacks for each host-only oauth2-proxy cookie origin", () => {
+    const apps = localOidcAppSpecs(
+      {
+        terrarium_manage_domain: "manage.example.test",
+        terrarium_proxy_domain: "proxy.example.test",
+        terrarium_lxd_domain: "lxd.example.test"
+      },
+      "auth.example.test"
+    );
+    const cockpit = apps.find((app) => app.outputPrefix === "cockpit");
+
+    expect(cockpit?.redirectUris).toEqual(["https://manage.example.test/oauth2/callback", "https://proxy.example.test/oauth2/callback"]);
+    expect(cockpit?.postLogoutRedirectUris).toEqual(["https://manage.example.test/", "https://proxy.example.test/"]);
   });
 
   test("looks up the local admin by exact ZITADEL login name", async () => {

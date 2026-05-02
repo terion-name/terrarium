@@ -112,15 +112,16 @@ describe("terrarium route auth generation", () => {
 
     expect(Object.keys(compose.services).sort()).toEqual(profiles.map((profile) => profile.containerName).sort());
     expect(profileConfigs[adminProfile.containerName]).toContain(`proxy_prefix = "${adminProfile.proxyPrefix}"`);
-    expect(profileConfigs[adminProfile.containerName]).toContain(
-      `redirect_url = "https://app.example.test${adminProfile.callbackPath}"`
-    );
+    expect(profileConfigs[adminProfile.containerName]).toContain(`redirect_url = "${adminProfile.callbackPath}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain('allowed_groups = [ "admins" ]');
-    expect(profileConfigs[adminProfile.containerName]).toContain(`cookie_name = "_terrarium_route_${adminProfile.containerName.replace(/^route-/, "")}"`);
+    expect(profileConfigs[adminProfile.containerName]).toContain(`cookie_name = "__Host-terrarium_route_${adminProfile.containerName.replace(/^route-/, "")}"`);
+    expect(profileConfigs[adminProfile.containerName]).toContain('cookie_path = "/"');
+    expect(profileConfigs[adminProfile.containerName]).toContain('whitelist_domains = [ "app.example.test" ]');
+    expect(profileConfigs[adminProfile.containerName]).not.toContain("cookie_domains");
     expect(profileConfigs[signedInProfile.containerName]).toContain(`proxy_prefix = "${signedInProfile.proxyPrefix}"`);
-    expect(profileConfigs[signedInProfile.containerName]).toContain(`cookie_name = "_terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
+    expect(profileConfigs[signedInProfile.containerName]).toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
     expect(profileConfigs[signedInProfile.containerName]).not.toContain("allowed_groups");
-    expect(profileConfigs[adminProfile.containerName]).not.toContain(`cookie_name = "_terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
+    expect(profileConfigs[adminProfile.containerName]).not.toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
   });
 
   test("generates policy-specific forwardAuth middleware and oauth callback routes without query policy", () => {
@@ -190,6 +191,7 @@ describe("terrarium route auth generation", () => {
 
     expect(errors).toEqual([]);
     expect(providerRedirectUris).toContain("https://manage.example.test/oauth2/callback");
+    expect(providerRedirectUris).toContain("https://proxy.example.test/oauth2/callback");
     expect(providerRedirectUris).toContain("https://manage.example.test/oauth2/app/callback");
     expect(providerRedirectUris).toContain("https://lxd.example.test/oidc/callback");
     expect(

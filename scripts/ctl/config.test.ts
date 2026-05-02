@@ -103,6 +103,7 @@ describe("terrariumctl config reconciliation", () => {
       terrarium_public_ip: "203.0.113.10",
       terrarium_root_domain: "example.test",
       terrarium_manage_domain: "primary-manage.example.test",
+      terrarium_proxy_domain: "primary-proxy.example.test",
       terrarium_lxd_domain: "primary-lxd.example.test",
       terrarium_auth_domain: "primary-auth.example.test",
       terrarium_admin_group: "terrarium-admins"
@@ -124,6 +125,7 @@ describe("terrariumctl config reconciliation", () => {
       lxdClientId: "client-1",
       lxdClientSecret: "secret-1",
       manageDomain: "primary-manage.example.test",
+      proxyDomain: "primary-proxy.example.test",
       lxdDomain: "primary-lxd.example.test"
     });
   });
@@ -133,6 +135,7 @@ describe("terrariumctl config reconciliation", () => {
       terrarium_public_ip: "203.0.113.10",
       terrarium_root_domain: "example.test",
       terrarium_manage_domain: "primary-manage.example.test",
+      terrarium_proxy_domain: "primary-proxy.example.test",
       terrarium_lxd_domain: "primary-lxd.example.test",
       terrarium_auth_domain: "primary-auth.example.test",
       terrarium_admin_group: "terrarium-admins"
@@ -152,7 +155,8 @@ describe("terrariumctl config reconciliation", () => {
       clientId: "manage-client",
       clientSecret: "manage-secret",
       lxdClientId: "lxd-client",
-      lxdClientSecret: ""
+      lxdClientSecret: "",
+      proxyDomain: "primary-proxy.example.test"
     });
   });
 
@@ -162,6 +166,7 @@ describe("terrariumctl config reconciliation", () => {
       terrarium_root_domain: "example.test",
       terrarium_email: "admin@example.test",
       terrarium_manage_domain: "primary-manage.example.test",
+      terrarium_proxy_domain: "primary-proxy.example.test",
       terrarium_lxd_domain: "primary-lxd.example.test",
       terrarium_auth_domain: "primary-auth.example.test",
       terrarium_admin_group: "terrarium-admins",

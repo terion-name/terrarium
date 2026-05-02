@@ -106,6 +106,7 @@ You must provide:
 Requirements for the external provider:
 
 - allow `https://<manage-domain>/oauth2/callback`
+- allow `https://<proxy-domain>/oauth2/callback`
 - allow `https://<lxd-domain>/oidc/callback`
 - allow each generated `https://<route-host>/oauth2/route/<generated-route-id>/callback` if you want to protect published app routes with `@auth`
 - emit a `groups` claim as a JSON string array containing the configured admin group

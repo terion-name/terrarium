@@ -141,7 +141,7 @@ workload design decisions.
 - For auth-protected published routes, the sync job also reconciles a host-side oauth2-proxy route-auth stack and publishes per-route callbacks under `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
 - `@auth` means “any authenticated user”.
 - `@auth:group1,group2` means “any authenticated user in at least one listed group”.
-- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains so the shared cookie domain remains valid. If no root domain is configured, only the `manage` hostname qualifies.
+- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains. If no root domain is configured, only the `manage` hostname qualifies. Each route-auth oauth2-proxy still uses an exact-host cookie.
 
 The key behavior for non-experts is simple:
 

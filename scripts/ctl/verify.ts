@@ -22,6 +22,7 @@ export type OidcVerificationOptions = {
   lxdClientId?: string;
   lxdClientSecret?: string;
   manageDomain: string;
+  proxyDomain: string;
   lxdDomain: string;
 };
 
@@ -345,11 +346,13 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
   }
 
   const manageRedirectUri = `https://${options.manageDomain}/oauth2/callback`;
+  const proxyRedirectUri = `https://${options.proxyDomain}/oauth2/callback`;
   const lxdRedirectUri = `https://${options.lxdDomain}/oidc/callback`;
   const lxdClientId = options.lxdClientId || options.clientId;
   const lxdClientSecret = options.lxdClientSecret || (lxdClientId === options.clientId ? options.clientSecret : "");
 
   await verifyAuthorizationProbe(authorizationEndpoint, options.clientId, manageRedirectUri);
+  await verifyAuthorizationProbe(authorizationEndpoint, options.clientId, proxyRedirectUri);
   await verifyAuthorizationProbe(authorizationEndpoint, lxdClientId, lxdRedirectUri);
   await verifyConfidentialClientProbe(tokenEndpoint, options.clientId, options.clientSecret, manageRedirectUri);
   if (lxdClientSecret && (lxdClientId !== options.clientId || lxdClientSecret !== options.clientSecret)) {

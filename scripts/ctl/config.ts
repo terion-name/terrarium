@@ -196,6 +196,7 @@ export async function setDomainsCmd(
       clientId: configString(config, "terrarium_oidc_client_id"),
       clientSecret: configString(config, "terrarium_oidc_client_secret"),
       manageDomain: configString(config, "terrarium_manage_domain"),
+      proxyDomain: configString(config, "terrarium_proxy_domain"),
       lxdDomain: configString(config, "terrarium_lxd_domain")
     });
   }
@@ -293,6 +294,7 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
         lxdClientId,
         lxdClientSecret,
         manageDomain: configString(config, "terrarium_manage_domain"),
+        proxyDomain: configString(config, "terrarium_proxy_domain"),
         lxdDomain: configString(config, "terrarium_lxd_domain")
       }
     };

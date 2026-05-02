@@ -430,9 +430,10 @@ Behavior:
 
 External OIDC notes:
 
-- Terrarium configures both Cockpit's oauth2-proxy and LXD from the same external issuer and client settings.
+- Terrarium configures both management oauth2-proxy hosts and LXD from the same external issuer and client settings.
 - The external client must allow:
   - `https://<manage-domain>/oauth2/callback`
+  - `https://<proxy-domain>/oauth2/callback`
   - `https://<lxd-domain>/oidc/callback`
 - Published-route auth with `@auth` also requires the external client to allow each generated route callback, rendered as `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
 - The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
