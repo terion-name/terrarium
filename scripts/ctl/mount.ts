@@ -44,6 +44,22 @@ function requireAbsoluteHostPath(hostPath: string): string {
   return trimmed;
 }
 
+function normalizeNumericMountOption(value: string | undefined, fallback: string, label: string): string {
+  const normalized = (value || fallback).trim();
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(`${label} must be numeric`);
+  }
+  return normalized;
+}
+
+function normalizeModeOption(value: string | undefined, fallback: string, label: string): string {
+  const normalized = (value || fallback).trim();
+  if (!/^[0-7]{3,4}$/.test(normalized)) {
+    throw new Error(`${label} must be an octal mode such as ${fallback}`);
+  }
+  return normalized;
+}
+
 /** Creates a stable mount identifier from host path and share address. */
 function slugifyMountName(value: string): string {
   return value
@@ -153,15 +169,17 @@ export async function mountAddCmd(
   const optionsList = [
     "iocharset=utf8",
     "rw",
-    "noperm",
+    "nosuid",
+    "nodev",
+    "noexec",
     "forceuid",
     "forcegid",
     ...(options.seal === false ? [] : ["seal"]),
     `credentials=${credentialsPath}`,
-    `uid=${options.uid || "0"}`,
-    `gid=${options.gid || "0"}`,
-    `file_mode=${options.fileMode || "0660"}`,
-    `dir_mode=${options.dirMode || "0770"}`
+    `uid=${normalizeNumericMountOption(options.uid, "0", "--uid")}`,
+    `gid=${normalizeNumericMountOption(options.gid, "0", "--gid")}`,
+    `file_mode=${normalizeModeOption(options.fileMode, "0660", "--file-mode")}`,
+    `dir_mode=${normalizeModeOption(options.dirMode, "0770", "--dir-mode")}`
   ];
   const entry = `${address} ${hostPath} ${protocol} ${optionsList.join(",")} 0 0`;
   const block = `# BEGIN ${marker}\n${entry}\n# END ${marker}`;

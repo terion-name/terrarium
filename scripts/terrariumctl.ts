@@ -18,7 +18,7 @@ import {
   clusterStatusCmd,
   clusterTokenCmd
 } from "./ctl/cluster";
-import { normalizedArgv, parseBooleanOption, PREFIX } from "./ctl/context";
+import { cliOption, normalizedArgv, parseBooleanOption, PREFIX } from "./ctl/context";
 import {
   configExportCmd,
   configImportCmd,
@@ -251,11 +251,11 @@ cli
         throw new Error("mount add requires: <protocol> <hostPath> <address> <username>");
       }
       await mountAddCmd(protocol, hostPath, address, username, rawOptions.password as string | undefined, {
-        passwordFile: rawOptions.passwordFile as string | undefined,
-        uid: rawOptions.uid as string | undefined,
-        gid: rawOptions.gid as string | undefined,
-        fileMode: rawOptions.fileMode as string | undefined,
-        dirMode: rawOptions.dirMode as string | undefined,
+        passwordFile: cliOption(rawOptions, "passwordFile", ["password-file"]),
+        uid: cliOption(rawOptions, "uid"),
+        gid: cliOption(rawOptions, "gid"),
+        fileMode: cliOption(rawOptions, "fileMode", ["file-mode"]),
+        dirMode: cliOption(rawOptions, "dirMode", ["dir-mode"]),
         seal: parseBooleanOption(rawOptions.seal as string | undefined, "--seal", true)
       });
       return;

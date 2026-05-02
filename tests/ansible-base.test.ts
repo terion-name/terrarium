@@ -69,12 +69,22 @@ describe("terrariumctl install alias", () => {
 });
 
 describe("terrariumctl mount defaults", () => {
-  test("disable client-side CIFS permission checks for single-credential managed mounts", () => {
+  test("keeps local CIFS permission checks and applies host hardening flags", () => {
     const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");
 
-    expect(mount).toContain('"noperm"');
+    expect(mount).not.toContain('"noperm"');
+    expect(mount).toContain('"nosuid"');
+    expect(mount).toContain('"nodev"');
+    expect(mount).toContain('"noexec"');
     expect(mount).toContain('"forceuid"');
     expect(mount).toContain('"forcegid"');
+  });
+
+  test("recovers dashed CIFS mode options from the CLI parser", () => {
+    const ctl = readFileSync(join(repoRoot, "scripts/terrariumctl.ts"), "utf8");
+
+    expect(ctl).toContain('cliOption(rawOptions, "fileMode", ["file-mode"])');
+    expect(ctl).toContain('cliOption(rawOptions, "dirMode", ["dir-mode"])');
   });
 
   test("supports file-based CIFS password input", () => {
