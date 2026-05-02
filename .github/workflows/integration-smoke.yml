@@ -30,9 +30,10 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     concurrency:
-      group: terrarium-integration-smoke
+      # Shared with integration-full so Hetzner-backed integration suites do not run at the same time.
+      group: terrarium-integration
       cancel-in-progress: false
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}

@@ -72,10 +72,12 @@ permissions:
 jobs:
   full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 210
+    timeout-minutes: 360
     concurrency:
-      group: terrarium-integration-full
-      cancel-in-progress: false
+      # Shared with integration-smoke. Release preflight takes priority over an
+      # already-running smoke run for the same release candidate.
+      group: terrarium-integration
+      cancel-in-progress: ${{ inputs.release_preflight == true }}
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       HCLOUD_LOCATION: ${{ secrets.HCLOUD_LOCATION }}
