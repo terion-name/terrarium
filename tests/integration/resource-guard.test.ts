@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { IntegrationLogger } from "./lib/logger";
@@ -25,6 +25,12 @@ function createStore(): { dir: string; store: CleanupManifestStore } {
 }
 
 describe("integration resource guard", () => {
+  test("does not keep successful keep-on-failure runs alive by itself", () => {
+    const source = readFileSync(join(import.meta.dir, "resource-guard.ts"), "utf8");
+
+    expect(source).toContain(".unref?.()");
+  });
+
   test("fails fast when a tracked Hetzner server disappears", async () => {
     const { dir, store } = createStore();
     try {

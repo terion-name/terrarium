@@ -37,6 +37,7 @@ export class IntegrationResourceGuard {
     this.timer = setInterval(() => {
       void this.checkOnce();
     }, this.intervalMs);
+    (this.timer as { unref?: () => void }).unref?.();
   }
 
   stop(): void {
