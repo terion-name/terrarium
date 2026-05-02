@@ -547,6 +547,7 @@ jobs:
             release-assets/zfs/*.tar.gz.sha256
             release-assets/zfs/provenance.json
           prerelease: false
+          make_latest: false
           overwrite_files: true
 
       - name: Publish cockpit-s3 bundles
@@ -561,4 +562,5 @@ jobs:
             release-assets/s3/*.tar.gz.sha256
             release-assets/s3/provenance.json
           prerelease: false
+          make_latest: false
           overwrite_files: true

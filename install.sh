@@ -53,7 +53,7 @@ ensure_os() {
 ensure_bootstrap_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y ca-certificates curl unzip git
+  apt-get install -y ca-certificates curl unzip git python3
 }
 
 ensure_bun() {
@@ -79,9 +79,21 @@ is_release_ref() {
 }
 
 resolve_latest_tag() {
-  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null |
-    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-    head -n1
+  local arch="$1"
+  TERRARIUM_ASSET="terrarium-linux-${arch}.zip" \
+    python3 -c '
+import json
+import os
+import sys
+
+asset = os.environ["TERRARIUM_ASSET"]
+for release in json.load(sys.stdin):
+    if release.get("draft") or release.get("prerelease"):
+        continue
+    if any(item.get("name") == asset for item in release.get("assets", [])):
+        print(release.get("tag_name", ""))
+        break
+' < <(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=50" 2>/dev/null)
 }
 
 parse_args() {
@@ -171,7 +183,7 @@ main() {
       download_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}" || die "failed to download Terrarium release bundle ${BOOTSTRAP_REF}"
       exit 0
     fi
-    resolved_ref="$(resolve_latest_tag)" || die "failed to resolve latest Terrarium release tag"
+    resolved_ref="$(resolve_latest_tag "${arch}")" || die "failed to resolve latest Terrarium release tag"
     [[ -n "${resolved_ref}" ]] || die "failed to resolve latest Terrarium release tag"
     download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"
     exit 0

@@ -63,4 +63,14 @@ describe("release workflow", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("plugin bundle releases cannot replace the latest Terrarium installer", () => {
+    const workflow = readFileSync(join(repoRoot, ".github/workflows/cockpit-plugins.yml"), "utf8");
+    const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
+
+    expect(workflow.match(/make_latest: false/g)?.length).toBe(2);
+    expect(installer).toContain("releases?per_page=50");
+    expect(installer).toContain('TERRARIUM_ASSET="terrarium-linux-${arch}.zip"');
+    expect(installer).toContain('any(item.get("name") == asset for item in release.get("assets", []))');
+  });
 });
