@@ -242,6 +242,17 @@ export class HetznerCloudProvider {
     }
   }
 
+  async serverExists(id: number): Promise<boolean> {
+    const response = await this.requestResponse("GET", `/servers/${id}`);
+    if (response.status === 404) {
+      return false;
+    }
+    if (!response.ok) {
+      throw new Error(`Hetzner API GET /servers/${id} failed with HTTP ${response.status}: ${await response.text()}`);
+    }
+    return true;
+  }
+
   async waitForServerDeleted(id: number, timeoutMs = 240000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let lastError = "";

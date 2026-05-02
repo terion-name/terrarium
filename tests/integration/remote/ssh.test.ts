@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { remoteTarRootPattern } from "./ssh";
+import { DEFAULT_SSH_COMMAND_TIMEOUT_MS, remoteTarRootPattern, sshCommandTimeoutMs } from "./ssh";
 
 describe("SSH archive helpers", () => {
   test("converts archive paths and globs into tar includes relative to root", () => {
@@ -8,5 +8,10 @@ describe("SSH archive helpers", () => {
     expect(remoteTarRootPattern("var/log")).toBe("var/log");
     expect(remoteTarRootPattern("//var/lib/terrarium")).toBe("var/lib/terrarium");
     expect(remoteTarRootPattern("/")).toBe(".");
+  });
+
+  test("applies a local timeout to SSH commands by default", () => {
+    expect(sshCommandTimeoutMs()).toBe(DEFAULT_SSH_COMMAND_TIMEOUT_MS);
+    expect(sshCommandTimeoutMs({ timeoutMs: 1234 })).toBe(1234);
   });
 });

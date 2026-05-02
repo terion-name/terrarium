@@ -652,11 +652,12 @@ async function waitForRemoteCommandSuccess(
   host: SshHost,
   command: string,
   description: string,
-  timeoutMs: number
+  timeoutMs: number,
+  attemptTimeoutMs = 30000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await host.execAllowFailure(command);
+    const result = await host.execAllowFailure(command, { timeoutMs: attemptTimeoutMs });
     if (result.exitCode === 0) {
       return;
     }
@@ -667,12 +668,12 @@ async function waitForRemoteCommandSuccess(
 }
 
 async function deleteContainerIfPresent(host: SshHost, containerName: string): Promise<void> {
-  const exists = await host.execAllowFailure(`timeout 30s lxc info ${shellArg(containerName)} >/dev/null 2>&1`);
+  const exists = await host.execAllowFailure(`timeout 30s lxc info ${shellArg(containerName)} >/dev/null 2>&1`, { timeoutMs: 60000 });
   if (exists.exitCode !== 0) {
     return;
   }
 
-  const deletion = await host.execAllowFailure(`timeout 120s lxc delete ${shellArg(containerName)} --force`);
+  const deletion = await host.execAllowFailure(`timeout 120s lxc delete ${shellArg(containerName)} --force`, { timeoutMs: 180000 });
   if (deletion.exitCode !== 0 && deletion.exitCode !== 124) {
     throw new Error(deletion.stderr.trim() || deletion.stdout.trim() || `failed to delete existing container ${containerName}`);
   }

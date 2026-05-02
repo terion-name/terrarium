@@ -11,6 +11,11 @@ export type SshExecResult = {
 
 const REMOTE_READ_ATTEMPTS = 5;
 const REMOTE_READ_TIMEOUT_MS = 20000;
+export const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+
+export function sshCommandTimeoutMs(options: { timeoutMs?: number } = {}): number {
+  return options.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS;
+}
 
 /** Converts an absolute remote path or glob into a tar include relative to `/`. */
 export function remoteTarRootPattern(remotePath: string): string {
@@ -91,7 +96,9 @@ export class SshHost {
             .join(" ")} `
         : "";
     this.logger.info(`ssh ${this.host}: ${command}`);
-    return await run(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`], { timeoutMs: options.timeoutMs });
+    return await run(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`], {
+      timeoutMs: sshCommandTimeoutMs(options)
+    });
   }
 
   async execAllowFailure(command: string, options: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<SshExecResult> {
@@ -103,7 +110,7 @@ export class SshHost {
         : "";
     this.logger.info(`ssh ${this.host}: ${command}`);
     const result = await runAllowFailure(["ssh", ...this.baseArgs(), `${envPrefix}bash -lc ${shellEscape(command)}`], {
-      timeoutMs: options.timeoutMs
+      timeoutMs: sshCommandTimeoutMs(options)
     });
     return result;
   }
@@ -118,12 +125,15 @@ export class SshHost {
 
   async copyTo(localPath: string, remotePath: string): Promise<void> {
     this.logger.info(`scp ${localPath} -> ${this.host}:${remotePath}`);
-    await run([
-      "scp",
-      ...this.connectionArgs(),
-      localPath,
-      `${this.user}@${this.host}:${remotePath}`
-    ]);
+    await run(
+      [
+        "scp",
+        ...this.connectionArgs(),
+        localPath,
+        `${this.user}@${this.host}:${remotePath}`
+      ],
+      { timeoutMs: DEFAULT_SSH_COMMAND_TIMEOUT_MS }
+    );
   }
 
   async read(remotePath: string): Promise<string> {
@@ -187,12 +197,15 @@ export class SshHost {
     if (archiveResult.exitCode !== 0) {
       throw new Error(archiveResult.stderr.trim() || archiveResult.stdout.trim() || `failed to archive host paths on ${this.host}`);
     }
-    await run([
-      "scp",
-      ...this.connectionArgs(),
-      `${this.user}@${this.host}:${remoteTar}`,
-      localPath
-    ]);
+    await run(
+      [
+        "scp",
+        ...this.connectionArgs(),
+        `${this.user}@${this.host}:${remoteTar}`,
+        localPath
+      ],
+      { timeoutMs: DEFAULT_SSH_COMMAND_TIMEOUT_MS }
+    );
     await this.exec(`rm -f ${shellEscape(remoteTar)}`);
   }
 

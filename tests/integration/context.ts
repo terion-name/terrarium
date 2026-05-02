@@ -20,6 +20,7 @@ import { S3Provider } from "./provider/s3";
 import { CifsProvider } from "./provider/cifs";
 import { SshHost } from "./remote/ssh";
 import { buildCleanupPlan, CleanupManifestStore, type CleanupStep } from "./resources";
+import { IntegrationResourceGuard } from "./resource-guard";
 
 type CleanupTask = () => Promise<void>;
 
@@ -54,6 +55,7 @@ export class IntegrationContext {
   private readonly cleanupTasks: CleanupTask[] = [];
   private readonly sshKeyIdByName = new Map<string, number>();
   private cleanupPromise?: Promise<void>;
+  private resourceGuard?: IntegrationResourceGuard;
 
   constructor(options: IntegrationCliOptions) {
     this.config = loadIntegrationConfig(options);
@@ -198,9 +200,11 @@ export class IntegrationContext {
 
   async releaseHetznerHost(host: ManagedHost): Promise<void> {
     this.logger.info(`release Hetzner host ${host.label} (${host.server.id}) before continuing`);
-    await this.hetzner.deleteServer(host.server.id);
-    await this.hetzner.waitForServerDeleted(host.server.id);
-    this.resources.removeHetznerServer(host.server.id);
+    await this.withExpectedHetznerServerDeletion(host.server.id, async () => {
+      await this.hetzner.deleteServer(host.server.id);
+      await this.hetzner.waitForServerDeleted(host.server.id);
+      this.resources.removeHetznerServer(host.server.id);
+    });
 
     if (host.volume) {
       this.logger.info(`release Hetzner volume ${host.volume.id} for ${host.label}`);
@@ -214,11 +218,38 @@ export class IntegrationContext {
   }
 
   async runCleanup(): Promise<void> {
+    this.stopResourceGuard();
     if (this.cleanupPromise) {
       return await this.cleanupPromise;
     }
     this.cleanupPromise = this.runCleanupOnce();
     return await this.cleanupPromise;
+  }
+
+  startResourceGuard(onFatal: (error: Error) => void | Promise<void>, intervalMs?: number): void {
+    if (this.resourceGuard) {
+      return;
+    }
+    this.resourceGuard = new IntegrationResourceGuard({
+      resources: this.resources,
+      hetzner: this.hetzner,
+      logger: this.logger,
+      intervalMs,
+      onFatal
+    });
+    this.resourceGuard.start();
+  }
+
+  stopResourceGuard(): void {
+    this.resourceGuard?.stop();
+    this.resourceGuard = undefined;
+  }
+
+  private async withExpectedHetznerServerDeletion<T>(serverId: number, task: () => Promise<T>): Promise<T> {
+    if (!this.resourceGuard) {
+      return await task();
+    }
+    return await this.resourceGuard.allowExpectedServerDeletion(serverId, task);
   }
 
   private async runCleanupOnce(): Promise<void> {

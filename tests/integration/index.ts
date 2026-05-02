@@ -19,6 +19,7 @@ cli
 try {
   let context: IntegrationContext | undefined;
   let cleanupStarted = false;
+  let fatalCleanupStarted = false;
 
   async function cleanupOnce(reason: string): Promise<void> {
     if (!context || cleanupStarted) {
@@ -27,6 +28,17 @@ try {
     cleanupStarted = true;
     context.logger.warn(`running integration cleanup (${reason})`);
     await context.runCleanup();
+  }
+
+  async function failFast(error: Error): Promise<void> {
+    if (fatalCleanupStarted) {
+      return;
+    }
+    fatalCleanupStarted = true;
+    context?.logger.error(error.message);
+    console.error(`terrarium-integration: ${error.message}`);
+    await cleanupOnce("resource-guard");
+    process.exit(1);
   }
 
   function installSignalHandler(signal: NodeJS.Signals): void {
@@ -65,6 +77,10 @@ try {
     await cleanupOnce("cleanup-only");
     process.exit(0);
   }
+
+  context.startResourceGuard((error) => {
+    void failFast(error);
+  });
 
   await context.buildLinuxBundle();
 

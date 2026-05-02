@@ -129,6 +129,15 @@ describe("Hetzner Cloud provider cleanup", () => {
     expect(sleeps).toEqual([5000]);
   });
 
+  test("serverExists reports missing servers without throwing", async () => {
+    const calls = installFetchMock([new Response(null, { status: 404 })]);
+
+    await expect(createProvider().serverExists(42)).resolves.toBe(false);
+
+    expect(calls.map(callPath)).toEqual(["/v1/servers/42"]);
+    expect(calls.map((call) => call.init?.method)).toEqual(["GET"]);
+  });
+
   test("deleteVolume detaches attached volumes before retrying deletion", async () => {
     const sleeps: number[] = [];
     setSleepMock(async (ms) => {
