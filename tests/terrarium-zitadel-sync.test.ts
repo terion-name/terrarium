@@ -4,9 +4,19 @@ import {
   isZitadelAlreadyExistsError,
   isRetriableZitadelApiError,
   isZitadelNoChangesResponse,
+  lookupUserId,
   mergedRoleKeys,
   parseZitadelHttpOutput
 } from "../scripts/terrarium-zitadel-sync";
+
+type LookupCall = {
+  authDomain: string;
+  pat: string;
+  method: string;
+  path: string;
+  body?: unknown;
+  query?: Record<string, string>;
+};
 
 describe("terrarium local ZITADEL sync", () => {
   test("writes the stable outputs contract consumed by oauth2-proxy, LXD, and route auth", () => {
@@ -63,5 +73,64 @@ describe("terrarium local ZITADEL sync", () => {
   test("preserves existing grant roles when adding the local admin group", () => {
     expect(mergedRoleKeys(["auditor", "operators"], "terrarium-admins")).toEqual(["auditor", "operators", "terrarium-admins"]);
     expect(mergedRoleKeys(["terrarium-admins"], "terrarium-admins")).toEqual(["terrarium-admins"]);
+  });
+
+  test("looks up the local admin by exact ZITADEL login name", async () => {
+    const calls: LookupCall[] = [];
+    const userId = await lookupUserId("auth.example.test", "pat-1", "configured-admin@example.com", async <T>(
+      authDomain: string,
+      pat: string,
+      method: "GET" | "POST" | "PUT" | "DELETE",
+      path: string,
+      body?: unknown,
+      query?: Record<string, string>
+    ): Promise<T> => {
+      calls.push({ authDomain, pat, method, path, body, query });
+      return { user: { id: "admin-user" } } as T;
+    });
+
+    expect(userId).toBe("admin-user");
+    expect(calls).toEqual([
+      {
+        authDomain: "auth.example.test",
+        pat: "pat-1",
+        method: "GET",
+        path: "/management/v1/global/users/_by_login_name",
+        body: undefined,
+        query: { loginName: "configured-admin@example.com" }
+      }
+    ]);
+  });
+
+  test("does not fall back to an unrelated singleton human user", async () => {
+    const calls: LookupCall[] = [];
+    await expect(
+      lookupUserId("auth.example.test", "pat-1", "stale-admin@example.com", async <T>(
+        authDomain: string,
+        pat: string,
+        method: "GET" | "POST" | "PUT" | "DELETE",
+        path: string,
+        body?: unknown,
+        query?: Record<string, string>
+      ): Promise<T> => {
+        calls.push({ authDomain, pat, method, path, body, query });
+        return {
+          result: [{ userId: "attacker-singleton", human: { email: { email: "attacker@example.com" } } }]
+        } as T;
+      })
+    ).rejects.toThrow(
+      "failed to find ZITADEL user for login name stale-admin@example.com"
+    );
+
+    expect(calls).toEqual([
+      {
+        authDomain: "auth.example.test",
+        pat: "pat-1",
+        method: "GET",
+        path: "/management/v1/global/users/_by_login_name",
+        body: undefined,
+        query: { loginName: "stale-admin@example.com" }
+      }
+    ]);
   });
 });
