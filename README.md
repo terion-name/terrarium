@@ -29,7 +29,7 @@ The goal is simple: make a single VPS feel safe enough for experimentation, capa
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-The shell bootstrap is intentionally thin. The release-published `install.sh` is pinned to the release it came from, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, clones the Terrarium repo into `/opt/terrarium`, and stages that binary into the checkout. If you explicitly target a branch-like `--ref` such as `main`, it falls back to a source build.
+The shell bootstrap is intentionally thin. The release-published `install.sh` is pinned to the release it came from, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, clones the Terrarium repo into `/opt/terrarium`, and stages that binary into the checkout. Default and tag-like release installs fail closed if the release cannot be resolved or downloaded. Source builds are only used when you explicitly target a branch-like `--ref` such as `main`.
 
 If you want to pin a specific release instead of `latest`, use the tagged release asset directly:
 

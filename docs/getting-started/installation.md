@@ -26,7 +26,7 @@ Or browse the full [Provider Guides](../providers/README.md) section first.
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-The published `install.sh` is intentionally thin. It downloads the matching compiled `terrariumctl` bundle from GitHub Releases, stages it into `/opt/terrarium`, and runs the real installer there.
+The published `install.sh` is intentionally thin. It downloads the matching compiled `terrariumctl` bundle from GitHub Releases, stages it into `/opt/terrarium`, and runs the real installer there. Default and tag-like release installs fail closed if the release cannot be resolved or downloaded; source builds require an explicit branch-like `--ref`, for example `main`.
 
 If you want to pin a specific release instead of `latest`, use the tagged asset directly:
 

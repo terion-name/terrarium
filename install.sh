@@ -79,11 +79,9 @@ is_release_ref() {
 }
 
 resolve_latest_tag() {
-  {
-    curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null |
-      sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-      head -n1
-  } || true
+  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null |
+    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+    head -n1
 }
 
 parse_args() {
@@ -154,31 +152,33 @@ build_from_source() {
 }
 
 main() {
-  local tmpdir arch resolved_ref
+  local tmpdir arch resolved_ref bootstrap_parent
   parse_args "$@"
   require_root
   ensure_os
   ensure_bootstrap_deps
 
-  TMPDIR_PATH="$(mktemp -d /tmp/terrarium-bootstrap.XXXXXX)"
+  bootstrap_parent="/var/lib/terrarium/bootstrap"
+  install -d -o root -g root -m 0700 "${bootstrap_parent}"
+  TMPDIR_PATH="$(mktemp -d "${bootstrap_parent}/run.XXXXXX")"
+  chmod 0700 "${TMPDIR_PATH}"
   trap '[[ -n "${TMPDIR_PATH}" ]] && rm -rf "${TMPDIR_PATH}"' EXIT
   tmpdir="${TMPDIR_PATH}"
   arch="$(detect_arch)"
 
   if [[ -z "${REF}" ]]; then
-    if [[ -n "${BOOTSTRAP_REF}" ]] && download_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}"; then
+    if [[ -n "${BOOTSTRAP_REF}" ]]; then
+      download_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}" || die "failed to download Terrarium release bundle ${BOOTSTRAP_REF}"
       exit 0
     fi
-    resolved_ref="$(resolve_latest_tag)"
-    if [[ -n "${resolved_ref}" ]] && download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}"; then
-      exit 0
-    fi
-    log "release bundle is unavailable; using source fallback"
-    build_from_source "${tmpdir}" "main"
+    resolved_ref="$(resolve_latest_tag)" || die "failed to resolve latest Terrarium release tag"
+    [[ -n "${resolved_ref}" ]] || die "failed to resolve latest Terrarium release tag"
+    download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"
     exit 0
   fi
 
-  if is_release_ref "${REF}" && download_release_bundle "${tmpdir}" "${arch}" "${REF}"; then
+  if is_release_ref "${REF}"; then
+    download_release_bundle "${tmpdir}" "${arch}" "${REF}" || die "failed to download Terrarium release bundle ${REF}"
     exit 0
   fi
 

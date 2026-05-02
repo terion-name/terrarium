@@ -7,7 +7,7 @@ Terrarium turns a single Ubuntu 24.04 host into a hardened control plane for iso
 Terrarium is split into four layers:
 
 1. `install.sh`
-   Thin bootstrap only. The release-published installer is pinned to its own release, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, and falls back to a source build only for branch-like refs such as `main`.
+   Thin bootstrap only. The release-published installer is pinned to its own release, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, and fails closed if a default or tag-like release cannot be resolved or downloaded. It falls back to a source build only when the operator explicitly passes a branch-like ref such as `main`.
 2. `terrariumctl`
    Single Terrarium binary. It owns install-time prompting, config rendering, status and maintenance commands, backup/restore flows, proxy sync, IDP sync, and config updates through `terrariumctl set ...`.
 3. Ansible
