@@ -20,6 +20,7 @@ describe("release workflow", () => {
     expect(workflow.jobs.build.needs).toContain("release_tag");
     expect(workflow.jobs.publish.needs).toContain("release_tag");
     expect(source).toContain("TERRARIUM_VERSION: ${{ needs.release_tag.outputs.value }}");
+    expect(source).toContain("bun scripts/build.ts");
     expect(source).toContain("tag_name: ${{ needs.release_tag.outputs.value }}");
   });
 

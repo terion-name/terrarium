@@ -69,6 +69,7 @@ jobs:
           TERRARIUM_VERSION: ${{ needs.release_tag.outputs.value }}
         run: |
           mkdir -p release/dist
+          bun scripts/build.ts
           bun build --compile --target=bun-linux-${{ matrix.arch }} scripts/terrariumctl.ts --outfile release/dist/terrariumctl
 
       - name: Package release bundle
