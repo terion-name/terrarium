@@ -298,7 +298,7 @@ describe("terrariumctl cluster", () => {
 
   test("validates WireGuard join bundle fields before writing local config", () => {
     const validBundle = {
-      version: 1,
+      version: 1 as const,
       interface: "terrarium-wg0",
       cidr: "10.255.54.0/24",
       port: "51820",
@@ -319,7 +319,7 @@ describe("terrariumctl cluster", () => {
 
   test("rejects WireGuard join bundle config-injection fields", () => {
     const validBundle = {
-      version: 1,
+      version: 1 as const,
       interface: "terrarium-wg0",
       cidr: "10.255.54.0/24",
       port: "51820",
