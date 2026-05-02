@@ -1,0 +1,66 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import YAML from "yaml";
+
+const repoRoot = join(import.meta.dir, "..");
+
+describe("release workflow", () => {
+  test("validates release tags before preflight and publishing", () => {
+    const source = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
+    const workflow = YAML.parse(source);
+
+    expect(workflow.jobs.release_tag).toBeDefined();
+    expect(source).toContain('[[ "${RELEASE_TAG}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]');
+    expect(source).toContain("Release tags may only contain letters, numbers, '.', '_', and '-'");
+    expect(source).toContain("printf 'value=%s\\n' \"${RELEASE_TAG}\" >> \"${GITHUB_OUTPUT}\"");
+    expect(workflow.jobs.integration_preflight.needs).toBe("release_tag");
+    expect(workflow.jobs.build.needs).toContain("release_tag");
+    expect(workflow.jobs.publish.needs).toContain("release_tag");
+    expect(source).toContain("TERRARIUM_VERSION: ${{ needs.release_tag.outputs.value }}");
+    expect(source).toContain("tag_name: ${{ needs.release_tag.outputs.value }}");
+  });
+
+  test("shell-quotes the embedded bootstrap ref instead of interpolating it through sed", () => {
+    const source = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
+
+    expect(source).toContain("shlex.quote(release_tag)");
+    expect(source).toContain("EMBEDDED_BOOTSTRAP_REF={shlex.quote(release_tag)} # TERRARIUM_RELEASE_REF");
+    expect(source).not.toContain('sed "s|^EMBEDDED_BOOTSTRAP_REF=\\"\\" # TERRARIUM_RELEASE_REF$|');
+    expect(source).not.toContain('EMBEDDED_BOOTSTRAP_REF=\\"${RELEASE_TAG}\\"');
+  });
+
+  test("generated installer assignment treats shell metacharacters as data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "terrarium-release-workflow-"));
+    const marker = join(dir, "pwned");
+    const installer = join(dir, "install.sh");
+    const payload = `v1.2.3";touch\${IFS}${marker};#`;
+
+    try {
+      const quote = spawnSync("python3", ["-c", "import os, shlex; print(shlex.quote(os.environ['RELEASE_TAG']))"], {
+        env: { ...process.env, RELEASE_TAG: payload },
+        encoding: "utf8"
+      });
+      expect(quote.status).toBe(0);
+
+      writeFileSync(
+        installer,
+        [
+          "#!/usr/bin/env bash",
+          "set -Eeuo pipefail",
+          `EMBEDDED_BOOTSTRAP_REF=${quote.stdout.trim()} # TERRARIUM_RELEASE_REF`,
+          'printf "%s\\n" "${EMBEDDED_BOOTSTRAP_REF}"'
+        ].join("\n")
+      );
+
+      const run = spawnSync("bash", [installer], { encoding: "utf8" });
+      expect(run.status).toBe(0);
+      expect(run.stdout.trim()).toBe(payload);
+      expect(spawnSync("test", ["!", "-e", marker]).status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

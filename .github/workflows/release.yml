@@ -14,7 +14,32 @@ permissions:
   contents: write
 
 jobs:
+  release_tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      value: ${{ steps.tag.outputs.value }}
+    steps:
+      - name: Resolve release tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "${INPUT_TAG}" ]; then
+            RELEASE_TAG="${INPUT_TAG}"
+          else
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if ! [[ "${RELEASE_TAG}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "Invalid release tag: ${RELEASE_TAG}" >&2
+            echo "Release tags may only contain letters, numbers, '.', '_', and '-'." >&2
+            exit 1
+          fi
+
+          printf 'value=%s\n' "${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+
   integration_preflight:
+    needs: release_tag
     uses: ./.github/workflows/integration-full.yml
     secrets: inherit
     with:
@@ -22,7 +47,9 @@ jobs:
 
   build:
     runs-on: ubuntu-24.04
-    needs: integration_preflight
+    needs:
+      - release_tag
+      - integration_preflight
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +66,7 @@ jobs:
 
       - name: Build Terrarium binary
         env:
-          TERRARIUM_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          TERRARIUM_VERSION: ${{ needs.release_tag.outputs.value }}
         run: |
           mkdir -p release/dist
           bun build --compile --target=bun-linux-${{ matrix.arch }} scripts/terrariumctl.ts --outfile release/dist/terrariumctl
@@ -57,7 +84,9 @@ jobs:
 
   publish:
     runs-on: ubuntu-24.04
-    needs: build
+    needs:
+      - release_tag
+      - build
     steps:
       - uses: actions/checkout@v4
 
@@ -65,25 +94,26 @@ jobs:
         with:
           path: artifacts
 
-      - name: Resolve release tag
-        id: tag
-        env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          if [ -n "${INPUT_TAG}" ]; then
-            echo "value=${INPUT_TAG}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "value=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
-          fi
-
       - name: Prepare release assets
         env:
-          RELEASE_TAG: ${{ steps.tag.outputs.value }}
+          RELEASE_TAG: ${{ needs.release_tag.outputs.value }}
         run: |
           mkdir -p release-assets
           cp artifacts/terrarium-linux-x64/terrarium-linux-x64.zip release-assets/
           cp artifacts/terrarium-linux-arm64/terrarium-linux-arm64.zip release-assets/
-          sed "s|^EMBEDDED_BOOTSTRAP_REF=\"\" # TERRARIUM_RELEASE_REF$|EMBEDDED_BOOTSTRAP_REF=\"${RELEASE_TAG}\" # TERRARIUM_RELEASE_REF|" install.sh > release-assets/install.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import shlex
+
+          release_tag = os.environ["RELEASE_TAG"]
+          source = Path("install.sh").read_text()
+          needle = 'EMBEDDED_BOOTSTRAP_REF="" # TERRARIUM_RELEASE_REF'
+          replacement = f"EMBEDDED_BOOTSTRAP_REF={shlex.quote(release_tag)} # TERRARIUM_RELEASE_REF"
+          if needle not in source:
+              raise SystemExit("install.sh release placeholder not found")
+          Path("release-assets/install.sh").write_text(source.replace(needle, replacement, 1))
+          PY
           chmod 0644 release-assets/install.sh
           (
             cd release-assets
@@ -93,11 +123,11 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.value }}
+          tag_name: ${{ needs.release_tag.outputs.value }}
           files: |
             release-assets/install.sh
             release-assets/terrarium-linux-x64.zip
             release-assets/terrarium-linux-arm64.zip
             release-assets/SHA256SUMS
           generate_release_notes: true
-          prerelease: ${{ contains(steps.tag.outputs.value, '-') }}
+          prerelease: ${{ contains(needs.release_tag.outputs.value, '-') }}
