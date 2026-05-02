@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged } from "./lib/common";
 
@@ -99,7 +100,7 @@ async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
   throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
 }
 
-function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string): string[] {
+function zitadelCurlBase(authDomain: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string, headerPath: string): string[] {
   const cmd = ["curl", "-sS", "--noproxy", "*", ...trustedCaArgs()];
   cmd.push(
     "--resolve",
@@ -113,12 +114,19 @@ function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST"
     "-X",
     method,
     "-H",
-    `Authorization: Bearer ${pat}`,
-    "-H",
-    "Content-Type: application/json",
+    `@${headerPath}`,
     url
   );
   return cmd;
+}
+
+function writeZitadelHeaderFile(pat: string): { dir: string; path: string } {
+  const dir = mkdtempSync(join(tmpdir(), "terrarium-zitadel-api-"));
+  chmodSync(dir, 0o700);
+  const path = join(dir, "headers");
+  writeFileSync(path, `Authorization: Bearer ${pat}\nContent-Type: application/json\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(path, 0o600);
+  return { dir, path };
 }
 
 export function parseZitadelHttpOutput(raw: string): { status: number; body: string } {
@@ -242,38 +250,44 @@ async function zitadelApi<T>(
   for (const [key, value] of Object.entries(query ?? {})) {
     url.searchParams.set(key, value);
   }
-  const cmd = zitadelCurlBase(authDomain, pat, method, url.toString());
+  const headers = writeZitadelHeaderFile(pat);
+  const cmd = zitadelCurlBase(authDomain, method, url.toString(), headers.path);
+  const stdin = body !== undefined && method !== "GET" ? JSON.stringify(body) : undefined;
   if (body !== undefined && method !== "GET") {
-    cmd.push("-d", JSON.stringify(body));
+    cmd.push("--data-binary", "@-");
   }
 
   let lastError = "";
-  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
-    const result = await runAllowFailure(cmd);
-    if (result.exitCode === 0) {
-      try {
-        const response = parseZitadelHttpOutput(result.stdout);
-        if (response.status >= 200 && response.status < 300) {
-          return JSON.parse(response.body || "null") as T;
+  try {
+    for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+      const result = await runAllowFailure(cmd, { stdin });
+      if (result.exitCode === 0) {
+        try {
+          const response = parseZitadelHttpOutput(result.stdout);
+          if (response.status >= 200 && response.status < 300) {
+            return JSON.parse(response.body || "null") as T;
+          }
+          if (isZitadelNoChangesResponse(response.status, response.body)) {
+            return JSON.parse(response.body || "null") as T;
+          }
+          lastError = formatZitadelHttpFailure(method, path, response.status, response.body);
+        } catch (error) {
+          lastError = String(error).replace(/^Error: /, "");
         }
-        if (isZitadelNoChangesResponse(response.status, response.body)) {
-          return JSON.parse(response.body || "null") as T;
-        }
-        lastError = formatZitadelHttpFailure(method, path, response.status, response.body);
-      } catch (error) {
-        lastError = String(error).replace(/^Error: /, "");
+      } else {
+        lastError = result.stderr.trim() || result.stdout.trim() || `ZITADEL API ${method} ${path} failed`;
       }
-    } else {
-      lastError = result.stderr.trim() || result.stdout.trim() || `ZITADEL API ${method} ${path} failed`;
+
+      if (!isRetriableZitadelApiError(lastError)) {
+        throw new Error(lastError);
+      }
+      await Bun.sleep(WAIT_INTERVAL_MS);
     }
 
-    if (!isRetriableZitadelApiError(lastError)) {
-      throw new Error(lastError);
-    }
-    await Bun.sleep(WAIT_INTERVAL_MS);
+    throw new Error(`timed out waiting for ZITADEL API ${method} ${path}: ${lastError}`);
+  } finally {
+    rmSync(headers.dir, { recursive: true, force: true });
   }
-
-  throw new Error(`timed out waiting for ZITADEL API ${method} ${path}: ${lastError}`);
 }
 
 async function lookupProjectId(authDomain: string, pat: string): Promise<string> {

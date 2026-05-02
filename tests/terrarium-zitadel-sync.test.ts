@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildLocalIdpOutputs,
   isZitadelAlreadyExistsError,
@@ -10,6 +12,8 @@ import {
   parseZitadelHttpOutput,
   terrariumGroupsActionScript
 } from "../scripts/terrarium-zitadel-sync";
+
+const repoRoot = join(import.meta.dir, "..");
 
 type LookupCall = {
   authDomain: string;
@@ -50,6 +54,15 @@ describe("terrarium local ZITADEL sync", () => {
       status: 200,
       body: '{"ok":true}'
     });
+  });
+
+  test("keeps ZITADEL PAT and request bodies out of curl argv", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-zitadel-sync.ts"), "utf8");
+
+    expect(source).not.toContain("`Authorization: Bearer ${pat}`");
+    expect(source).toContain("Authorization: Bearer ${pat}\\nContent-Type: application/json\\n");
+    expect(source).toContain('"--data-binary", "@-"');
+    expect(source).toContain("runAllowFailure(cmd, { stdin })");
   });
 
   test("treats ZITADEL no-op updates as idempotent success responses", () => {
