@@ -115,6 +115,7 @@ describe("terrarium route auth generation", () => {
     const compose = parse(composeYaml) as { services: Record<string, unknown> };
 
     expect(Object.keys(compose.services).sort()).toEqual(profiles.map((profile) => profile.containerName).sort());
+    expect(Object.values(compose.services).map((service) => (service as { user?: string }).user)).toEqual(profiles.map(() => "65532:65532"));
     expect(profileConfigs[adminProfile.containerName]).toContain(`proxy_prefix = "${adminProfile.proxyPrefix}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain(`redirect_url = "${adminProfile.callbackPath}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain('allowed_groups = [ "admins" ]');

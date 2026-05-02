@@ -124,7 +124,9 @@
       ansible.builtin.template:
         src: oauth2-proxy.cfg.j2
         dest: "{{ terrarium_oauth2_proxy_dir }}/oauth2-proxy.cfg"
-        mode: "0600"
+        owner: root
+        group: "{{ terrarium_oauth2_proxy_gid }}"
+        mode: "0640"
       vars:
         terrarium_oauth2_proxy_client_id: "{{ terrarium_oauth2_proxy_client_id_effective }}"
         terrarium_oauth2_proxy_client_secret: "{{ terrarium_oauth2_proxy_client_secret_effective }}"

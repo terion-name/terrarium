@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { URL } from "node:url";
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
 
 const PREFIX = "terrariumctl proxy sync";
@@ -13,6 +13,8 @@ const OAUTH2_PROXY_COOKIE_SECRET_PATH = "/etc/terrarium/secrets/oauth2_proxy_coo
 const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
+const OAUTH2_PROXY_UID = 65532;
+const OAUTH2_PROXY_GID = 65532;
 const ROUTE_AUTH_READY_ATTEMPTS = 12;
 const ROUTE_AUTH_READY_INTERVAL_MS = 1000;
 const ZITADEL_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
@@ -1096,7 +1098,7 @@ export function buildRouteAuthComposeArtifacts(
         profile.containerName,
         {
           image: "quay.io/oauth2-proxy/oauth2-proxy:v7.13.0",
-          user: "0:0",
+          user: `${OAUTH2_PROXY_UID}:${OAUTH2_PROXY_GID}`,
           network_mode: "host",
           restart: "unless-stopped",
           command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"],
@@ -1123,7 +1125,9 @@ function buildRouteAuthCompose(
   const { composeYaml, profileConfigs } = buildRouteAuthComposeArtifacts(config, profiles, clientId, clientSecret, cookieSecret);
   let changed = false;
   for (const [containerName, content] of Object.entries(profileConfigs)) {
-    changed = writeIfChanged(`${ROUTE_AUTH_DIR}/${containerName}.cfg`, content, { mode: 0o600, directoryMode: 0o700 }) || changed;
+    const configPath = `${ROUTE_AUTH_DIR}/${containerName}.cfg`;
+    changed = writeIfChanged(configPath, content, { mode: 0o640, directoryMode: 0o700 }) || changed;
+    chownSync(configPath, 0, OAUTH2_PROXY_GID);
   }
   return { composeYaml, changed };
 }
