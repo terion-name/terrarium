@@ -185,14 +185,20 @@ type ZitadelApiCall = <T>(
 ) => Promise<T>;
 
 const TERRARIUM_GROUPS_ACTION_NAME = "terrariumGroups";
-const TERRARIUM_GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
+export function terrariumGroupsActionScript(projectId: string): string {
+  return `function terrariumGroups(ctx, api) {
   var groups = [];
+  var terrariumProjectId = ${JSON.stringify(projectId)};
   if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
     api.v1.claims.setClaim('groups', groups);
     return;
   }
   for (var i = 0; i < ctx.v1.user.grants.grants.length; i++) {
     var grant = ctx.v1.user.grants.grants[i];
+    var grantProjectId = grant && (grant.projectId || grant.projectID || grant.project_id);
+    if (grantProjectId !== terrariumProjectId) {
+      continue;
+    }
     if (!grant || !grant.roles) {
       continue;
     }
@@ -205,6 +211,7 @@ const TERRARIUM_GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
   }
   api.v1.claims.setClaim('groups', groups);
 }`;
+}
 
 type LocalOidcAppSpec = {
   outputPrefix: "cockpit" | "lxd" | "routes";
@@ -335,14 +342,15 @@ export function mergedRoleKeys(existingRoleKeys: string[], requiredRoleKey: stri
   return Array.from(new Set([...existingRoleKeys, requiredRoleKey])).sort();
 }
 
-async function ensureGroupsAction(authDomain: string, pat: string): Promise<string> {
+async function ensureGroupsAction(authDomain: string, pat: string, projectId: string): Promise<string> {
+  const script = terrariumGroupsActionScript(projectId);
   const actions = await zitadelApi<{ result?: ZitadelAction[] }>(authDomain, pat, "POST", "/management/v1/actions/_search", {});
   const existing = (actions.result ?? []).find((action) => action.name === TERRARIUM_GROUPS_ACTION_NAME);
   if (existing?.id) {
-    if ((existing.script ?? "").trim() !== TERRARIUM_GROUPS_ACTION_SCRIPT.trim()) {
+    if ((existing.script ?? "").trim() !== script.trim()) {
       await zitadelApi(authDomain, pat, "PUT", `/management/v1/actions/${existing.id}`, {
         name: TERRARIUM_GROUPS_ACTION_NAME,
-        script: TERRARIUM_GROUPS_ACTION_SCRIPT,
+        script,
         timeout: "10s",
         allowedToFail: false
       });
@@ -352,7 +360,7 @@ async function ensureGroupsAction(authDomain: string, pat: string): Promise<stri
 
   const created = await zitadelApi<{ id?: string }>(authDomain, pat, "POST", "/management/v1/actions", {
     name: TERRARIUM_GROUPS_ACTION_NAME,
-    script: TERRARIUM_GROUPS_ACTION_SCRIPT,
+    script,
     timeout: "10s",
     allowedToFail: false
   });
@@ -579,7 +587,7 @@ async function ensureManagementGroupProvisioning(authDomain: string, pat: string
   await ensureProjectRole(authDomain, pat, projectId, adminGroup);
   const userId = await lookupUserId(authDomain, pat, adminLoginName);
   await ensureUserGrant(authDomain, pat, userId, projectId, adminGroup);
-  const actionId = await ensureGroupsAction(authDomain, pat);
+  const actionId = await ensureGroupsAction(authDomain, pat, projectId);
   await ensureFlowTrigger(authDomain, pat, "2", "4", actionId);
   await ensureFlowTrigger(authDomain, pat, "2", "5", actionId);
 }

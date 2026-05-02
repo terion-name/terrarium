@@ -7,7 +7,8 @@ import {
   localOidcAppSpecs,
   lookupUserId,
   mergedRoleKeys,
-  parseZitadelHttpOutput
+  parseZitadelHttpOutput,
+  terrariumGroupsActionScript
 } from "../scripts/terrarium-zitadel-sync";
 
 type LookupCall = {
@@ -74,6 +75,14 @@ describe("terrarium local ZITADEL sync", () => {
   test("preserves existing grant roles when adding the local admin group", () => {
     expect(mergedRoleKeys(["auditor", "operators"], "terrarium-admins")).toEqual(["auditor", "operators", "terrarium-admins"]);
     expect(mergedRoleKeys(["terrarium-admins"], "terrarium-admins")).toEqual(["terrarium-admins"]);
+  });
+
+  test("emits only Terrarium project roles into the groups claim", () => {
+    const script = terrariumGroupsActionScript("project-terrarium");
+
+    expect(script).toContain('var terrariumProjectId = "project-terrarium"');
+    expect(script).toContain("grant.projectId || grant.projectID || grant.project_id");
+    expect(script).toContain("grantProjectId !== terrariumProjectId");
   });
 
   test("registers local management callbacks for each host-only oauth2-proxy cookie origin", () => {
