@@ -55,6 +55,18 @@ describe("config store reconciliation", () => {
   });
 });
 
+describe("partition-mode storage", () => {
+  test("uses the partition created at the selected free-space offset", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/zfs/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("Locate partition created in discovered free space");
+    expect(tasks).toContain('awk -F: -v start="{{ terrarium_storage_partition_start }}"');
+    expect(tasks).toContain("terrarium_created_partition_source.stdout");
+    expect(tasks).toContain("if terrarium_storage_partition_start | length > 0");
+    expect(tasks).toContain("if terrarium_storage_source | regex_search('[0-9]+$')");
+  });
+});
+
 describe("terrariumctl install alias", () => {
   test("installs trm as a shorthand symlink to the installed CLI", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");

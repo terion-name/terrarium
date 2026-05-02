@@ -82,6 +82,44 @@
     - terrarium_storage_partition_start | length > 0
     - terrarium_storage_partition_end | length > 0
 
+- name: Locate partition created in discovered free space
+  ansible.builtin.shell: |
+    set -o pipefail
+    partprobe {{ terrarium_storage_source }}
+    udevadm settle
+    number="$(
+      parted -sm {{ terrarium_storage_source }} unit MiB print |
+        awk -F: -v start="{{ terrarium_storage_partition_start }}" '
+          BEGIN {
+            gsub(/MiB$/, "", start)
+            target = start + 0
+          }
+          $1 ~ /^[0-9]+$/ {
+            current = $2
+            gsub(/MiB$/, "", current)
+            if (current + 0 == target) {
+              print $1
+              exit
+            }
+          }
+        '
+    )"
+    test -n "$number"
+    case "{{ terrarium_storage_source }}" in
+      *[0-9]) printf '%sp%s\n' "{{ terrarium_storage_source }}" "$number" ;;
+      *) printf '%s%s\n' "{{ terrarium_storage_source }}" "$number" ;;
+    esac
+  args:
+    executable: /bin/bash
+  register: terrarium_created_partition_source
+  changed_when: false
+  when:
+    - terrarium_storage_mode == 'partition'
+    - terrarium_zpool_check.rc != 0
+    - terrarium_partition_source_type.stdout == 'disk'
+    - terrarium_storage_partition_start | length > 0
+    - terrarium_storage_partition_end | length > 0
+
 - name: Determine effective partition target
   ansible.builtin.set_fact:
     terrarium_zfs_effective_source: >-
@@ -89,9 +127,13 @@
         terrarium_storage_source
         if terrarium_partition_source_type.stdout != 'disk'
         else (
-          terrarium_storage_source ~ 'p1'
-          if terrarium_storage_source | regex_search('nvme[0-9]+n[0-9]+$')
-          else terrarium_storage_source ~ '1'
+          terrarium_created_partition_source.stdout
+          if terrarium_storage_partition_start | length > 0
+          else (
+            terrarium_storage_source ~ 'p1'
+            if terrarium_storage_source | regex_search('[0-9]+$')
+            else terrarium_storage_source ~ '1'
+          )
         )
       }}
   when:
