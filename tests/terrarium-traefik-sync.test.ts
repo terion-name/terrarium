@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import {
   buildDynamicConfig,
@@ -11,6 +13,8 @@ import {
   parseZitadelHttpOutput
 } from "../scripts/terrarium-traefik-sync";
 import { buildZitadelCloudRedirectUris } from "./integration/provider/zitadel-cloud";
+
+const repoRoot = join(import.meta.dir, "..");
 
 const routeAuthConfig = {
   terrarium_root_domain: "example.test",
@@ -214,6 +218,15 @@ describe("terrarium route auth generation", () => {
 });
 
 describe("terrarium proxy sync failure handling", () => {
+  test("writes dynamic auth routers before route-auth sidecar readiness can abort", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+    const dynamicWrite = source.indexOf("writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml)");
+    const routeAuthSync = source.indexOf("const routeAuthErrors = await syncRouteAuthStack(config, authProfiles)");
+
+    expect(dynamicWrite).toBeGreaterThan(0);
+    expect(routeAuthSync).toBeGreaterThan(dynamicWrite);
+  });
+
   test("throws one failure message when any sync error group is non-empty", () => {
     expect(() =>
       assertProxySyncSucceeded({

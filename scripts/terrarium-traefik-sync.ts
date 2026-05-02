@@ -1518,18 +1518,16 @@ export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<vo
     const { dynamicYaml, extraEntrypoints, ufwPorts, authProfiles, errors } = buildDynamicConfig(containers, config, backendTargets);
     const staticYaml = buildStaticConfig(config, extraEntrypoints);
 
-    const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
-    const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
     assertProxySyncSucceeded({
       dynamicErrors: errors,
-      ufwErrors: [],
-      backendErrors,
-      localRouteClientErrors,
-      routeAuthErrors
+      backendErrors
     });
 
     const staticChanged = writeIfChanged(STATIC_CONFIG_PATH, staticYaml);
     writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml);
+
+    const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
+    const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
     const ufwErrors = await syncUfw(ufwPorts);
 
     if (staticChanged) {
@@ -1539,8 +1537,9 @@ export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<vo
     assertProxySyncSucceeded({
       dynamicErrors: [],
       ufwErrors,
-      localRouteClientErrors: [],
-      routeAuthErrors: []
+      backendErrors: [],
+      localRouteClientErrors,
+      routeAuthErrors
     });
   });
 }
