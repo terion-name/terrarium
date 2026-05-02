@@ -90,14 +90,14 @@ function secretCliOption(
   fileKey: string,
   aliases: string[] = [],
   fileAliases: string[] = []
-): string {
+): string | undefined {
   const inlineValue = cliOption(rawOptions, key, aliases);
   const filePath = cliOption(rawOptions, fileKey, fileAliases);
   if (inlineValue && filePath) {
     throw new Error(`use only one of --${key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)} or --${fileKey.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}`);
   }
   if (!filePath) {
-    return inlineValue || "";
+    return inlineValue || undefined;
   }
   try {
     return readFileSync(filePath, "utf8").trim();

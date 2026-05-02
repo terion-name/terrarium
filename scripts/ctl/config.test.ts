@@ -211,4 +211,12 @@ describe("terrariumctl config reconciliation", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test("leaves omitted set command secrets undefined", () => {
+    const parsed = parseSetCommandOptions({});
+
+    expect(parsed.idp.oidcSecret).toBeUndefined();
+    expect(parsed.idp.lxdOidcSecret).toBeUndefined();
+    expect(parsed.s3.s3SecretKey).toBeUndefined();
+  });
 });
