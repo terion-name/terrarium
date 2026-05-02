@@ -621,7 +621,77 @@ function encodeWireGuardJoinBundle(bundle: WireGuardJoinBundle): string {
   return base64UrlEncode(JSON.stringify(bundle));
 }
 
-function decodeWireGuardJoinBundle(value: string): WireGuardJoinBundle {
+function requireWireGuardScalar(label: string, value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || /[\r\n\0]/.test(trimmed)) {
+    throw new Error(`invalid WireGuard join bundle: ${label} is invalid`);
+  }
+  return trimmed;
+}
+
+function requireWireGuardInterface(value: string): string {
+  const trimmed = requireWireGuardScalar("interface", value);
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$/.test(trimmed)) {
+    throw new Error("invalid WireGuard join bundle: interface is invalid");
+  }
+  return trimmed;
+}
+
+function requireWireGuardPort(value: string): string {
+  const trimmed = requireWireGuardScalar("port", value);
+  const port = Number(trimmed);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("invalid WireGuard join bundle: port is invalid");
+  }
+  return trimmed;
+}
+
+function requireWireGuardKey(label: string, value: string): string {
+  const trimmed = requireWireGuardScalar(label, value);
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(trimmed)) {
+    throw new Error(`invalid WireGuard join bundle: ${label} is invalid`);
+  }
+  return trimmed;
+}
+
+function requireWireGuardCidr(value: string): string {
+  const trimmed = requireWireGuardScalar("cidr", value);
+  ipv4FromCidr(trimmed, 1);
+  return trimmed;
+}
+
+function requireWireGuardTunnelIp(label: string, value: string, cidr: string): string {
+  const trimmed = requireWireGuardScalar(label, value);
+  const ip = ipv4ToInt(trimmed);
+  if (ip === null) {
+    throw new Error(`invalid WireGuard join bundle: ${label} is invalid`);
+  }
+  const [network, prefixValue] = cidr.split("/");
+  const networkInt = ipv4ToInt(network);
+  const prefix = Number(prefixValue);
+  if (networkInt === null || !Number.isInteger(prefix) || prefix < 1 || prefix > 30) {
+    throw new Error("invalid WireGuard join bundle: cidr is invalid");
+  }
+  const mask = (0xffffffff << (32 - prefix)) >>> 0;
+  if ((ip & mask) !== (networkInt & mask)) {
+    throw new Error(`invalid WireGuard join bundle: ${label} is outside cidr`);
+  }
+  return trimmed;
+}
+
+function requireWireGuardEndpoint(value: string, defaultPort: string): string {
+  const trimmed = requireWireGuardScalar("peer endpoint", value);
+  if (/\s/.test(trimmed)) {
+    throw new Error("invalid WireGuard join bundle: peer endpoint is invalid");
+  }
+  const normalized = normalizeWireGuardEndpoint(trimmed, defaultPort);
+  if (normalized !== trimmed) {
+    throw new Error("invalid WireGuard join bundle: peer endpoint must include an explicit port");
+  }
+  return trimmed;
+}
+
+export function decodeWireGuardJoinBundle(value: string): WireGuardJoinBundle {
   const parsed = JSON.parse(base64UrlDecode(value)) as Partial<WireGuardJoinBundle>;
   if (
     parsed.version !== 1 ||
@@ -639,7 +709,21 @@ function decodeWireGuardJoinBundle(value: string): WireGuardJoinBundle {
     throw new Error("invalid WireGuard join bundle");
   }
 
-  return parsed as WireGuardJoinBundle;
+  const cidr = requireWireGuardCidr(parsed.cidr);
+  const port = requireWireGuardPort(parsed.port);
+  return {
+    version: 1,
+    interface: requireWireGuardInterface(parsed.interface),
+    cidr,
+    port,
+    privateKey: requireWireGuardKey("private key", parsed.privateKey),
+    tunnelIp: requireWireGuardTunnelIp("tunnel IP", parsed.tunnelIp, cidr),
+    peer: {
+      publicKey: requireWireGuardKey("peer public key", parsed.peer.publicKey),
+      tunnelIp: requireWireGuardTunnelIp("peer tunnel IP", parsed.peer.tunnelIp, cidr),
+      endpoint: requireWireGuardEndpoint(parsed.peer.endpoint, port)
+    }
+  };
 }
 
 function wireGuardPeerCidrs(members: WireGuardMember[]): string[] {

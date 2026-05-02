@@ -8,6 +8,7 @@ import {
   buildJoinPreseed,
   clusterMemberAddressesFromJson,
   clusterMembersFromJson,
+  decodeWireGuardJoinBundle,
   decodeLxdJoinToken,
   endpointHost,
   extractLxdJoinToken,
@@ -29,6 +30,10 @@ import {
   secondsUntilInviteCleanup,
   unjoinedExactInvitePeerCidrs
 } from "./cluster";
+
+function encodeWireGuardBundle(value: unknown): string {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
 
 describe("terrariumctl cluster", () => {
   test("normalizes cluster listener endpoints", () => {
@@ -289,5 +294,49 @@ describe("terrariumctl cluster", () => {
     expect(config).toContain("AllowedIPs = 10.255.54.2/32");
     expect(config).toContain("Endpoint = 203.0.113.12:51820");
     expect(config).toContain("PersistentKeepalive = 25");
+  });
+
+  test("validates WireGuard join bundle fields before writing local config", () => {
+    const validBundle = {
+      version: 1,
+      interface: "terrarium-wg0",
+      cidr: "10.255.54.0/24",
+      port: "51820",
+      privateKey: `${"A".repeat(43)}=`,
+      tunnelIp: "10.255.54.2",
+      peer: {
+        publicKey: `${"B".repeat(43)}=`,
+        tunnelIp: "10.255.54.1",
+        endpoint: "203.0.113.10:51820"
+      }
+    };
+
+    expect(decodeWireGuardJoinBundle(encodeWireGuardBundle(validBundle))).toEqual(validBundle);
+    expect(() => decodeWireGuardJoinBundle(encodeWireGuardBundle({ ...validBundle, interface: "../../etc/systemd/system/pwn" }))).toThrow(
+      "interface is invalid"
+    );
+  });
+
+  test("rejects WireGuard join bundle config-injection fields", () => {
+    const validBundle = {
+      version: 1,
+      interface: "terrarium-wg0",
+      cidr: "10.255.54.0/24",
+      port: "51820",
+      privateKey: `${"A".repeat(43)}=`,
+      tunnelIp: "10.255.54.2",
+      peer: {
+        publicKey: `${"B".repeat(43)}=`,
+        tunnelIp: "10.255.54.1",
+        endpoint: "203.0.113.10:51820"
+      }
+    };
+
+    expect(() => decodeWireGuardJoinBundle(encodeWireGuardBundle({ ...validBundle, privateKey: `${"A".repeat(43)}=\nPostUp = touch /root/pwn` }))).toThrow(
+      "private key is invalid"
+    );
+    expect(() =>
+      decodeWireGuardJoinBundle(encodeWireGuardBundle({ ...validBundle, peer: { ...validBundle.peer, endpoint: "203.0.113.10\nAllowedIPs = 0.0.0.0/0" } }))
+    ).toThrow("peer endpoint is invalid");
   });
 });
