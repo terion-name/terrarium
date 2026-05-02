@@ -10,6 +10,7 @@ Options:
   --output PATH
   --repo URL
   --ref REF
+  --expected-commit SHA
 
 The script builds one Cockpit plugin into /usr/share/cockpit inside the current
 Linux environment and then packages that install tree as a tarball.
@@ -20,6 +21,7 @@ PLUGIN=""
 OUTPUT=""
 REPO=""
 REF=""
+EXPECTED_COMMIT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +55,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ref=*)
       REF="${1#--ref=}"
+      shift
+      ;;
+    --expected-commit)
+      EXPECTED_COMMIT="${2:-}"
+      shift 2
+      ;;
+    --expected-commit=*)
+      EXPECTED_COMMIT="${1#--expected-commit=}"
       shift
       ;;
     --help|-h)
@@ -126,6 +136,11 @@ mkdir -p /usr/local/src
 rm -rf "${PLUGIN_DIR}"
 git clone "${REPO}" "${PLUGIN_DIR}"
 git -C "${PLUGIN_DIR}" checkout "${REF}"
+ACTUAL_COMMIT="$(git -C "${PLUGIN_DIR}" rev-parse HEAD)"
+if [[ -n "${EXPECTED_COMMIT}" && "${ACTUAL_COMMIT}" != "${EXPECTED_COMMIT}" ]]; then
+  printf 'Expected %s at %s, but checked out %s\n' "${REF}" "${EXPECTED_COMMIT}" "${ACTUAL_COMMIT}" >&2
+  exit 1
+fi
 (cd "${PLUGIN_DIR}" && corepack enable && make install RESTART_COCKPIT=0)
 
 mkdir -p "$(dirname "${OUTPUT}")"

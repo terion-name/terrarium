@@ -1,17 +1,6 @@
 name: integration-smoke
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "scripts/**"
-      - "ansible/**"
-      - "tests/integration/**"
-      - "install.sh"
-      - "package.json"
-      - "bun.lock"
-      - "requirements.yml"
   workflow_dispatch:
     inputs:
       keep_on_failure:

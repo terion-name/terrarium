@@ -18,11 +18,13 @@ jobs:
       zfs_ref: ${{ steps.refs.outputs.zfs_ref }}
       zfs_ref_safe: ${{ steps.refs.outputs.zfs_ref_safe }}
       zfs_release: ${{ steps.refs.outputs.zfs_release }}
+      zfs_source_commit: ${{ steps.refs.outputs.zfs_source_commit }}
       zfs_published: ${{ steps.published.outputs.zfs_published }}
       s3_repo: ${{ steps.refs.outputs.s3_repo }}
       s3_ref: ${{ steps.refs.outputs.s3_ref }}
       s3_ref_safe: ${{ steps.refs.outputs.s3_ref_safe }}
       s3_release: ${{ steps.refs.outputs.s3_release }}
+      s3_source_commit: ${{ steps.refs.outputs.s3_source_commit }}
       s3_published: ${{ steps.published.outputs.s3_published }}
       should_build: ${{ steps.published.outputs.should_build }}
     steps:
@@ -32,10 +34,50 @@ jobs:
         id: refs
         run: |
           ruby <<'RUBY' >> "${GITHUB_OUTPUT}"
+          require "open3"
+          require "tmpdir"
           require "yaml"
 
           def sanitize(value)
             value.gsub(/[^A-Za-z0-9._-]+/, "-")
+          end
+
+          def run!(*args)
+            stdout, stderr, status = Open3.capture3(*args)
+            return stdout if status.success?
+
+            abort "Command failed: #{args.join(" ")}\n#{stderr}#{stdout}"
+          end
+
+          def fetch_ref!(dir, repo, ref)
+            attempts = [
+              [ref],
+              ["refs/tags/#{ref}:refs/tags/#{ref}"],
+              ["refs/heads/#{ref}:refs/remotes/origin/#{ref}"]
+            ]
+            errors = []
+
+            attempts.each do |refspec|
+              _stdout, stderr, status = Open3.capture3(
+                "git", "-C", dir, "fetch", "--depth=1", "origin", *refspec
+              )
+              return if status.success?
+
+              errors << stderr
+            end
+
+            abort "Unable to resolve #{repo}@#{ref}\n#{errors.join("\n")}"
+          end
+
+          def resolve_source_commit(repo, ref)
+            return ref.downcase if ref.match?(/\A[0-9a-f]{40}\z/)
+
+            Dir.mktmpdir("terrarium-cockpit-ref.") do |dir|
+              run!("git", "-C", dir, "init", "-q")
+              run!("git", "-C", dir, "remote", "add", "origin", repo)
+              fetch_ref!(dir, repo, ref)
+              run!("git", "-C", dir, "rev-parse", "FETCH_HEAD^{commit}").strip
+            end
           end
 
           defaults = YAML.load_file("ansible/roles/cockpit_plugins/defaults/main.yml")
@@ -50,32 +92,204 @@ jobs:
             }
           }.each do |plugin, values|
             ref_safe = sanitize(values.fetch("ref"))
+            source_commit = resolve_source_commit(values.fetch("repo"), values.fetch("ref"))
             puts "#{plugin}_repo=#{values.fetch("repo")}"
             puts "#{plugin}_ref=#{values.fetch("ref")}"
             puts "#{plugin}_ref_safe=#{ref_safe}"
             puts "#{plugin}_release=cockpit-plugin-#{plugin}-#{ref_safe}"
+            puts "#{plugin}_source_commit=#{source_commit}"
           end
           RUBY
 
-      - name: Check published plugin releases
+      - name: Check reusable plugin releases
         id: published
         env:
           GH_TOKEN: ${{ github.token }}
+          ZFS_REPO: ${{ steps.refs.outputs.zfs_repo }}
+          ZFS_REF: ${{ steps.refs.outputs.zfs_ref }}
+          ZFS_REF_SAFE: ${{ steps.refs.outputs.zfs_ref_safe }}
           ZFS_RELEASE: ${{ steps.refs.outputs.zfs_release }}
+          ZFS_SOURCE_COMMIT: ${{ steps.refs.outputs.zfs_source_commit }}
+          S3_REPO: ${{ steps.refs.outputs.s3_repo }}
+          S3_REF: ${{ steps.refs.outputs.s3_ref }}
+          S3_REF_SAFE: ${{ steps.refs.outputs.s3_ref_safe }}
           S3_RELEASE: ${{ steps.refs.outputs.s3_release }}
+          S3_SOURCE_COMMIT: ${{ steps.refs.outputs.s3_source_commit }}
         run: |
           set -euo pipefail
 
-          release_exists() {
-            gh release view "$1" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1
+          release_is_reusable() {
+            local plugin="$1"
+            local release="$2"
+            local source_repo="$3"
+            local source_ref="$4"
+            local source_commit="$5"
+            local ref_safe="$6"
+            local tmp
+
+            tmp="$(mktemp -d)"
+
+            if ! gh release view "${release}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json author,isDraft,isPrerelease,assets \
+              > "${tmp}/release.json"
+            then
+              echo "Building ${release}; release does not exist."
+              rm -rf "${tmp}"
+              return 1
+            fi
+
+            if ! env \
+              PLUGIN="${plugin}" \
+              REF_SAFE="${ref_safe}" \
+              RELEASE_JSON="${tmp}/release.json" \
+              ruby <<'RUBY'
+          require "json"
+
+          plugin = ENV.fetch("PLUGIN")
+          ref_safe = ENV.fetch("REF_SAFE")
+          release = JSON.parse(File.read(ENV.fetch("RELEASE_JSON")))
+          author = release.dig("author", "login")
+          abort "release author #{author.inspect} is not github-actions[bot]" unless author == "github-actions[bot]"
+          abort "release is a draft" if release["isDraft"]
+          abort "release is a prerelease" if release["isPrerelease"]
+
+          asset_names = release.fetch("assets").map { |asset| asset.fetch("name") }
+          expected_assets = %w[amd64 arm64].flat_map do |arch|
+            basename = "cockpit-plugin-#{plugin}-#{ref_safe}-linux-#{arch}.tar.gz"
+            [basename, "#{basename}.sha256"]
+          end
+          missing = (["provenance.json"] + expected_assets) - asset_names
+          abort "missing release assets: #{missing.join(", ")}" unless missing.empty?
+          RUBY
+            then
+              echo "Building ${release}; release metadata is not trusted for reuse."
+              rm -rf "${tmp}"
+              return 1
+            fi
+
+            if ! gh release download "${release}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "provenance.json" \
+              --dir "${tmp}" \
+              >/dev/null
+            then
+              echo "Building ${release}; provenance asset is missing."
+              rm -rf "${tmp}"
+              return 1
+            fi
+
+            if ! env \
+              PLUGIN="${plugin}" \
+              REF_SAFE="${ref_safe}" \
+              RELEASE="${release}" \
+              SOURCE_REPO="${source_repo}" \
+              SOURCE_REF="${source_ref}" \
+              SOURCE_COMMIT="${source_commit}" \
+              PROVENANCE="${tmp}/provenance.json" \
+              EXPECTED_ASSETS_FILE="${tmp}/expected-assets" \
+              ruby <<'RUBY'
+          require "json"
+
+          plugin = ENV.fetch("PLUGIN")
+          ref_safe = ENV.fetch("REF_SAFE")
+          expected_assets = %w[amd64 arm64].map do |arch|
+            "cockpit-plugin-#{plugin}-#{ref_safe}-linux-#{arch}.tar.gz"
+          end
+
+          provenance = JSON.parse(File.read(ENV.fetch("PROVENANCE")))
+          abort "unsupported provenance schema" unless provenance["schema_version"] == 1
+          abort "plugin mismatch" unless provenance["plugin"] == plugin
+          abort "release mismatch" unless provenance["release"] == ENV.fetch("RELEASE")
+
+          source = provenance.fetch("source")
+          abort "source repo mismatch" unless source["repo"] == ENV.fetch("SOURCE_REPO")
+          abort "source ref mismatch" unless source["ref"] == ENV.fetch("SOURCE_REF")
+          abort "source commit mismatch" unless source["commit"] == ENV.fetch("SOURCE_COMMIT")
+
+          workflow = provenance.fetch("workflow")
+          abort "workflow repository mismatch" unless workflow["repository"] == ENV.fetch("GITHUB_REPOSITORY")
+
+          asset_names = provenance.fetch("assets").map { |asset| asset.fetch("name") }
+          abort "asset set mismatch" unless asset_names.sort == expected_assets.sort
+
+          File.write(ENV.fetch("EXPECTED_ASSETS_FILE"), expected_assets.join("\n") + "\n")
+          RUBY
+            then
+              echo "Building ${release}; provenance does not match the pinned source."
+              rm -rf "${tmp}"
+              return 1
+            fi
+
+            while IFS= read -r asset; do
+              [ -n "${asset}" ] || continue
+
+              if ! gh release download "${release}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --pattern "${asset}" \
+                --dir "${tmp}" \
+                >/dev/null
+              then
+                echo "Building ${release}; ${asset} is missing."
+                rm -rf "${tmp}"
+                return 1
+              fi
+
+              if ! gh release download "${release}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --pattern "${asset}.sha256" \
+                --dir "${tmp}" \
+                >/dev/null
+              then
+                echo "Building ${release}; ${asset}.sha256 is missing."
+                rm -rf "${tmp}"
+                return 1
+              fi
+
+              actual_sha="$(sha256sum "${tmp}/${asset}" | awk '{print tolower($1)}')"
+              sidecar_sha="$(awk '{print tolower($1); exit}' "${tmp}/${asset}.sha256")"
+              provenance_sha="$(env ASSET="${asset}" PROVENANCE="${tmp}/provenance.json" ruby <<'RUBY'
+          require "json"
+
+          provenance = JSON.parse(File.read(ENV.fetch("PROVENANCE")))
+          asset = provenance.fetch("assets").find { |entry| entry.fetch("name") == ENV.fetch("ASSET") }
+          abort "asset missing from provenance" unless asset
+          puts asset.fetch("sha256").downcase
+          RUBY
+              )"
+
+              if [ "${actual_sha}" != "${sidecar_sha}" ] || [ "${actual_sha}" != "${provenance_sha}" ]; then
+                echo "Building ${release}; checksum mismatch for ${asset}."
+                rm -rf "${tmp}"
+                return 1
+              fi
+            done < "${tmp}/expected-assets"
+
+            echo "Reusing ${release}; provenance and checksums match ${source_repo}@${source_commit}."
+            rm -rf "${tmp}"
+            return 0
           }
 
           zfs_published=false
           s3_published=false
-          if release_exists "${ZFS_RELEASE}"; then
+          if release_is_reusable \
+            "zfs" \
+            "${ZFS_RELEASE}" \
+            "${ZFS_REPO}" \
+            "${ZFS_REF}" \
+            "${ZFS_SOURCE_COMMIT}" \
+            "${ZFS_REF_SAFE}"
+          then
             zfs_published=true
           fi
-          if release_exists "${S3_RELEASE}"; then
+          if release_is_reusable \
+            "s3" \
+            "${S3_RELEASE}" \
+            "${S3_REPO}" \
+            "${S3_REF}" \
+            "${S3_SOURCE_COMMIT}" \
+            "${S3_REF_SAFE}"
+          then
             s3_published=true
           fi
 
@@ -89,13 +303,6 @@ jobs:
             echo "s3_published=${s3_published}"
             echo "should_build=${should_build}"
           } >> "${GITHUB_OUTPUT}"
-
-          if [ "${zfs_published}" = true ]; then
-            echo "Skipping ${ZFS_RELEASE}; release already exists."
-          fi
-          if [ "${s3_published}" = true ]; then
-            echo "Skipping ${S3_RELEASE}; release already exists."
-          fi
 
   build:
     runs-on: ubuntu-24.04
@@ -163,17 +370,21 @@ jobs:
           BUNDLE_BASENAME: ${{ steps.bundle.outputs.basename }}
           ZFS_REPO: ${{ needs.check.outputs.zfs_repo }}
           ZFS_REF: ${{ needs.check.outputs.zfs_ref }}
+          ZFS_SOURCE_COMMIT: ${{ needs.check.outputs.zfs_source_commit }}
           S3_REPO: ${{ needs.check.outputs.s3_repo }}
           S3_REF: ${{ needs.check.outputs.s3_ref }}
+          S3_SOURCE_COMMIT: ${{ needs.check.outputs.s3_source_commit }}
         run: |
           case "${PLUGIN}" in
             zfs)
               PLUGIN_REPO="${ZFS_REPO}"
               PLUGIN_REF="${ZFS_REF}"
+              PLUGIN_SOURCE_COMMIT="${ZFS_SOURCE_COMMIT}"
               ;;
             s3)
               PLUGIN_REPO="${S3_REPO}"
               PLUGIN_REF="${S3_REF}"
+              PLUGIN_SOURCE_COMMIT="${S3_SOURCE_COMMIT}"
               ;;
           esac
           mkdir -p release-assets
@@ -187,7 +398,8 @@ jobs:
               --plugin ${PLUGIN@Q} \
               --output /workspace/release-assets/${BUNDLE_BASENAME} \
               --repo ${PLUGIN_REPO@Q} \
-              --ref ${PLUGIN_REF@Q}"
+              --ref ${PLUGIN_REF@Q} \
+              --expected-commit ${PLUGIN_SOURCE_COMMIT@Q}"
 
       - uses: actions/upload-artifact@v4
         if: >-
@@ -217,30 +429,104 @@ jobs:
         id: prepare
         env:
           ZFS_REF_SAFE: ${{ needs.check.outputs.zfs_ref_safe }}
+          ZFS_RELEASE: ${{ needs.check.outputs.zfs_release }}
+          ZFS_REPO: ${{ needs.check.outputs.zfs_repo }}
+          ZFS_REF: ${{ needs.check.outputs.zfs_ref }}
+          ZFS_SOURCE_COMMIT: ${{ needs.check.outputs.zfs_source_commit }}
           S3_REF_SAFE: ${{ needs.check.outputs.s3_ref_safe }}
+          S3_RELEASE: ${{ needs.check.outputs.s3_release }}
+          S3_REPO: ${{ needs.check.outputs.s3_repo }}
+          S3_REF: ${{ needs.check.outputs.s3_ref }}
+          S3_SOURCE_COMMIT: ${{ needs.check.outputs.s3_source_commit }}
           ZFS_PUBLISHED: ${{ needs.check.outputs.zfs_published }}
           S3_PUBLISHED: ${{ needs.check.outputs.s3_published }}
         run: |
+          set -euo pipefail
+
           mkdir -p release-assets/zfs release-assets/s3
+
+          prepare_plugin() {
+            local plugin="$1"
+            local ref_safe="$2"
+            local release="$3"
+            local source_repo="$4"
+            local source_ref="$5"
+            local source_commit="$6"
+            local dir="release-assets/${plugin}"
+            local assets=()
+            local asset_list
+
+            mkdir -p "${dir}"
+
+            for arch in amd64 arm64; do
+              local basename="cockpit-plugin-${plugin}-${ref_safe}-linux-${arch}.tar.gz"
+              cp "artifacts/${basename%.tar.gz}/${basename}" "${dir}/${basename}"
+              (cd "${dir}" && sha256sum "${basename}" > "${basename}.sha256")
+              assets+=("${basename}")
+            done
+
+            asset_list="$(printf "%s\n" "${assets[@]}")"
+            env \
+              PLUGIN="${plugin}" \
+              RELEASE="${release}" \
+              SOURCE_REPO="${source_repo}" \
+              SOURCE_REF="${source_ref}" \
+              SOURCE_COMMIT="${source_commit}" \
+              ASSET_DIR="${dir}" \
+              ASSETS="${asset_list}" \
+              ruby <<'RUBY'
+          require "json"
+
+          asset_dir = ENV.fetch("ASSET_DIR")
+          assets = ENV.fetch("ASSETS").lines.map(&:strip).reject(&:empty?).map do |name|
+            {
+              "name" => name,
+              "sha256" => File.read(File.join(asset_dir, "#{name}.sha256")).split.first
+            }
+          end
+
+          provenance = {
+            "schema_version" => 1,
+            "plugin" => ENV.fetch("PLUGIN"),
+            "release" => ENV.fetch("RELEASE"),
+            "source" => {
+              "repo" => ENV.fetch("SOURCE_REPO"),
+              "ref" => ENV.fetch("SOURCE_REF"),
+              "commit" => ENV.fetch("SOURCE_COMMIT")
+            },
+            "workflow" => {
+              "repository" => ENV.fetch("GITHUB_REPOSITORY"),
+              "commit" => ENV.fetch("GITHUB_SHA"),
+              "run_id" => ENV.fetch("GITHUB_RUN_ID"),
+              "run_attempt" => ENV.fetch("GITHUB_RUN_ATTEMPT")
+            },
+            "assets" => assets
+          }
+
+          File.write(File.join(asset_dir, "provenance.json"), JSON.pretty_generate(provenance) + "\n")
+          RUBY
+          }
 
           zfs_ready=false
           s3_ready=false
           if [ "${ZFS_PUBLISHED}" != true ]; then
-            for BASENAME in \
-              "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-amd64.tar.gz" \
-              "cockpit-plugin-zfs-${ZFS_REF_SAFE}-linux-arm64.tar.gz"
-            do
-              cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/zfs/${BASENAME}"
-            done
+            prepare_plugin \
+              "zfs" \
+              "${ZFS_REF_SAFE}" \
+              "${ZFS_RELEASE}" \
+              "${ZFS_REPO}" \
+              "${ZFS_REF}" \
+              "${ZFS_SOURCE_COMMIT}"
             zfs_ready=true
           fi
           if [ "${S3_PUBLISHED}" != true ]; then
-            for BASENAME in \
-              "cockpit-plugin-s3-${S3_REF_SAFE}-linux-amd64.tar.gz" \
-              "cockpit-plugin-s3-${S3_REF_SAFE}-linux-arm64.tar.gz"
-            do
-              cp "artifacts/${BASENAME%.tar.gz}/${BASENAME}" "release-assets/s3/${BASENAME}"
-            done
+            prepare_plugin \
+              "s3" \
+              "${S3_REF_SAFE}" \
+              "${S3_RELEASE}" \
+              "${S3_REPO}" \
+              "${S3_REF}" \
+              "${S3_SOURCE_COMMIT}"
             s3_ready=true
           fi
 
@@ -258,8 +544,10 @@ jobs:
           name: ${{ needs.check.outputs.zfs_release }}
           files: |
             release-assets/zfs/*.tar.gz
+            release-assets/zfs/*.tar.gz.sha256
+            release-assets/zfs/provenance.json
           prerelease: false
-          overwrite_files: false
+          overwrite_files: true
 
       - name: Publish cockpit-s3 bundles
         if: steps.prepare.outputs.s3_ready == 'true'
@@ -270,5 +558,7 @@ jobs:
           name: ${{ needs.check.outputs.s3_release }}
           files: |
             release-assets/s3/*.tar.gz
+            release-assets/s3/*.tar.gz.sha256
+            release-assets/s3/provenance.json
           prerelease: false
-          overwrite_files: false
+          overwrite_files: true
