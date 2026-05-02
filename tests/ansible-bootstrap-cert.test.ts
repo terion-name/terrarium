@@ -63,6 +63,17 @@ describe("Traefik bootstrap certificate template", () => {
     expect(tasks).toContain("retries: 6");
   });
 
+  test("keeps local ZITADEL secret material out of world-readable paths and logs", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/tasks/main.yml"), "utf8");
+    const playbook = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
+
+    expect(tasks).toContain('mode: "0700"');
+    expect(tasks).toContain("Read ZITADEL master key");
+    expect(tasks.match(/no_log: true/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(playbook).toContain("Refresh config bundle with resolved admin group");
+    expect(playbook).toContain("no_log: true");
+  });
+
   test("retries transient Traefik release download failures", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/traefik/tasks/main.yml"), "utf8");
 

@@ -30,7 +30,7 @@
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        mode: "0755"
+        mode: "0700"
       loop:
         - "{{ terrarium_zitadel_dir }}"
         - "{{ terrarium_zitadel_postgres_dir }}"
@@ -58,16 +58,19 @@
       ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_masterkey
       register: terrarium_zitadel_masterkey_raw
       changed_when: false
+      no_log: true
 
     - name: Read ZITADEL Postgres password
       ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_postgres_password
       register: terrarium_zitadel_postgres_password_raw
       changed_when: false
+      no_log: true
 
     - name: Read ZITADEL bootstrap admin password
       ansible.builtin.command: cat /etc/terrarium/secrets/zitadel_admin_password
       register: terrarium_zitadel_admin_password_raw
       changed_when: false
+      no_log: true
 
     - name: Render ZITADEL compose stack
       ansible.builtin.template:
@@ -78,6 +81,7 @@
         terrarium_zitadel_masterkey: "{{ terrarium_zitadel_masterkey_raw.stdout }}"
         terrarium_zitadel_postgres_password: "{{ terrarium_zitadel_postgres_password_raw.stdout }}"
         terrarium_zitadel_admin_password: "{{ terrarium_zitadel_admin_password_raw.stdout }}"
+      no_log: true
       notify: restart terrarium zitadel
 
     - name: Render ZITADEL systemd unit
