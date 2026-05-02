@@ -5,7 +5,10 @@ function resolveBase(): string {
   if (!raw || raw === "/") {
     return "/";
   }
-  const withLeadingSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  if (raw.startsWith("//") || /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    throw new Error("TERRARIUM_DOCS_BASE must be a root-relative path");
+  }
+  const withLeadingSlash = raw.startsWith("/") ? `/${raw.replace(/^\/+/, "")}` : `/${raw}`;
   return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
 }
 
