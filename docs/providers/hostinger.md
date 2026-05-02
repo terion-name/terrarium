@@ -77,20 +77,25 @@ Hostinger's current public VPS docs do not document a VPC/private-network
 feature for connecting multiple VPS instances on a non-public subnet. That
 makes Hostinger a poor fit for Terrarium clustering.
 
-You can technically form an LXD cluster over public IP addresses, but that is
-not the recommended Hostinger path. If you do it anyway:
+You can form a Terrarium cluster over public IP addresses because cluster
+traffic uses WireGuard, but this is still not the recommended Hostinger path.
+If you do it anyway:
 
-- pass exact `/32` public peer CIDRs instead of a broad range
+- pass exact public member IPs to `cluster invite`
+- allow WireGuard `51820/udp` only between the cluster member public IPs
 - keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
-  restricted to the other cluster members only
+  closed on public/provider firewalls
 - expect less isolation than providers with a real private VPC/network
 
 Example public-only shape:
 
 ```bash
-terrariumctl cluster init --peer-cidr 203.0.113.12/32
-terrariumctl cluster join --token '<token>' --peer-cidr 203.0.113.11/32 --yes
+terrariumctl cluster init --wireguard-endpoint 203.0.113.11:51820
+terrariumctl cluster invite node2 203.0.113.12
 ```
+
+Then run the printed `terrariumctl cluster join --token ... --wireguard ...`
+command on `node2`.
 
 For production clustering, prefer a provider that documents private networking,
 such as Hetzner Cloud Networks, DigitalOcean VPC, or Vultr VPC 2.0.

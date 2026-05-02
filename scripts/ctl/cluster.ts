@@ -1,10 +1,10 @@
 import { confirm, input } from "@inquirer/prompts";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { stringify } from "yaml";
-import { configString, runAllowFailure, runText, shellEscape } from "../lib/common";
+import { configString, runAllowFailure, runText, shellEscape, writeIfChanged } from "../lib/common";
 import {
   CONFIG_PATH,
   loadMutableConfig,
@@ -22,9 +22,15 @@ const DEFAULT_OVN_NETWORK = "terrarium-ovn";
 const DEFAULT_OVN_PARENT = "lxdbr0";
 const DEFAULT_STORAGE_POOL = "terrarium";
 const DEFAULT_STATE_DIR = "/var/lib/terrarium";
+const DEFAULT_WIREGUARD_INTERFACE = "terrarium-wg0";
+const DEFAULT_WIREGUARD_CIDR = "10.255.54.0/24";
+const DEFAULT_WIREGUARD_PORT = "51820";
+const WIREGUARD_PRIVATE_KEY_PATH = "/etc/terrarium/secrets/wireguard/private.key";
+const WIREGUARD_CONFIG_DIR = "/etc/wireguard";
 const LXC = process.env.TERRARIUM_LXC_BIN ?? "/snap/bin/lxc";
 const LXD = process.env.TERRARIUM_LXD_BIN ?? "/snap/bin/lxd";
 const UFW = process.env.TERRARIUM_UFW_BIN ?? "ufw";
+const WG = process.env.TERRARIUM_WG_BIN ?? "wg";
 const ZPOOL = process.env.TERRARIUM_ZPOOL_BIN ?? "zpool";
 const MKDIR = process.env.TERRARIUM_MKDIR_BIN ?? "mkdir";
 const RM = process.env.TERRARIUM_RM_BIN ?? "rm";
@@ -34,6 +40,7 @@ const HOSTNAME = process.env.TERRARIUM_HOSTNAME_BIN ?? "hostname";
 const TIMEOUT = process.env.TERRARIUM_TIMEOUT_BIN ?? "timeout";
 const GETENT = process.env.TERRARIUM_GETENT_BIN ?? "getent";
 const SYSTEMD_RUN = process.env.TERRARIUM_SYSTEMD_RUN_BIN ?? "systemd-run";
+const SYSTEMCTL = process.env.TERRARIUM_SYSTEMCTL_BIN ?? "systemctl";
 const TERRARIUMCTL = process.env.TERRARIUMCTL_BIN ?? "/usr/local/bin/terrariumctl";
 const OPENSSL = process.env.TERRARIUM_OPENSSL_BIN ?? "openssl";
 const CLUSTER_FIREWALL_RULES = [
@@ -43,6 +50,7 @@ const CLUSTER_FIREWALL_RULES = [
   { port: "6642", proto: "tcp" }
 ] as const;
 const PENDING_INVITES_KEY = "terrarium_cluster_pending_peer_invites";
+const PENDING_WIREGUARD_INVITES_KEY = "terrarium_cluster_pending_wireguard_invites";
 
 export type ClusterInitOptions = {
   member?: string;
@@ -51,11 +59,15 @@ export type ClusterInitOptions = {
   parent?: string;
   centralAddresses?: string;
   peerCidr?: string;
+  wireguardCidr?: string;
+  wireguardPort?: string;
+  wireguardEndpoint?: string;
   skipReconfigure?: boolean;
 };
 
 export type ClusterJoinOptions = {
   token?: string;
+  wireguard?: string;
   address?: string;
   storagePool?: string;
   peerCidr?: string;
@@ -150,9 +162,41 @@ type PendingClusterInvite = {
   expires_at: string;
 };
 
+type PendingWireGuardInvite = {
+  tunnel_ip: string;
+  endpoint_cidr?: string;
+  expires_at: string;
+};
+
 type OvnCaMaterial = {
   cert: string;
   key: string;
+};
+
+type WireGuardKeyPair = {
+  privateKey: string;
+  publicKey: string;
+};
+
+type WireGuardMember = {
+  name: string;
+  public_key: string;
+  tunnel_ip: string;
+  endpoint?: string;
+};
+
+type WireGuardJoinBundle = {
+  version: 1;
+  interface: string;
+  cidr: string;
+  port: string;
+  privateKey: string;
+  tunnelIp: string;
+  peer: {
+    publicKey: string;
+    tunnelIp: string;
+    endpoint: string;
+  };
 };
 
 export function normalizeClusterEndpoint(value: string, defaultPort = DEFAULT_CLUSTER_PORT): string {
@@ -224,6 +268,26 @@ function ipv4ToInt(address: string): number | null {
     return null;
   }
   return (((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]) >>> 0;
+}
+
+function intToIpv4(value: number): string {
+  return [24, 16, 8, 0].map((shift) => (value >>> shift) & 255).join(".");
+}
+
+function ipv4FromCidr(cidr: string, hostIndex: number): string {
+  const [network, prefixValue] = cidr.split("/");
+  const networkInt = ipv4ToInt(network);
+  const prefix = Number(prefixValue);
+  if (networkInt === null || !Number.isInteger(prefix) || prefix < 1 || prefix > 30) {
+    throw new Error(`WireGuard mesh CIDR must be an IPv4 network with usable host addresses, got ${cidr}`);
+  }
+
+  const hostCount = 2 ** (32 - prefix);
+  if (!Number.isInteger(hostIndex) || hostIndex <= 0 || hostIndex >= hostCount - 1) {
+    throw new Error(`WireGuard mesh CIDR ${cidr} does not have usable host index ${hostIndex}`);
+  }
+
+  return intToIpv4((networkInt & (0xffffffff << (32 - prefix))) + hostIndex);
 }
 
 function exactPeerCidrForHost(host: string): string | null {
@@ -439,6 +503,180 @@ export function ovnDbEndpoints(addresses: string[], port: "6641" | "6642", schem
   return addresses.map((address) => `${scheme}:${ovnEndpointHost(address)}:${port}`).join(",");
 }
 
+function configBoolean(config: MutableConfig, key: string, fallback = false): boolean {
+  const value = config[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true";
+  }
+  return fallback;
+}
+
+function endpointHostForCidrOrEndpoint(value: string): string {
+  const withoutCidr = value.trim().split("/")[0] ?? value.trim();
+  return endpointHost(withoutCidr);
+}
+
+function wireGuardEndpointHost(address: string): string {
+  return address.includes(":") && !address.startsWith("[") ? `[${address}]` : address;
+}
+
+function normalizeWireGuardEndpoint(value: string, defaultPort: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("WireGuard endpoint is required");
+  }
+  if (!trimmed.includes("/") && trimmed.startsWith("[") && trimmed.includes("]:")) {
+    return trimmed;
+  }
+  if (!trimmed.includes("/") && /^[^:]+:\d+$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const host = endpointHostForCidrOrEndpoint(trimmed);
+  return `${wireGuardEndpointHost(host)}:${defaultPort}`;
+}
+
+function endpointCidrFromWireGuardEndpoint(endpoint: string): string | null {
+  return exactPeerCidrForHost(endpointHost(endpoint));
+}
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string): string {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="), "base64").toString("utf8");
+}
+
+function wireGuardInterface(config: MutableConfig): string {
+  return configString(config, "terrarium_cluster_wireguard_interface", DEFAULT_WIREGUARD_INTERFACE);
+}
+
+function wireGuardCidr(config: MutableConfig): string {
+  return configString(config, "terrarium_cluster_wireguard_cidr", DEFAULT_WIREGUARD_CIDR);
+}
+
+function wireGuardPort(config: MutableConfig): string {
+  return configString(config, "terrarium_cluster_wireguard_port", DEFAULT_WIREGUARD_PORT);
+}
+
+function wireGuardMembers(config: MutableConfig): WireGuardMember[] {
+  const value = config["terrarium_cluster_wireguard_members"];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): WireGuardMember[] => {
+    if (typeof item !== "object" || item === null) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.name !== "string" || typeof record.public_key !== "string" || typeof record.tunnel_ip !== "string") {
+      return [];
+    }
+    const member: WireGuardMember = {
+      name: record.name,
+      public_key: record.public_key,
+      tunnel_ip: record.tunnel_ip
+    };
+    if (typeof record.endpoint === "string" && record.endpoint.trim()) {
+      member.endpoint = record.endpoint;
+    }
+    return [member];
+  });
+}
+
+function setWireGuardMembers(config: MutableConfig, members: WireGuardMember[]): void {
+  setConfigValue(config, "terrarium_cluster_wireguard_members", members);
+}
+
+function wireGuardEndpointCidrs(config: MutableConfig): string[] {
+  return configStringArray(config, "terrarium_cluster_wireguard_endpoint_cidrs");
+}
+
+function setWireGuardEndpointCidrs(config: MutableConfig, cidrs: string[]): void {
+  setConfigValue(config, "terrarium_cluster_wireguard_endpoint_cidrs", [...new Set(cidrs)]);
+}
+
+export function nextWireGuardTunnelIp(config: MutableConfig, cidr = wireGuardCidr(config)): string {
+  const used = new Set(wireGuardMembers(config).map((member) => member.tunnel_ip));
+  const [, prefixValue] = cidr.split("/");
+  const prefix = Number(prefixValue);
+  const hostCount = Number.isInteger(prefix) && prefix >= 1 && prefix <= 30 ? 2 ** (32 - prefix) : 0;
+
+  for (let index = 1; index < hostCount - 1; index += 1) {
+    const candidate = ipv4FromCidr(cidr, index);
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`WireGuard mesh CIDR ${cidr} has no free tunnel addresses`);
+}
+
+function encodeWireGuardJoinBundle(bundle: WireGuardJoinBundle): string {
+  return base64UrlEncode(JSON.stringify(bundle));
+}
+
+function decodeWireGuardJoinBundle(value: string): WireGuardJoinBundle {
+  const parsed = JSON.parse(base64UrlDecode(value)) as Partial<WireGuardJoinBundle>;
+  if (
+    parsed.version !== 1 ||
+    typeof parsed.interface !== "string" ||
+    typeof parsed.cidr !== "string" ||
+    typeof parsed.port !== "string" ||
+    typeof parsed.privateKey !== "string" ||
+    typeof parsed.tunnelIp !== "string" ||
+    typeof parsed.peer !== "object" ||
+    parsed.peer === null ||
+    typeof parsed.peer.publicKey !== "string" ||
+    typeof parsed.peer.tunnelIp !== "string" ||
+    typeof parsed.peer.endpoint !== "string"
+  ) {
+    throw new Error("invalid WireGuard join bundle");
+  }
+
+  return parsed as WireGuardJoinBundle;
+}
+
+function wireGuardPeerCidrs(members: WireGuardMember[]): string[] {
+  return members
+    .map((member) => exactPeerCidrForHost(member.tunnel_ip))
+    .filter((cidr): cidr is string => cidr !== null);
+}
+
+export function renderWireGuardConfig(options: {
+  address: string;
+  privateKey: string;
+  listenPort: string;
+  peers: WireGuardMember[];
+}): string {
+  const peerBlocks = options.peers
+    .map((peer) =>
+      [
+        "[Peer]",
+        `PublicKey = ${peer.public_key}`,
+        `AllowedIPs = ${peer.tunnel_ip}/32`,
+        peer.endpoint ? `Endpoint = ${peer.endpoint}` : undefined,
+        peer.endpoint ? "PersistentKeepalive = 25" : undefined
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .join("\n\n");
+
+  return [
+    "[Interface]",
+    `Address = ${options.address}/32`,
+    `ListenPort = ${options.listenPort}`,
+    `PrivateKey = ${options.privateKey}`,
+    peerBlocks ? `\n${peerBlocks}` : ""
+  ].join("\n");
+}
+
 export function buildJoinPreseed(options: JoinPreseedOptions): string {
   return stringify({
     cluster: {
@@ -519,6 +757,73 @@ export function applyClusterConfig(config: MutableConfig, options: { network: st
   setConfigValue(config, "terrarium_cluster_peer_cidrs", options.peerCidrs);
 }
 
+function applyWireGuardConfig(
+  config: MutableConfig,
+  options: {
+    interfaceName?: string;
+    cidr?: string;
+    port?: string;
+    members: WireGuardMember[];
+    endpointCidrs?: string[];
+  }
+): void {
+  setConfigValue(config, "terrarium_cluster_wireguard_enabled", true);
+  setConfigValue(config, "terrarium_cluster_wireguard_interface", options.interfaceName ?? wireGuardInterface(config));
+  setConfigValue(config, "terrarium_cluster_wireguard_cidr", options.cidr ?? wireGuardCidr(config));
+  setConfigValue(config, "terrarium_cluster_wireguard_port", options.port ?? wireGuardPort(config));
+  setWireGuardMembers(config, options.members);
+  if (options.endpointCidrs !== undefined) {
+    setWireGuardEndpointCidrs(config, options.endpointCidrs);
+  }
+}
+
+function pendingWireGuardInvites(config: MutableConfig): PendingWireGuardInvite[] {
+  const value = config[PENDING_WIREGUARD_INVITES_KEY];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): PendingWireGuardInvite[] => {
+    if (typeof item !== "object" || item === null) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.tunnel_ip !== "string" || typeof record.expires_at !== "string") {
+      return [];
+    }
+    const invite: PendingWireGuardInvite = {
+      tunnel_ip: record.tunnel_ip,
+      expires_at: record.expires_at
+    };
+    if (typeof record.endpoint_cidr === "string") {
+      invite.endpoint_cidr = record.endpoint_cidr;
+    }
+    return [invite];
+  });
+}
+
+function setPendingWireGuardInvites(config: MutableConfig, invites: PendingWireGuardInvite[]): void {
+  setConfigValue(config, PENDING_WIREGUARD_INVITES_KEY, invites);
+}
+
+function upsertPendingWireGuardInvite(
+  config: MutableConfig,
+  tunnelIp: string,
+  endpointCidr: string | undefined,
+  expiresAt: string | undefined
+): void {
+  if (!expiresAt) {
+    return;
+  }
+  const next = pendingWireGuardInvites(config).filter((invite) => invite.tunnel_ip !== tunnelIp);
+  const invite: PendingWireGuardInvite = { tunnel_ip: tunnelIp, expires_at: expiresAt };
+  if (endpointCidr) {
+    invite.endpoint_cidr = endpointCidr;
+  }
+  next.push(invite);
+  setPendingWireGuardInvites(config, next);
+}
+
 async function createOvnCaMaterial(): Promise<OvnCaMaterial> {
   const dir = mkdtempSync(join(tmpdir(), "terrarium-ovn-ca-"));
   const keyPath = join(dir, "ca.key");
@@ -564,6 +869,80 @@ async function ensureOvnCaMaterial(config: MutableConfig): Promise<void> {
   const material = await createOvnCaMaterial();
   setConfigValue(config, "terrarium_ovn_ca_cert", material.cert);
   setConfigValue(config, "terrarium_ovn_ca_key", material.key);
+}
+
+async function wireGuardPublicKey(privateKey: string): Promise<string> {
+  return (await runText([WG, "pubkey"], PREFIX, { stdin: privateKey.endsWith("\n") ? privateKey : `${privateKey}\n` })).trim();
+}
+
+async function generateWireGuardKeyPair(): Promise<WireGuardKeyPair> {
+  const privateKey = (await runText([WG, "genkey"], PREFIX)).trim();
+  return {
+    privateKey,
+    publicKey: await wireGuardPublicKey(privateKey)
+  };
+}
+
+async function ensureLocalWireGuardKeyPair(privateKeyOverride?: string): Promise<WireGuardKeyPair> {
+  const privateKey =
+    privateKeyOverride?.trim() ||
+    (existsSync(WIREGUARD_PRIVATE_KEY_PATH) ? readFileSync(WIREGUARD_PRIVATE_KEY_PATH, "utf8").trim() : (await generateWireGuardKeyPair()).privateKey);
+
+  writeIfChanged(WIREGUARD_PRIVATE_KEY_PATH, `${privateKey}\n`, { mode: 0o600, directoryMode: 0o700 });
+  return {
+    privateKey,
+    publicKey: await wireGuardPublicKey(privateKey)
+  };
+}
+
+async function startWireGuardInterface(name: string, changed: boolean): Promise<void> {
+  const unit = `wg-quick@${name}`;
+  await runText([SYSTEMCTL, "enable", "--now", unit], PREFIX);
+  if (changed) {
+    await runText([SYSTEMCTL, "restart", unit], PREFIX);
+  }
+}
+
+async function configureLocalWireGuard(config: MutableConfig, privateKeyOverride?: string): Promise<void> {
+  if (!configBoolean(config, "terrarium_cluster_wireguard_enabled")) {
+    return;
+  }
+
+  const keyPair = await ensureLocalWireGuardKeyPair(privateKeyOverride);
+  const localMember = wireGuardMembers(config).find((member) => member.public_key === keyPair.publicKey);
+  if (!localMember) {
+    throw new Error("local WireGuard public key is not registered in Terrarium cluster config");
+  }
+
+  const peers = wireGuardMembers(config).filter((member) => member.public_key !== keyPair.publicKey);
+  const configPath = join(WIREGUARD_CONFIG_DIR, `${wireGuardInterface(config)}.conf`);
+  const changed = writeIfChanged(
+    configPath,
+    `${renderWireGuardConfig({
+      address: localMember.tunnel_ip,
+      privateKey: keyPair.privateKey,
+      listenPort: wireGuardPort(config),
+      peers
+    })}\n`,
+    { mode: 0o600, directoryMode: 0o700 }
+  );
+  await startWireGuardInterface(wireGuardInterface(config), changed);
+}
+
+async function openWireGuardFirewall(endpointCidrs: string[], port: string): Promise<void> {
+  for (const cidr of endpointCidrs) {
+    await runText([UFW, "allow", "from", cidr, "to", "any", "port", port, "proto", "udp"], PREFIX);
+  }
+}
+
+async function closeWireGuardFirewall(endpointCidrs: string[], port: string): Promise<void> {
+  for (const cidr of endpointCidrs) {
+    const result = await runAllowFailure([UFW, "--force", "delete", "allow", "from", cidr, "to", "any", "port", port, "proto", "udp"]);
+    if (result.exitCode !== 0) {
+      const details = (result.stderr || result.stdout).trim();
+      console.warn(`Could not remove WireGuard firewall rule for ${cidr} ${port}/udp${details ? `: ${details}` : ""}`);
+    }
+  }
 }
 
 async function converge(skipReconfigure: boolean | undefined): Promise<void> {
@@ -708,6 +1087,36 @@ function removePendingClusterInvites(config: MutableConfig, peerCidrs: string[])
   return true;
 }
 
+function removePendingWireGuardInvites(config: MutableConfig, tunnelIps: string[]): { changed: boolean; endpointCidrs: string[] } {
+  const remove = new Set(tunnelIps);
+  const current = pendingWireGuardInvites(config);
+  const removed = current.filter((invite) => remove.has(invite.tunnel_ip));
+  const next = current.filter((invite) => !remove.has(invite.tunnel_ip));
+  if (next.length !== current.length) {
+    setPendingWireGuardInvites(config, next);
+  }
+  return {
+    changed: next.length !== current.length,
+    endpointCidrs: removed.map((invite) => invite.endpoint_cidr).filter((cidr): cidr is string => Boolean(cidr))
+  };
+}
+
+function removeWireGuardMembers(config: MutableConfig, tunnelIps: string[]): boolean {
+  const remove = new Set(tunnelIps);
+  const current = wireGuardMembers(config);
+  const next = current.filter((member) => !remove.has(member.tunnel_ip));
+  if (next.length === current.length) {
+    return false;
+  }
+  setWireGuardMembers(config, next);
+  const remainingEndpoints = new Set(next.map((member) => (member.endpoint ? endpointCidrFromWireGuardEndpoint(member.endpoint) : null)).filter(Boolean));
+  setWireGuardEndpointCidrs(
+    config,
+    wireGuardEndpointCidrs(config).filter((cidr) => remainingEndpoints.has(cidr))
+  );
+  return true;
+}
+
 function saveInvitedPeerCidrs(peerCidrs: string[], expiresAt: string | undefined): { temporaryPeerCidrs: string[]; changed: boolean } {
   if (peerCidrs.length === 0) {
     return { temporaryPeerCidrs: [], changed: false };
@@ -743,7 +1152,7 @@ async function peerCidrsForInvite(member: string, explicitPeerCidr: string | und
   }
 
   const answer = await input({
-    message: `Private IP or exact CIDR for joining member ${member} (leave blank to skip firewall pre-open):`,
+    message: `Public or private IP/exact CIDR for joining member ${member} (leave blank to skip firewall pre-open):`,
     default: ""
   });
   return parsePeerCidrs(answer);
@@ -816,6 +1225,22 @@ function expiredPendingInvitePeerCidrs(
       return !Number.isFinite(inviteExpiryMs) || inviteExpiryMs <= nowMs;
     })
     .map((invite) => invite.peer_cidr);
+}
+
+function expiredPendingWireGuardTunnelIps(config: MutableConfig, requestedPeerCidrs: string[], cleanupExpiresAt: string | undefined, nowMs = Date.now()): string[] {
+  const requestedHosts = new Set(requestedPeerCidrs.map(exactHostFromPeerCidr).filter((host): host is string => host !== null));
+  const cleanupExpiryMs = cleanupExpiresAt ? Date.parse(cleanupExpiresAt) : null;
+
+  return pendingWireGuardInvites(config)
+    .filter((invite) => requestedHosts.has(invite.tunnel_ip))
+    .filter((invite) => {
+      const inviteExpiryMs = Date.parse(invite.expires_at);
+      if (Number.isFinite(cleanupExpiryMs) && Number.isFinite(inviteExpiryMs) && inviteExpiryMs > cleanupExpiryMs) {
+        return false;
+      }
+      return !Number.isFinite(inviteExpiryMs) || inviteExpiryMs <= nowMs;
+    })
+    .map((invite) => invite.tunnel_ip);
 }
 
 export function unjoinedExactInvitePeerCidrs(peerCidrs: string[], memberAddresses: string[]): string[] {
@@ -931,9 +1356,23 @@ async function reconcileAfterMemberRemove(removedAddress: string | undefined, sk
     discoveredPeerCidrs.length > 0
       ? [...new Set([...discoveredPeerCidrs, ...pendingPeerCidrs])]
       : configStringArray(config, "terrarium_cluster_peer_cidrs").filter((cidr) => cidr !== removedExactCidr);
+  const removedWireGuardEndpointCidrs = removedAddress
+    ? wireGuardMembers(config)
+        .filter((member) => member.tunnel_ip === removedAddress && member.endpoint)
+        .map((member) => endpointCidrFromWireGuardEndpoint(member.endpoint ?? ""))
+        .filter((cidr): cidr is string => cidr !== null)
+    : [];
+  if (removedAddress) {
+    removeWireGuardMembers(config, [removedAddress]);
+    removePendingWireGuardInvites(config, [removedAddress]);
+  }
 
   applyClusterConfig(config, { network, parent, centralAddresses, peerCidrs });
   saveMutableConfig(stringify(config));
+  if (removedExactCidr) {
+    await closeClusterFirewall([removedExactCidr]);
+  }
+  await closeWireGuardFirewall(removedWireGuardEndpointCidrs, wireGuardPort(config));
   await converge(skipReconfigure);
 }
 
@@ -1097,25 +1536,41 @@ export async function clusterStatusCmd(): Promise<void> {
 export async function clusterInitCmd(options: ClusterInitOptions): Promise<void> {
   const discovered = options.address ? undefined : await discoverClusterNetwork();
   const member = options.member || (await discoverMemberName());
-  const address = options.address ?? discovered?.address;
-  if (!address) {
+  const bootstrapAddress = options.address ?? discovered?.address;
+  if (!bootstrapAddress) {
     throw new Error("could not discover a reachable cluster address; pass --address explicitly");
   }
 
-  const endpoint = normalizeClusterEndpoint(address);
-  const endpointAddress = endpointHost(endpoint);
   const network = options.network || DEFAULT_OVN_NETWORK;
   const parent = options.parent || DEFAULT_OVN_PARENT;
-  const centralAddresses = options.centralAddresses === undefined ? [endpointAddress] : parseCsv(options.centralAddresses);
-  const defaultPeerCidr = discovered?.peerCidr ?? exactPeerCidrForHost(endpointAddress) ?? undefined;
+  const wireguardCidr = options.wireguardCidr || DEFAULT_WIREGUARD_CIDR;
+  const wireguardPort = options.wireguardPort || DEFAULT_WIREGUARD_PORT;
+  const wireguardEndpoint = normalizeWireGuardEndpoint(options.wireguardEndpoint || bootstrapAddress, wireguardPort);
+  const keyPair = await ensureLocalWireGuardKeyPair();
+  const localTunnelIp = ipv4FromCidr(wireguardCidr, 1);
+  const localMember: WireGuardMember = {
+    name: member,
+    public_key: keyPair.publicKey,
+    tunnel_ip: localTunnelIp,
+    endpoint: wireguardEndpoint
+  };
+  const centralAddresses = options.centralAddresses === undefined ? [localTunnelIp] : parseCsv(options.centralAddresses);
   const peerCidrs =
-    options.peerCidr === undefined ? (defaultPeerCidr ? [defaultPeerCidr] : []) : parsePeerCidrs(options.peerCidr);
+    options.peerCidr === undefined ? [exactPeerCidrForHost(localTunnelIp)].filter((cidr): cidr is string => cidr !== null) : parsePeerCidrs(options.peerCidr);
 
   await openClusterFirewall(peerCidrs);
+  const config = loadMutableConfig();
+  applyWireGuardConfig(config, {
+    cidr: wireguardCidr,
+    port: wireguardPort,
+    members: [localMember],
+    endpointCidrs: [endpointCidrFromWireGuardEndpoint(wireguardEndpoint)].filter((cidr): cidr is string => cidr !== null)
+  });
+  await configureLocalWireGuard(config);
+  const endpoint = normalizeClusterEndpoint(localTunnelIp);
   await runText([LXC, "config", "set", "core.https_address", endpoint], PREFIX);
   await runText([LXC, "cluster", "enable", member], PREFIX);
 
-  const config = loadMutableConfig();
   applyClusterConfig(config, { network, parent, centralAddresses, peerCidrs });
   if (centralAddresses.length > 0) {
     await ensureOvnCaMaterial(config);
@@ -1125,10 +1580,10 @@ export async function clusterInitCmd(options: ClusterInitOptions): Promise<void>
 
   console.log(success(`Initialized LXD cluster member ${member} at ${endpoint}`));
   if (options.address === undefined) {
-    console.log(success(`Auto-discovered cluster address ${endpoint}${discovered?.ifname ? ` on ${discovered.ifname}` : ""}`));
+    console.log(success(`Auto-discovered WireGuard endpoint ${wireguardEndpoint}${discovered?.ifname ? ` on ${discovered.ifname}` : ""}`));
   }
   if (options.peerCidr === undefined && peerCidrs.length === 0) {
-    console.warn("Terrarium did not auto-open cluster peer firewall rules because no exact peer address was discovered. Pass --peer-cidr <peer-ip>/32 for public-only clusters.");
+    console.warn("Terrarium did not auto-open cluster peer firewall rules because no exact tunnel peer address was discovered.");
   }
 }
 
@@ -1154,6 +1609,71 @@ export async function clusterInviteCmd(member: string, options: ClusterInviteOpt
   const token = await mintClusterToken(normalized);
   const tokenExpiry = decodeLxdJoinToken(token).expiresAt;
   const peerCidrs = await peerCidrsForInvite(normalized, options.peerCidr);
+  const config = loadMutableConfig();
+
+  if (configBoolean(config, "terrarium_cluster_wireguard_enabled")) {
+    const endpointCidr = peerCidrs[0];
+    const endpointInput = parseCsv(options.peerCidr)[0] || normalized;
+    const endpoint = normalizeWireGuardEndpoint(endpointInput, wireGuardPort(config));
+    const endpointCidrs = endpointCidr ? [endpointCidr] : [];
+    const joinerKeyPair = await generateWireGuardKeyPair();
+    const joinerTunnelIp = nextWireGuardTunnelIp(config);
+    const joinerMember: WireGuardMember = {
+      name: normalized,
+      public_key: joinerKeyPair.publicKey,
+      tunnel_ip: joinerTunnelIp,
+      endpoint
+    };
+    const seedKeyPair = await ensureLocalWireGuardKeyPair();
+    const seedMember = wireGuardMembers(config).find((item) => item.public_key === seedKeyPair.publicKey);
+    if (!seedMember?.endpoint) {
+      throw new Error("local WireGuard member is missing an endpoint; rerun cluster init with --wireguard-endpoint");
+    }
+
+    const nextMembers = [...wireGuardMembers(config).filter((item) => item.name !== normalized), joinerMember];
+    const joinerPeerCidr = exactPeerCidrForHost(joinerTunnelIp);
+    const nextPeerCidrs = [...new Set([...configStringArray(config, "terrarium_cluster_peer_cidrs"), ...wireGuardPeerCidrs(nextMembers)])];
+    applyWireGuardConfig(config, {
+      members: nextMembers,
+      endpointCidrs: [...wireGuardEndpointCidrs(config), ...endpointCidrs]
+    });
+    setConfigValue(config, "terrarium_cluster_peer_cidrs", nextPeerCidrs);
+    if (joinerPeerCidr) {
+      upsertPendingClusterInvites(config, [joinerPeerCidr], tokenExpiry);
+      upsertPendingWireGuardInvite(config, joinerTunnelIp, endpointCidr, tokenExpiry);
+    }
+    saveMutableConfig(stringify(config));
+    importConfigFileToClusterStore(CONFIG_PATH, PREFIX);
+
+    await openWireGuardFirewall(endpointCidrs, wireGuardPort(config));
+    if (joinerPeerCidr) {
+      await openClusterFirewall([joinerPeerCidr]);
+      await scheduleInviteCleanup([joinerPeerCidr], tokenExpiry);
+    }
+    await configureLocalWireGuard(config);
+
+    const bundle = encodeWireGuardJoinBundle({
+      version: 1,
+      interface: wireGuardInterface(config),
+      cidr: wireGuardCidr(config),
+      port: wireGuardPort(config),
+      privateKey: joinerKeyPair.privateKey,
+      tunnelIp: joinerTunnelIp,
+      peer: {
+        publicKey: seedMember.public_key,
+        tunnelIp: seedMember.tunnel_ip,
+        endpoint: seedMember.endpoint
+      }
+    });
+    console.log(success(`Invited cluster member ${normalized} as WireGuard peer ${joinerTunnelIp}`));
+    if (endpointCidrs.length === 0) {
+      console.warn(`Terrarium could not resolve ${normalized} to an IP address, so WireGuard UDP/${wireGuardPort(config)} was not pre-opened for the joining node.`);
+    }
+    console.log("Run this on the new node:");
+    console.log(`terrariumctl cluster join --token ${shellEscape(token)} --wireguard ${shellEscape(bundle)}`);
+    return;
+  }
+
   if (peerCidrs.length > 0) {
     await openClusterFirewall(peerCidrs);
     const { temporaryPeerCidrs, changed } = saveInvitedPeerCidrs(peerCidrs, tokenExpiry);
@@ -1207,14 +1727,22 @@ export async function clusterInviteCleanupCmd(options: ClusterInviteCleanupOptio
   const memberAddresses = members.map((member) => member.address);
   const removablePeerCidrs = unjoinedExactInvitePeerCidrs(expiredPeerCidrs, memberAddresses);
   const joinedPeerCidrs = expiredPeerCidrs.filter((cidr) => !removablePeerCidrs.includes(cidr));
+  const removableTunnelIps = expiredPendingWireGuardTunnelIps(config, removablePeerCidrs, options.expiresAt);
   const changedPending = removePendingClusterInvites(config, expiredPeerCidrs);
   const changedPeers = removeClusterPeerCidrs(config, removablePeerCidrs);
+  const removedWireGuard = removePendingWireGuardInvites(config, removableTunnelIps);
+  const changedWireGuard = removeWireGuardMembers(config, removableTunnelIps);
 
-  if (changedPending || changedPeers) {
+  if (changedPending || changedPeers || removedWireGuard.changed || changedWireGuard) {
     saveMutableConfig(stringify(config));
+    importConfigFileToClusterStore(CONFIG_PATH, PREFIX);
   }
   if (removablePeerCidrs.length > 0) {
     await closeClusterFirewall(removablePeerCidrs);
+    await closeWireGuardFirewall(removedWireGuard.endpointCidrs, wireGuardPort(config));
+    if (changedWireGuard) {
+      await configureLocalWireGuard(config);
+    }
     console.log(success(`Removed expired cluster invite peer ${removablePeerCidrs.join(", ")}`));
   }
   if (joinedPeerCidrs.length > 0) {
@@ -1239,18 +1767,51 @@ export async function clusterJoinCmd(options: ClusterJoinOptions): Promise<void>
 
   const storagePool = options.storagePool || DEFAULT_STORAGE_POOL;
   const storage = resolveJoinStorageConfig(loadMutableConfig(), storagePool);
-  const tokenPeerHost = singleAddressFromJoinToken(options.token);
-  const discovered = options.address ? undefined : await discoverClusterNetwork(tokenPeerHost);
-  const address = options.address ?? discovered?.address;
+  const wireGuardBundle = options.wireguard ? decodeWireGuardJoinBundle(options.wireguard) : undefined;
+  const tokenPeerHost = wireGuardBundle?.peer.tunnelIp ?? singleAddressFromJoinToken(options.token);
+  const discovered = options.address || wireGuardBundle ? undefined : await discoverClusterNetwork(tokenPeerHost);
+  const address = options.address ?? wireGuardBundle?.tunnelIp ?? discovered?.address;
   if (!address) {
     throw new Error("could not discover this node's cluster address; pass --address explicitly");
+  }
+  if (wireGuardBundle) {
+    const localMemberName = decodeLxdJoinToken(options.token).serverName || (await discoverMemberName());
+    const localPublicKey = await wireGuardPublicKey(wireGuardBundle.privateKey);
+    const config = loadMutableConfig();
+    applyWireGuardConfig(config, {
+      interfaceName: wireGuardBundle.interface,
+      cidr: wireGuardBundle.cidr,
+      port: wireGuardBundle.port,
+      members: [
+        {
+          name: localMemberName,
+          public_key: localPublicKey,
+          tunnel_ip: wireGuardBundle.tunnelIp
+        },
+        {
+          name: "seed",
+          public_key: wireGuardBundle.peer.publicKey,
+          tunnel_ip: wireGuardBundle.peer.tunnelIp,
+          endpoint: wireGuardBundle.peer.endpoint
+        }
+      ],
+      endpointCidrs: [endpointCidrFromWireGuardEndpoint(wireGuardBundle.peer.endpoint)].filter((cidr): cidr is string => cidr !== null)
+    });
+    saveMutableConfig(stringify(config));
+    await openWireGuardFirewall(wireGuardEndpointCidrs(config), wireGuardPort(config));
+    await configureLocalWireGuard(config, wireGuardBundle.privateKey);
   }
   const preseed = buildJoinPreseed({
     serverAddress: normalizeClusterEndpoint(address),
     clusterToken: options.token,
     storagePool
   });
-  const peerCidrs = options.peerCidr === undefined ? peerCidrsFromJoinToken(options.token) : parsePeerCidrs(options.peerCidr);
+  const peerCidrs =
+    options.peerCidr === undefined
+      ? wireGuardBundle
+        ? [exactPeerCidrForHost(wireGuardBundle.peer.tunnelIp)].filter((cidr): cidr is string => cidr !== null)
+        : peerCidrsFromJoinToken(options.token)
+      : parsePeerCidrs(options.peerCidr);
   await openClusterFirewall(peerCidrs);
   await prepareLocalLxdForClusterJoin(storage);
   await runText([LXD, "init", "--preseed"], PREFIX, { stdin: preseed });
@@ -1261,6 +1822,9 @@ export async function clusterJoinCmd(options: ClusterJoinOptions): Promise<void>
   if (!options.skipExport) {
     const localPeerCidr = exactPeerCidrForHost(endpointHost(normalizeClusterEndpoint(address)));
     saveMergedClusterPeerCidrs([...peerCidrs, localPeerCidr].filter((cidr): cidr is string => cidr !== null));
+    if (wireGuardBundle) {
+      await configureLocalWireGuard(loadMutableConfig(), wireGuardBundle.privateKey);
+    }
   }
   if (!options.skipReconfigure) {
     await reconfigureCmd({ applyHardening: false });

@@ -275,17 +275,23 @@ async function verifyTerrariumCluster(context: IntegrationContext, sshKeyId: num
     await assertInstalledHost(seedSsh);
     await assertInstalledHost(joinSsh);
 
-    await seedSsh.exec(`terrariumctl cluster init --member ${shellArg(seedMember)} --peer-cidr ${shellArg(`${joiner.server.ipv4}/32`)}`, {
+    await seedSsh.exec(`terrariumctl cluster init --member ${shellArg(seedMember)}`, {
       timeoutMs: 30 * 60 * 1000
     });
     await waitForClusterMembers(seedSsh, [seedMember]);
 
-    const token = lastNonEmptyLine(await seedSsh.exec(`terrariumctl cluster token ${shellArg(joinMember)}`, { timeoutMs: 120000 }));
-    if (!token) {
-      throw new Error("cluster token command returned an empty token");
+    const inviteOutput = await seedSsh.exec(`terrariumctl cluster invite ${shellArg(joinMember)} ${shellArg(joiner.server.ipv4)}`, {
+      timeoutMs: 120000
+    });
+    const joinCommand = inviteOutput
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.startsWith("terrariumctl cluster join "));
+    if (!joinCommand) {
+      throw new Error(`cluster invite did not print a join command: ${lastNonEmptyLine(inviteOutput)}`);
     }
 
-    await joinSsh.exec(`terrariumctl cluster join --token ${shellArg(token)} --yes`, { timeoutMs: 30 * 60 * 1000 });
+    await joinSsh.exec(`${joinCommand} --yes`, { timeoutMs: 30 * 60 * 1000 });
 
     await waitForClusterMembers(seedSsh, [seedMember, joinMember]);
     await waitForClusterMembers(joinSsh, [seedMember, joinMember]);
@@ -404,6 +410,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
   const fileSsh = context.ssh(fileHost);
   const partitionSsh = context.ssh(partitionHost);
   const rootDomain = context.publicDns.rootDomain(fileHost.server.ipv4);
+  let releasedFullHosts = false;
 
   try {
     const composeRouteLabels = [`https://compose-${context.config.slug}.${rootDomain}@auth:agents,admins`];
@@ -492,9 +499,15 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       throw new Error("expected bad OIDC credentials to fail");
     }
 
+    await context.releaseHetznerHost(fileHost);
+    await context.releaseHetznerHost(partitionHost);
+    releasedFullHosts = true;
+
     await verifyTerrariumCluster(context, sshKeyId);
   } catch (error) {
-    await captureFailureArtifacts(context, [fileHost, partitionHost]);
+    if (!releasedFullHosts) {
+      await captureFailureArtifacts(context, [fileHost, partitionHost]);
+    }
     throw error;
   }
 }

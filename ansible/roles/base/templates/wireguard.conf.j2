@@ -1,0 +1,15 @@
+[Interface]
+Address = {{ terrarium_cluster_wireguard_local_member.tunnel_ip }}/32
+ListenPort = {{ terrarium_cluster_wireguard_port }}
+PrivateKey = {{ terrarium_cluster_wireguard_private_key_plain }}
+
+{% for peer in terrarium_cluster_wireguard_members | default([]) if peer.public_key != terrarium_cluster_wireguard_local_public_key %}
+[Peer]
+PublicKey = {{ peer.public_key }}
+AllowedIPs = {{ peer.tunnel_ip }}/32
+{% if peer.endpoint is defined and peer.endpoint | length > 0 %}
+Endpoint = {{ peer.endpoint }}
+PersistentKeepalive = 25
+{% endif %}
+
+{% endfor %}

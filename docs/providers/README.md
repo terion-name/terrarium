@@ -27,10 +27,12 @@ General recommendation:
 
 Clustering recommendation:
 
-- Put every Terrarium cluster member in the same provider private network, VPC, or VPC 2.0 before running `terrariumctl cluster init`.
+- Put every Terrarium cluster member in the same provider private network, VPC, or VPC 2.0 when the provider supports it.
+- Terrarium clusters use a WireGuard mesh by default, so private networking is recommended but not mandatory.
 - Keep the cluster members in one provider region unless you know that provider's private network spans the regions you want to use.
-- Let `terrariumctl cluster init` and `terrariumctl cluster join` auto-discover private addresses first.
-- If auto-discovery cannot see the private network, pass `--address <private-ip>:8443` and exact `--peer-cidr <peer-ip>` entries. Terrarium stores plain IPs as exact CIDRs. Broad private subnets intentionally trust every host in that subnet.
-- Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or Geneve `6081/udp` to the public internet.
+- Let `terrariumctl cluster init` auto-discover the best WireGuard endpoint first.
+- If auto-discovery picks the wrong endpoint, pass `--wireguard-endpoint <private-or-public-ip>:51820`.
+- Open WireGuard `51820/udp` only between exact cluster member endpoint IPs.
+- Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or Geneve `6081/udp` on provider firewalls; Terrarium carries them inside WireGuard.
 
 See [Clustering](../operations/clustering.md) for the Terrarium-side workflow.

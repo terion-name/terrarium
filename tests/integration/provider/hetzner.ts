@@ -242,6 +242,23 @@ export class HetznerCloudProvider {
     }
   }
 
+  async waitForServerDeleted(id: number, timeoutMs = 240000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let lastError = "";
+    while (Date.now() < deadline) {
+      const response = await this.requestResponse("GET", `/servers/${id}`);
+      if (response.status === 404) {
+        return;
+      }
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}: ${await response.text()}`;
+      }
+      await Bun.sleep(3000);
+    }
+    const suffix = lastError ? `; last error: ${lastError}` : "";
+    throw new Error(`timed out waiting for Hetzner server ${id} deletion${suffix}`);
+  }
+
   async createVolume(
     name: string,
     sizeGb: number,

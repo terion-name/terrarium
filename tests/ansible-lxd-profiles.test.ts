@@ -87,6 +87,8 @@ describe("OVN TLS", () => {
     expect(tasks).toContain("network.ovn.client_cert");
     expect(tasks).toContain("network.ovn.client_key");
     expect(tasks).toContain("network.ovn.northbound_connection");
+    expect(tasks).toContain("Pin clustered LXD API to the WireGuard tunnel address");
+    expect(tasks).toContain("core.https_address {{ terrarium_ovn_local_address }}:8443");
     expect(tasks).toContain("'ssl:' ~ host ~ ':6641'");
     expect(tasks).toContain("'ssl:' ~ host ~ ':6642'");
   });

@@ -218,6 +218,17 @@
   register: terrarium_cockpit_zfs_checkout
   when: not (terrarium_cockpit_zfs_bundle_usable | default(false))
 
+- name: Pin cockpit-zfs source bootstrap to the declared Yarn release
+  ansible.builtin.shell: |
+    set -euo pipefail
+    yarn_version="$(jq -r '(.packageManager // "yarn@4.6.0") | sub("^yarn@"; "")' package.json)"
+    sed -i "s/yarn set version stable/yarn set version ${yarn_version}/" bootstrap.sh
+  args:
+    chdir: /usr/local/src/cockpit-zfs
+    executable: /bin/bash
+  changed_when: false
+  when: not (terrarium_cockpit_zfs_bundle_usable | default(false))
+
 - name: Build and install cockpit-zfs
   ansible.builtin.shell: |
     set -euo pipefail
@@ -237,6 +248,17 @@
     version: "{{ terrarium_cockpit_s3_ref }}"
     force: true
   register: terrarium_cockpit_s3_checkout
+  when: not (terrarium_cockpit_s3_bundle_usable | default(false))
+
+- name: Pin cockpit-S3ObjectBroswer source bootstrap to the declared Yarn release
+  ansible.builtin.shell: |
+    set -euo pipefail
+    yarn_version="$(jq -r '(.packageManager // "yarn@4.12.0") | sub("^yarn@"; "")' package.json)"
+    sed -i "s/yarn set version stable/yarn set version ${yarn_version}/" bootstrap.sh
+  args:
+    chdir: /usr/local/src/cockpit-S3ObjectBroswer
+    executable: /bin/bash
+  changed_when: false
   when: not (terrarium_cockpit_s3_bundle_usable | default(false))
 
 - name: Build and install cockpit-S3ObjectBroswer

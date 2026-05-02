@@ -21,4 +21,5 @@ terrarium_base_packages:
   - ufw
   - unzip
   - vim
+  - wireguard-tools
   - zstd

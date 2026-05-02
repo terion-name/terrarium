@@ -495,6 +495,13 @@
   changed_when: false
   when: not (terrarium_cluster_enabled | bool)
 
+- name: Pin clustered LXD API to the WireGuard tunnel address
+  ansible.builtin.command: "/snap/bin/lxc config set core.https_address {{ terrarium_ovn_local_address }}:8443"
+  changed_when: false
+  when:
+    - terrarium_cluster_enabled | bool
+    - terrarium_cluster_wireguard_enabled | default(false) | bool
+
 - name: Allow LXD bridge DHCP and DNS through UFW
   community.general.ufw:
     rule: allow

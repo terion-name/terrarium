@@ -16,9 +16,18 @@ Use at least three members for a real cluster. LXD can form smaller clusters,
 but three members let dqlite keep quorum after one member is lost. OVN central
 members should also be an odd-sized set.
 
-Use private addresses for the cluster network when your provider gives you a
-private/VPC network. Do not expose LXD cluster port `8443`, OVN database ports
-`6641`/`6642`, or OVN Geneve traffic `6081/udp` to the public internet.
+Terrarium creates a WireGuard mesh for cluster transport by default. LXD
+cluster traffic, OVN database traffic, and OVN Geneve overlay traffic use the
+WireGuard tunnel addresses, so those control-plane ports are not exposed on the
+provider/public interface. The public or provider-private address is only the
+WireGuard handshake endpoint.
+
+Private/VPC networking is still recommended when your provider supports it: it
+keeps WireGuard handshakes off the public internet and usually gives lower
+latency. If you do not have private networking, exact public peer IPs are fine.
+Do not open LXD `8443/tcp`, OVN `6641/tcp`/`6642/tcp`, or Geneve `6081/udp` on
+provider firewalls; Terrarium only needs WireGuard `51820/udp` between invited
+cluster members.
 
 ## Bootstrap The First Member
 
@@ -31,9 +40,12 @@ terrariumctl cluster init
 What this does:
 
 - uses the host shortname as the LXD member name
-- auto-selects a reachable non-container host address for LXD port `8443`
-- prefers a private/VPC address when one exists
-- opens LXD/OVN firewall rules only for exact cluster peer addresses
+- auto-selects a reachable non-container host address as the WireGuard endpoint
+- prefers a private/VPC endpoint when one exists
+- creates `/etc/terrarium/secrets/wireguard/private.key`
+- creates the `terrarium-wg0` mesh, defaulting to `10.255.54.0/24`
+- binds LXD clustering and OVN to this node's tunnel IP, initially `10.255.54.1`
+- opens LXD/OVN firewall rules only for exact WireGuard tunnel peer addresses
 - configures this node as the first OVN central member
 - generates a Terrarium-owned OVN certificate authority for mTLS
 - sets LXD's reachable cluster API listener
@@ -41,12 +53,10 @@ What this does:
 - stores Terrarium cluster/OVN settings in the shared config
 - runs Terrarium reconfiguration so OVN, firewall rules, and profiles converge
 
-If your hosts only have public addresses, Terrarium still does not guess a
-broad public firewall range. Pass exact peers explicitly, or preferably add a
-private provider network first:
+If Terrarium picks the wrong endpoint, override only the WireGuard endpoint:
 
 ```bash
-terrariumctl cluster init --peer-cidr 203.0.113.12/32
+terrariumctl cluster init --wireguard-endpoint 203.0.113.11:51820
 ```
 
 All discovery can be overridden when needed:
@@ -54,25 +64,23 @@ All discovery can be overridden when needed:
 ```bash
 terrariumctl cluster init \
   --member node1 \
-  --address 10.0.0.11:8443 \
-  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.12/32,10.0.0.13/32
+  --wireguard-endpoint 10.0.0.11:51820 \
+  --wireguard-cidr 10.255.54.0/24
 ```
 
-`--peer-cidr` is a firewall trust boundary. It controls which source addresses
-may reach LXD `8443/tcp`, OVN database ports `6641/tcp`/`6642/tcp`, and OVN
-Geneve `6081/udp`. Prefer exact `/32` IPv4 or `/128` IPv6 peer addresses.
-For convenience, Terrarium accepts plain peer IPs and stores them as exact
-CIDRs.
-Only pass a subnet such as `10.0.0.0/24` when every host in that subnet is
-trusted to reach the cluster control plane.
+`--address`, `--central-addresses`, and `--peer-cidr` remain as advanced
+escape hatches. With the default WireGuard transport, they should be tunnel
+addresses, not provider/public addresses. `--peer-cidr` is the firewall trust
+boundary for LXD `8443/tcp`, OVN database ports `6641/tcp`/`6642/tcp`, and
+OVN Geneve `6081/udp`; normal users should let Terrarium maintain exact
+`10.255.54.x/32` peers.
 
 OVN database access is also mutually authenticated. Terrarium creates an OVN CA
 during cluster initialization, stores it in the root-only shared Terrarium
 config, issues a local node certificate during reconfiguration, and configures
-OVN northbound/southbound database clients to use `ssl:` remotes. The firewall
-is still important defense-in-depth, but a host in an allowed peer CIDR also
-needs a Terrarium-issued OVN certificate to talk to the OVN databases.
+OVN northbound/southbound database clients to use `ssl:` remotes. The
+WireGuard mesh encrypts the local-network transport; OVN mTLS authenticates the
+database clients inside that mesh.
 
 ## Join Additional Members
 
@@ -82,50 +90,47 @@ On an existing cluster member, create an invite:
 terrariumctl cluster invite node2
 ```
 
-The command pre-opens this member's firewall for the joining node when `node2`
+The command pre-opens WireGuard `51820/udp` for the joining node when `node2`
 resolves to an IP address. If the name is not resolvable, Terrarium asks for
-the joining node's address in interactive terminals. For automation, pass the
-joining node's exact address:
+the joining node's endpoint in interactive terminals. For automation, pass the
+joining node's exact public or provider-private address:
 
 ```bash
 terrariumctl cluster invite node2 10.0.0.12
 ```
 
-`cluster invite` reads the LXD token expiry and schedules a one-shot systemd
-timer to clean up temporary exact peer firewall rules after that expiry. If the
-node joins before the token expires, cleanup sees the new LXD member and keeps
-the peer rule. If the node never joins, cleanup removes the exact peer rule
-from UFW and from the shared Terrarium config. Broad explicit CIDRs are treated
-as operator-managed trust boundaries and are not auto-cleaned.
+`cluster invite` allocates the new member's tunnel IP, generates a one-time
+WireGuard private key for that node, adds its public key to the shared config,
+and reads the LXD token expiry. It schedules a one-shot systemd cleanup after
+that expiry. If the node joins before the token expires, cleanup sees the new
+LXD member and keeps the WireGuard peer. If the node never joins, cleanup
+removes the temporary tunnel peer, the temporary WireGuard endpoint firewall
+rule, and the LXD/OVN tunnel firewall rule.
 
 The command prints the join command to run on the new node:
 
 ```bash
-terrariumctl cluster join --token '<token-from-existing-member>'
+terrariumctl cluster join --token '<token-from-existing-member>' --wireguard '<join-bundle>'
 ```
 
 Joining an LXD cluster replaces the node's local LXD database. Use fresh nodes
 or nodes whose local instances have already been backed up or moved.
 
-When `--address` is omitted, Terrarium routes toward the existing member in the
-token and uses the local source address as the new member address. When
-`--peer-cidr` is omitted, Terrarium pre-opens exact firewall rules for the
-existing member addresses embedded in the token. After join, Terrarium exports
-the shared config from the LXD dqlite-backed store to
-`/etc/terrarium/config.yaml` and runs `terrariumctl reconfigure` on that node.
-
-For public-only clusters, pass exact public peer CIDRs on both sides:
-
-```bash
-terrariumctl cluster init --peer-cidr 203.0.113.12/32
-terrariumctl cluster join --token '<token>' --peer-cidr 203.0.113.11/32 --yes
-```
+The `--wireguard` bundle is intentionally opaque. It contains the joining
+node's generated WireGuard private key, tunnel IP, and the seed member's
+WireGuard endpoint. Treat it like the LXD join token: short-lived and secret.
+`cluster join` writes the local WireGuard key, starts the tunnel, joins LXD
+through the tunnel address, exports the shared config from LXD's dqlite-backed
+store to `/etc/terrarium/config.yaml`, and runs `terrariumctl reconfigure` on
+that node.
 
 ## OVN Networking
 
 Terrarium creates an OVN workload network named `terrarium-ovn` and points the
 `default`, `terrarium`, and `strict` profiles at it. The existing managed bridge
-`lxdbr0` remains as the parent/uplink network.
+`lxdbr0` remains as the parent/uplink network. OVN central and host traffic use
+the WireGuard tunnel IPs, so Geneve overlay packets are carried inside the
+encrypted mesh.
 
 Default network values:
 
@@ -178,14 +183,14 @@ terrariumctl cluster ovn configure
 ```
 
 Without flags, Terrarium reads LXD cluster membership, keeps an odd-sized OVN
-central set, and writes exact member CIDRs to the shared peer firewall list. Use
-explicit flags when you want a specific central set or a deliberately broader
-trusted peer network:
+central set, and writes exact tunnel member CIDRs to the shared peer firewall
+list. Use explicit flags only when you want a specific central set or a
+deliberately broader trusted tunnel network:
 
 ```bash
 terrariumctl cluster ovn configure \
-  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.11/32,10.0.0.12/32,10.0.0.13/32
+  --central-addresses 10.255.54.1,10.255.54.2,10.255.54.3 \
+  --peer-cidr 10.255.54.1/32,10.255.54.2/32,10.255.54.3/32
 ```
 
 Use an odd number of OVN central addresses. Terrarium starts `ovn-central` on

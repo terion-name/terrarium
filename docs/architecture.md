@@ -68,36 +68,39 @@ Terrarium uses LXD clustering for multi-node membership and OVN for the default
 workload network.
 
 - `terrariumctl cluster init` enables LXD clustering on the first member after
-  setting a reachable `core.https_address`; by default it discovers the member
-  name, host address, and exact peer firewall CIDR.
+  creating the local WireGuard mesh endpoint and binding `core.https_address`
+  to the first tunnel address.
 - `terrariumctl cluster invite` wraps `lxc cluster add` and prints the
-  simplified join command for the next member. `terrariumctl cluster token`
-  prints only the raw token for automation.
+  simplified join command for the next member. The invite command also
+  allocates the joining member's tunnel IP and WireGuard key material.
+  `terrariumctl cluster token` prints only the raw LXD token for automation.
 - `terrariumctl cluster join` feeds a deterministic LXD preseed into
-  `lxd init --preseed`; by default it discovers the local join address by
-  routing toward the token's existing member, exports the shared Terrarium
-  config, and reconfigures the joined node.
+  `lxd init --preseed`; the normal invite flow starts WireGuard first, joins
+  LXD through the tunnel address, exports the shared Terrarium config, and
+  reconfigures the joined node.
 - `terrariumctl cluster ovn configure` records the OVN central members and
-  exact peer CIDRs in the shared config, discovering current LXD member
+  exact tunnel peer CIDRs in the shared config, discovering current LXD member
   addresses when explicit values are omitted, then reconciles host networking.
 
 Terrarium keeps `lxdbr0` as the managed parent/uplink network and creates
 `terrarium-ovn` as the logical workload network. The default, `terrarium`, and
 `strict` profiles attach new containers to `terrarium-ovn`.
 
-The cluster firewall model is explicit. Terrarium only opens LXD/OVN cluster
-ports for configured `terrarium_cluster_peer_cidrs`, covering LXD API `8443`,
-OVN northbound/southbound database ports `6641`/`6642`, and OVN Geneve
-`6081/udp`.
+The cluster transport model has two layers. Provider/public interfaces only
+need WireGuard `51820/udp` from invited member endpoints. Inside the WireGuard
+mesh, Terrarium only opens LXD/OVN cluster ports for configured
+`terrarium_cluster_peer_cidrs`, covering LXD API `8443`, OVN
+northbound/southbound database ports `6641`/`6642`, and OVN Geneve `6081/udp`.
 
-The default cluster commands use exact `/32` IPv4 or `/128` IPv6 peer entries.
+The default cluster commands use exact `/32` WireGuard tunnel peer entries.
 Broader CIDRs are supported only as an explicit operator choice and should be
-reserved for fully trusted private networks.
+reserved for fully trusted tunnel networks.
 
 OVN database access has a second boundary: Terrarium generates a cluster OVN CA
 and configures OVN central, LXD, and Open vSwitch with certificate-backed
-`ssl:` database remotes. This authenticates OVN control-plane clients; it does
-not encrypt arbitrary workload traffic or the Geneve overlay by itself.
+`ssl:` database remotes. This authenticates OVN control-plane clients. The
+WireGuard mesh encrypts the provider/local transport that carries LXD, OVN DB,
+and Geneve traffic between members.
 
 This is enough for one LXD management plane and cross-member container
 networking. It is not a blanket HA promise: storage locality, instance

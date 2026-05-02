@@ -126,20 +126,20 @@ terrariumctl cluster init
 terrariumctl cluster invite node2
 ```
 
-Then run the printed `terrariumctl cluster join --token ...` command on the new
-node. Terrarium should auto-select the VPC address. If it does not, pass the
-private address and exact peer addresses explicitly:
+Then run the printed `terrariumctl cluster join --token ... --wireguard ...` command on the new
+node. Terrarium should auto-select the VPC address as the WireGuard endpoint.
+If it does not, pass the private endpoint explicitly and invite peers by their
+private address:
 
 ```bash
-terrariumctl cluster init \
-  --address 10.42.0.11:8443 \
-  --peer-cidr 10.42.0.12/32
+terrariumctl cluster init --wireguard-endpoint 10.42.0.11:51820
+terrariumctl cluster invite node2 10.42.0.12
 ```
 
-Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
-restricted to exact VPC member addresses. Only use a broader VPC subnet if
-every host in that subnet is trusted to reach the cluster control plane. Public
-firewall rules should only cover the normal Terrarium ingress ports documented in
+Provider firewalls only need WireGuard `51820/udp` between exact VPC member
+addresses. Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or
+Geneve `6081/udp`; Terrarium carries those inside WireGuard. Public firewall
+rules should only cover the normal Terrarium ingress ports documented in
 [Services and Endpoints](../reference/services-and-endpoints.md).
 
 ## Notes

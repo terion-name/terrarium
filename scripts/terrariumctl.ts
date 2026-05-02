@@ -111,6 +111,10 @@ cli
   .option("--parent <name>", "LXD parent/uplink network for the OVN network", { ...STRING_OPTION, default: "lxdbr0" })
   .option("--central-addresses <csv>", "Comma-separated OVN central member IPs; auto-discovered when omitted", STRING_OPTION)
   .option("--peer-cidr <csv>", "Comma-separated source IPs/CIDRs allowed to reach LXD and OVN cluster ports; defaults to exact peers", STRING_OPTION)
+  .option("--wireguard <bundle>", "Internal WireGuard join bundle emitted by cluster invite", STRING_OPTION)
+  .option("--wireguard-cidr <cidr>", "WireGuard mesh CIDR for cluster init; defaults to 10.255.54.0/24", STRING_OPTION)
+  .option("--wireguard-port <port>", "WireGuard UDP listen port for cluster init; defaults to 51820", STRING_OPTION)
+  .option("--wireguard-endpoint <ipOrHostPort>", "Reachable WireGuard endpoint for this node; auto-discovered when omitted", STRING_OPTION)
   .option("--expires-at <iso>", "Internal invite cleanup deadline", STRING_OPTION)
   .option("--target <member>", "Target member for cluster remove workload moves; omit to distribute", STRING_OPTION)
   .option("--move", "Move workloads off a member before cluster remove")
@@ -119,7 +123,7 @@ cli
   .option("--skip-export", "Do not export Terrarium config from the cluster store after join")
   .option("--skip-reconfigure", "Do not run Terrarium reconfigure after cluster changes")
   .usage(
-    "cluster status\n  terrariumctl cluster init [--member NAME] [--address IP[:8443]] [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]\n  terrariumctl cluster invite MEMBER [PEER_IP_OR_CIDR]\n  terrariumctl cluster token MEMBER\n  terrariumctl cluster join --token TOKEN [--address IP[:8443]] [--peer-cidr CIDR] [--yes]\n  terrariumctl cluster evacuate MEMBER [--yes]\n  terrariumctl cluster restore MEMBER [--yes]\n  terrariumctl cluster move WORKLOAD MEMBER\n  terrariumctl cluster remove MEMBER [--move] [--target MEMBER] [--force] [--yes]\n  terrariumctl cluster ovn configure [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]"
+    "cluster status\n  terrariumctl cluster init [--member NAME] [--address IP[:8443]] [--wireguard-endpoint IP[:51820]]\n  terrariumctl cluster invite MEMBER [PEER_IP_OR_CIDR]\n  terrariumctl cluster token MEMBER\n  terrariumctl cluster join --token TOKEN --wireguard BUNDLE [--yes]\n  terrariumctl cluster evacuate MEMBER [--yes]\n  terrariumctl cluster restore MEMBER [--yes]\n  terrariumctl cluster move WORKLOAD MEMBER\n  terrariumctl cluster remove MEMBER [--move] [--target MEMBER] [--force] [--yes]\n  terrariumctl cluster ovn configure [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]"
   )
   .action(async (action, args, options) => {
     const commandArgs = (args as string[]) ?? [];
@@ -138,6 +142,9 @@ cli
         parent: rawOptions.parent as string | undefined,
         centralAddresses: rawOptions.centralAddresses as string | undefined,
         peerCidr: rawOptions.peerCidr as string | undefined,
+        wireguardCidr: rawOptions.wireguardCidr as string | undefined,
+        wireguardPort: rawOptions.wireguardPort as string | undefined,
+        wireguardEndpoint: rawOptions.wireguardEndpoint as string | undefined,
         skipReconfigure: Boolean(rawOptions.skipReconfigure)
       });
       return;
@@ -165,6 +172,7 @@ cli
     if (normalizedAction === "join") {
       await clusterJoinCmd({
         token: rawOptions.token as string | undefined,
+        wireguard: rawOptions.wireguard as string | undefined,
         address: rawOptions.address as string | undefined,
         storagePool: rawOptions.storagePool as string | undefined,
         peerCidr: rawOptions.peerCidr as string | undefined,

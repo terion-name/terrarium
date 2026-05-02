@@ -15,10 +15,10 @@
 | `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
 | `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
 | `terrariumctl cluster status` | none | n/a | Shows LXD cluster state and the Terrarium OVN workload network. |
-| `terrariumctl cluster init` | optional: `--member`, `--address`, `--central-addresses`, `--peer-cidr` | member from hostname, address/exact local peer CIDR auto-discovered when possible | Enables LXD clustering on the first member and reconciles Terrarium cluster networking. |
-| `terrariumctl cluster invite` | required: member name; optional: peer IP/CIDR or `--peer-cidr` | member name resolution when possible | Mints a single-use LXD cluster join token, temporarily opens the joining peer, and prints the simplified join command. |
+| `terrariumctl cluster init` | optional: `--member`, `--wireguard-endpoint`, `--wireguard-cidr`, advanced `--address`, `--central-addresses`, `--peer-cidr` | member from hostname, WireGuard endpoint auto-discovered, mesh CIDR `10.255.54.0/24` | Enables LXD clustering on the first member, creates the WireGuard mesh, and reconciles Terrarium cluster networking. |
+| `terrariumctl cluster invite` | required: member name; optional: peer IP/CIDR or `--peer-cidr` | member name resolution when possible | Mints a single-use LXD cluster join token, creates a one-time WireGuard join bundle, temporarily opens the joining peer, and prints the join command. |
 | `terrariumctl cluster token` | required: member name | n/a | Mints only the single-use LXD cluster join token for another member. |
-| `terrariumctl cluster join` | required: `--token`; optional: `--address`, `--peer-cidr`, `--yes` | storage pool `terrarium`, address auto-discovered by routing to the token member | Joins this node to an existing LXD cluster and exports the shared Terrarium config. |
+| `terrariumctl cluster join` | required: `--token`; normally also `--wireguard`; optional: `--yes` | storage pool `terrarium` | Starts the WireGuard mesh, joins this node to an existing LXD cluster, and exports the shared Terrarium config. |
 | `terrariumctl cluster evacuate` | required: member name | n/a | Asks LXD to evacuate workloads from a member for maintenance. |
 | `terrariumctl cluster restore` | required: member name | n/a | Restores an evacuated member to normal cluster service. |
 | `terrariumctl cluster move` | required: workload name, target member | n/a | Moves one workload to another LXD cluster member without renaming it. |
@@ -124,19 +124,21 @@ Manual override example:
 ```bash
 terrariumctl cluster init \
   --member node1 \
-  --address 10.0.0.11:8443 \
-  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.12/32,10.0.0.13/32
+  --wireguard-endpoint 10.0.0.11:51820 \
+  --wireguard-cidr 10.255.54.0/24
 ```
 
 | Flag | Argument | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `--member` | name | no | `hostname -s` | Local LXD cluster member name. |
-| `--address` | IP/DNS with optional port | no | auto-discovered host address, port `8443` | Reachable LXD cluster address for this node. |
+| `--address` | IP/DNS with optional port | no | local WireGuard tunnel IP | Advanced escape hatch for the LXD listener address. Normal clusters should omit this. |
 | `--network` | LXD network name | no | `terrarium-ovn` | Terrarium OVN workload network. |
 | `--parent` | LXD network name | no | `lxdbr0` | Managed parent/uplink network for OVN. |
-| `--central-addresses` | comma-separated IPs | no | local cluster address | OVN central member addresses. Use an odd-sized set for production. |
-| `--peer-cidr` | comma-separated IPs/CIDRs | no | exact local address when possible | Source addresses allowed through UFW for LXD and OVN cluster traffic. Plain IPs are stored as exact `/32` or `/128` peers; broad subnets intentionally trust every host in that range. |
+| `--central-addresses` | comma-separated IPs | no | local WireGuard tunnel IP | Advanced OVN central member addresses. Use tunnel IPs and an odd-sized set for production. |
+| `--peer-cidr` | comma-separated IPs/CIDRs | no | exact local WireGuard tunnel address | Advanced source addresses allowed through UFW for LXD and OVN cluster traffic. Normal clusters should let Terrarium maintain exact tunnel peers. |
+| `--wireguard-endpoint` | IP/DNS with optional port | no | auto-discovered host address, port `51820` | Public or provider-private endpoint other members use for WireGuard handshakes. |
+| `--wireguard-cidr` | IPv4 CIDR | no | `10.255.54.0/24` | Tunnel subnet for Terrarium cluster members. |
+| `--wireguard-port` | UDP port | no | `51820` | WireGuard listen port. |
 | `--skip-reconfigure` | none | no | reconfigure after cluster changes | Saves cluster config without reconciling the host. |
 
 ### cluster invite
@@ -154,13 +156,14 @@ terrariumctl cluster invite node2 10.0.0.12
 Prints a copy-paste join command:
 
 ```bash
-terrariumctl cluster join --token '<token-from-existing-member>'
+terrariumctl cluster join --token '<token-from-existing-member>' --wireguard '<join-bundle>'
 ```
 
-When `node2` resolves to an IP address, Terrarium pre-opens exact `/32` or
-`/128` firewall rules for that joining node and stores them in the shared
-config. If the name is not resolvable, Terrarium asks for the joining node
-address in interactive terminals. For automation, pass the joining node
+When `node2` resolves to an IP address, Terrarium pre-opens exact WireGuard
+endpoint firewall rules for that joining node and stores the generated
+WireGuard peer in the shared config. If the name is not resolvable, Terrarium
+asks for the joining node address in interactive terminals. For automation,
+pass the joining node
 explicitly:
 
 ```bash
@@ -169,7 +172,7 @@ terrariumctl cluster invite node2 10.0.0.12
 
 Invite peer rules are temporary until the LXD token expires. Terrarium
 schedules a one-shot systemd cleanup; joined peers are kept, and expired
-never-joined exact peers are removed from UFW and the shared config.
+never-joined WireGuard peers are removed from UFW and the shared config.
 
 Use this for normal operations. Use `cluster token` only when another tool will
 consume the raw token.
@@ -185,7 +188,7 @@ Prints the single-use token returned by `lxc cluster add node2`.
 ### cluster join
 
 ```bash
-terrariumctl cluster join --token '<token-from-existing-member>'
+terrariumctl cluster join --token '<token-from-existing-member>' --wireguard '<join-bundle>'
 ```
 
 Manual override example:
@@ -193,17 +196,17 @@ Manual override example:
 ```bash
 terrariumctl cluster join \
   --token '<token-from-existing-member>' \
-  --address 10.0.0.12:8443 \
-  --peer-cidr 10.0.0.11/32 \
+  --wireguard '<join-bundle>' \
   --yes
 ```
 
 | Flag | Argument | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `--token` | token | yes | none | Single-use token created by `terrariumctl cluster token`. |
-| `--address` | IP/DNS with optional port | no | auto-discovered by routing to an existing member from the token | Reachable LXD cluster address for this node. |
+| `--token` | token | yes | none | Single-use token created by `terrariumctl cluster invite` or `terrariumctl cluster token`. |
+| `--wireguard` | bundle | yes for normal Terrarium clusters | none | Opaque join bundle printed by `terrariumctl cluster invite`; contains this node's temporary WireGuard join secret. |
+| `--address` | IP/DNS with optional port | no | WireGuard tunnel IP from the bundle | Advanced LXD listener override. |
 | `--storage-pool` | pool name | no | `terrarium` | Member-local storage pool name used in the LXD join preseed. |
-| `--peer-cidr` | comma-separated IPs/CIDRs | no | exact existing member IPs from the token | Peers allowed through UFW before the LXD join runs. Plain IPs are stored as exact CIDRs. |
+| `--peer-cidr` | comma-separated IPs/CIDRs | no | exact existing WireGuard peer from the bundle | Advanced LXD/OVN tunnel peers allowed through UFW before the LXD join runs. |
 | `--yes` | none | no | prompt before join | Confirms the destructive LXD cluster join operation. |
 | `--skip-export` | none | no | export shared config after join | Leaves `/etc/terrarium/config.yaml` untouched after joining. |
 | `--skip-reconfigure` | none | no | reconfigure after join | Joins without running local Terrarium reconciliation. |
@@ -301,13 +304,13 @@ Manual override example:
 
 ```bash
 terrariumctl cluster ovn configure \
-  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.11/32,10.0.0.12/32,10.0.0.13/32
+  --central-addresses 10.255.54.1,10.255.54.2,10.255.54.3 \
+  --peer-cidr 10.255.54.1/32,10.255.54.2/32,10.255.54.3/32
 ```
 
-Use an odd number of central addresses. If there is no LXD cluster membership
-yet and `--central-addresses` is omitted, Terrarium keeps the existing local
-OVN setting.
+Use an odd number of central addresses and prefer WireGuard tunnel IPs. If
+there is no LXD cluster membership yet and `--central-addresses` is omitted,
+Terrarium keeps the existing local OVN setting.
 
 This command reconciles the node where it runs. If the central set changes
 after other members have already joined, run `terrariumctl reconfigure` on

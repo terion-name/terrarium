@@ -10,6 +10,13 @@
     terrarium_cluster_enabled: false
     terrarium_cluster_peer_cidrs: []
     terrarium_cluster_pending_peer_invites: []
+    terrarium_cluster_wireguard_enabled: false
+    terrarium_cluster_wireguard_interface: terrarium-wg0
+    terrarium_cluster_wireguard_cidr: 10.255.54.0/24
+    terrarium_cluster_wireguard_port: "51820"
+    terrarium_cluster_wireguard_members: []
+    terrarium_cluster_wireguard_endpoint_cidrs: []
+    terrarium_cluster_pending_wireguard_invites: []
     terrarium_lxd_network_parent: lxdbr0
     terrarium_lxd_network_name: terrarium-ovn
     terrarium_lxd_parent_ipv4: 10.154.0.1/24
@@ -76,6 +83,13 @@
       terrarium_cluster_enabled: "{{ terrarium_cluster_enabled }}"
       terrarium_cluster_peer_cidrs: "{{ terrarium_cluster_peer_cidrs }}"
       terrarium_cluster_pending_peer_invites: "{{ terrarium_cluster_pending_peer_invites }}"
+      terrarium_cluster_wireguard_enabled: "{{ terrarium_cluster_wireguard_enabled }}"
+      terrarium_cluster_wireguard_interface: "{{ terrarium_cluster_wireguard_interface }}"
+      terrarium_cluster_wireguard_cidr: "{{ terrarium_cluster_wireguard_cidr }}"
+      terrarium_cluster_wireguard_port: "{{ terrarium_cluster_wireguard_port }}"
+      terrarium_cluster_wireguard_members: "{{ terrarium_cluster_wireguard_members }}"
+      terrarium_cluster_wireguard_endpoint_cidrs: "{{ terrarium_cluster_wireguard_endpoint_cidrs }}"
+      terrarium_cluster_pending_wireguard_invites: "{{ terrarium_cluster_pending_wireguard_invites }}"
       terrarium_lxd_network_parent: "{{ terrarium_lxd_network_parent }}"
       terrarium_lxd_network_name: "{{ terrarium_lxd_network_name }}"
       terrarium_lxd_parent_ipv4: "{{ terrarium_lxd_parent_ipv4 }}"

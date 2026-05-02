@@ -92,6 +92,108 @@
     mode: "0600"
   no_log: true
 
+- name: Create WireGuard configuration directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/terrarium/secrets/wireguard
+      mode: "0700"
+    - path: /etc/wireguard
+      mode: "0700"
+  when: terrarium_cluster_wireguard_enabled | bool
+
+- name: Check local WireGuard private key
+  ansible.builtin.stat:
+    path: /etc/terrarium/secrets/wireguard/private.key
+  register: terrarium_cluster_wireguard_private_key_stat
+  when: terrarium_cluster_wireguard_enabled | bool
+
+- name: Assert local WireGuard private key exists
+  ansible.builtin.assert:
+    that:
+      - terrarium_cluster_wireguard_private_key_stat.stat.exists
+    fail_msg: Terrarium cluster WireGuard is enabled, but /etc/terrarium/secrets/wireguard/private.key is missing. Join through terrariumctl cluster invite/join so the local key is installed.
+  when: terrarium_cluster_wireguard_enabled | bool
+
+- name: Read local WireGuard private key
+  ansible.builtin.slurp:
+    path: /etc/terrarium/secrets/wireguard/private.key
+  register: terrarium_cluster_wireguard_private_key_raw
+  when: terrarium_cluster_wireguard_enabled | bool
+  no_log: true
+
+- name: Resolve local WireGuard public key
+  ansible.builtin.command: wg pubkey
+  args:
+    stdin: "{{ terrarium_cluster_wireguard_private_key_raw.content | b64decode }}"
+  register: terrarium_cluster_wireguard_public_key_cmd
+  changed_when: false
+  when: terrarium_cluster_wireguard_enabled | bool
+  no_log: true
+
+- name: Resolve local WireGuard member
+  ansible.builtin.set_fact:
+    terrarium_cluster_wireguard_private_key_plain: "{{ terrarium_cluster_wireguard_private_key_raw.content | b64decode | trim }}"
+    terrarium_cluster_wireguard_local_public_key: "{{ terrarium_cluster_wireguard_public_key_cmd.stdout | trim }}"
+    terrarium_cluster_wireguard_local_member: >-
+      {{
+        (
+          terrarium_cluster_wireguard_members
+          | selectattr('public_key', 'equalto', terrarium_cluster_wireguard_public_key_cmd.stdout | trim)
+          | list
+          | first
+        )
+        | default({})
+      }}
+  when: terrarium_cluster_wireguard_enabled | bool
+  no_log: true
+
+- name: Assert local WireGuard member is registered
+  ansible.builtin.assert:
+    that:
+      - terrarium_cluster_wireguard_local_member.tunnel_ip is defined
+      - terrarium_cluster_wireguard_local_member.tunnel_ip | length > 0
+    fail_msg: Local WireGuard public key is not registered in Terrarium cluster config.
+  when: terrarium_cluster_wireguard_enabled | bool
+  no_log: true
+
+- name: Use WireGuard tunnel address for clustered LXD and OVN
+  ansible.builtin.set_fact:
+    terrarium_ovn_local_address: "{{ terrarium_cluster_wireguard_local_member.tunnel_ip }}"
+  when:
+    - terrarium_cluster_enabled | bool
+    - terrarium_cluster_wireguard_enabled | bool
+
+- name: Render WireGuard mesh config
+  ansible.builtin.template:
+    src: wireguard.conf.j2
+    dest: "/etc/wireguard/{{ terrarium_cluster_wireguard_interface }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  register: terrarium_cluster_wireguard_config
+  when: terrarium_cluster_wireguard_enabled | bool
+  no_log: true
+
+- name: Enable WireGuard mesh interface
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ terrarium_cluster_wireguard_interface }}"
+    state: started
+    enabled: true
+  when: terrarium_cluster_wireguard_enabled | bool
+
+- name: Restart WireGuard mesh interface after config changes
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ terrarium_cluster_wireguard_interface }}"
+    state: restarted
+  when:
+    - terrarium_cluster_wireguard_enabled | bool
+    - terrarium_cluster_wireguard_config is changed
+
 - name: Build Terrarium local hostnames list
   ansible.builtin.set_fact:
     terrarium_local_hostnames: >-
@@ -127,6 +229,15 @@
     - "22"
     - "80"
     - "443"
+
+- name: Allow WireGuard mesh from configured peer endpoints
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ item }}"
+    port: "{{ terrarium_cluster_wireguard_port }}"
+    proto: udp
+  loop: "{{ terrarium_cluster_wireguard_endpoint_cidrs | default([]) }}"
+  when: terrarium_cluster_wireguard_enabled | bool
 
 - name: Allow LXD cluster API from configured peer networks
   community.general.ufw:

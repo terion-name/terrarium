@@ -52,21 +52,26 @@ These can be overridden with:
 
 ## Internal Cluster Ports
 
-When clustering is enabled, Terrarium only opens these ports for configured
-`terrarium_cluster_peer_cidrs`:
+When clustering is enabled, Terrarium creates a WireGuard mesh and opens
+WireGuard only for configured joining/member endpoints:
+
+- `51820/udp` for Terrarium cluster WireGuard handshakes
+
+Inside the WireGuard mesh, Terrarium only opens these ports for configured
+`terrarium_cluster_peer_cidrs`, which are normally exact tunnel IPs:
 
 - `8443/tcp` for LXD cluster/API traffic
 - `6641/tcp` for OVN northbound database traffic
 - `6642/tcp` for OVN southbound database traffic
 - `6081/udp` for OVN Geneve overlay traffic
 
-Default cluster commands store exact `/32` IPv4 or `/128` IPv6 peer CIDRs.
-Broad peer subnets are an explicit trust decision because every host in the
-range can reach the LXD/OVN control-plane ports above.
+Default cluster commands store exact `/32` tunnel CIDRs such as
+`10.255.54.2/32`. Broad peer subnets are an explicit trust decision because
+every host in the range can reach the LXD/OVN control-plane ports above.
 
 OVN database traffic uses Terrarium-managed TLS. Cluster initialization creates
 an OVN CA, each node receives a local OVN certificate during reconfiguration,
 and LXD/Open vSwitch connect to OVN northbound/southbound databases through
-`ssl:` remotes. Geneve overlay traffic on `6081/udp` is still plain OVN tunnel
-traffic; use a private network today, or a future WireGuard/IPsec transport if
-you need encryption for all workload east/west traffic.
+`ssl:` remotes. Geneve overlay traffic on `6081/udp` is plain OVN tunnel
+traffic, but it is carried inside the Terrarium WireGuard mesh in the default
+cluster design.

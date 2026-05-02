@@ -15,6 +15,7 @@ import {
   instancesFromLxcListJson,
   memoryLoadFromResourcesJson,
   normalizeClusterEndpoint,
+  nextWireGuardTunnelIp,
   ovnDbEndpoints,
   partitionDeviceForStorageSource,
   parseCsv,
@@ -24,6 +25,7 @@ import {
   selectClusterAddressCandidate,
   selectOvnCentralAddresses,
   resolveJoinStorageConfig,
+  renderWireGuardConfig,
   secondsUntilInviteCleanup,
   unjoinedExactInvitePeerCidrs
 } from "./cluster";
@@ -256,5 +258,36 @@ describe("terrariumctl cluster", () => {
     expect(ovnDbEndpoints(addresses, "6642")).toBe(
       "ssl:10.0.0.10:6642,ssl:10.0.0.11:6642,ssl:10.0.0.12:6642,ssl:[2001:db8::12]:6642"
     );
+  });
+
+  test("allocates and renders WireGuard mesh peers", () => {
+    expect(
+      nextWireGuardTunnelIp({
+        terrarium_cluster_wireguard_members: [
+          { name: "node1", public_key: "pub1", tunnel_ip: "10.255.54.1" },
+          { name: "node2", public_key: "pub2", tunnel_ip: "10.255.54.2" }
+        ]
+      })
+    ).toBe("10.255.54.3");
+
+    const config = renderWireGuardConfig({
+      address: "10.255.54.1",
+      privateKey: "private",
+      listenPort: "51820",
+      peers: [
+        {
+          name: "node2",
+          public_key: "pub2",
+          tunnel_ip: "10.255.54.2",
+          endpoint: "203.0.113.12:51820"
+        }
+      ]
+    });
+
+    expect(config).toContain("Address = 10.255.54.1/32");
+    expect(config).toContain("ListenPort = 51820");
+    expect(config).toContain("AllowedIPs = 10.255.54.2/32");
+    expect(config).toContain("Endpoint = 203.0.113.12:51820");
+    expect(config).toContain("PersistentKeepalive = 25");
   });
 });

@@ -89,8 +89,8 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/ins
 ## Private network for clustering
 
 For clustered Terrarium, create one Vultr VPC 2.0 network and attach every
-Terrarium instance to it. Use the VPC 2.0 subnet for LXD cluster traffic and
-OVN traffic.
+Terrarium instance to it. Use the VPC 2.0 subnet as the endpoint for
+Terrarium's WireGuard cluster mesh.
 
 Create a VPC 2.0 network:
 
@@ -129,19 +129,19 @@ terrariumctl cluster init
 terrariumctl cluster invite node2
 ```
 
-Then run the printed `terrariumctl cluster join --token ...` command on the new
-node. Terrarium should auto-select the VPC private address. If it does not,
-pass the private address and exact peer addresses explicitly:
+Then run the printed `terrariumctl cluster join --token ... --wireguard ...` command on the new
+node. Terrarium should auto-select the VPC private address as the WireGuard
+endpoint. If it does not, pass the private endpoint explicitly and invite peers
+by their private address:
 
 ```bash
-terrariumctl cluster init \
-  --address 10.42.0.11:8443 \
-  --peer-cidr 10.42.0.12/32
+terrariumctl cluster init --wireguard-endpoint 10.42.0.11:51820
+terrariumctl cluster invite node2 10.42.0.12
 ```
 
-Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
-restricted to exact VPC 2.0 member addresses. Only use a broader VPC subnet if
-every host in that subnet is trusted to reach the cluster control plane.
+Provider firewalls only need WireGuard `51820/udp` between exact VPC 2.0 member
+addresses. Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or
+Geneve `6081/udp`; Terrarium carries those inside WireGuard.
 
 ## Notes
 

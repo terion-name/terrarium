@@ -196,6 +196,19 @@ export class IntegrationContext {
     return new SshHost(host.server.ipv4, this.config.sshUser, this.config.sshPrivateKey, this.logger.child(host.label));
   }
 
+  async releaseHetznerHost(host: ManagedHost): Promise<void> {
+    this.logger.info(`release Hetzner host ${host.label} (${host.server.id}) before continuing`);
+    await this.hetzner.deleteServer(host.server.id);
+    await this.hetzner.waitForServerDeleted(host.server.id);
+    this.resources.removeHetznerServer(host.server.id);
+
+    if (host.volume) {
+      this.logger.info(`release Hetzner volume ${host.volume.id} for ${host.label}`);
+      await this.hetzner.deleteVolume(host.volume.id);
+      this.resources.removeHetznerVolume(host.volume.id);
+    }
+  }
+
   registerCleanup(task: CleanupTask): void {
     this.cleanupTasks.unshift(task);
   }

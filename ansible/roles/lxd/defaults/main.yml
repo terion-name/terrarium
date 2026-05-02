@@ -3,6 +3,7 @@ terrarium_lxd_auth_group: terrarium-management
 terrarium_lxd_oidc_groups_claim: groups
 terrarium_lxd_idp_group_state_path: "{{ terrarium_state_dir }}/lxd-idp-admin-group"
 terrarium_cluster_enabled: false
+terrarium_cluster_wireguard_enabled: false
 terrarium_lxd_network_parent: lxdbr0
 terrarium_lxd_network_name: terrarium-ovn
 terrarium_lxd_parent_ipv4: 10.154.0.1/24
