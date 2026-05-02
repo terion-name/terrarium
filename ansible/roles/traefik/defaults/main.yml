@@ -1,2 +1,7 @@
 terrarium_traefik_config_dir: /etc/traefik
 terrarium_traefik_version: v3.6.7
+terrarium_traefik_download_dir: /var/lib/terrarium/downloads/traefik
+terrarium_traefik_stage_dir: /var/lib/terrarium/staging/traefik
+terrarium_traefik_sha256:
+  amd64: 15d07937d366abeea2bf99b30e4d4ae8886dc95db938c61a38f28d74a47fc9d4
+  arm64: ac7011bf8418f5024730a1306d9f28ab099c65462906e598226d9a8abfe4bdb7

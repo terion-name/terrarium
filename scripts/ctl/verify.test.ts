@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { verifyOidcConfig } from "./verify";
 
 const originalFetch = globalThis.fetch;
@@ -92,5 +94,21 @@ describe("OIDC verification", () => {
     }) as typeof fetch;
 
     await expect(verifyOidcConfig(oidcOptions())).resolves.toBeUndefined();
+  });
+});
+
+describe("AWS CLI fallback installer", () => {
+  test("uses a pinned archive and private staging directories", () => {
+    const source = readFileSync(join(import.meta.dir, "verify.ts"), "utf8");
+
+    expect(source).toContain('const AWS_CLI_VERSION = "2.34.41"');
+    expect(source).toContain('const AWS_CLI_DOWNLOAD_DIR = "/var/lib/terrarium/downloads/awscli"');
+    expect(source).toContain('const AWS_CLI_STAGE_DIR = "/var/lib/terrarium/staging/awscli"');
+    expect(source).toContain("AWS_CLI_SHA256");
+    expect(source).toContain("validateAwsCliArchive");
+    expect(source).toContain("validateAwsCliZipPath");
+    expect(source).toContain("unsafe AWS CLI archive member type");
+    expect(source).toContain("awscli-exe-linux-${fallbackArch}-${AWS_CLI_VERSION}.zip");
+    expect(source).not.toContain("terrarium-awscli-install-");
   });
 });

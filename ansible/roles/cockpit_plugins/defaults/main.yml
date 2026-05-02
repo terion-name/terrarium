@@ -17,8 +17,18 @@ terrarium_cockpit_plugin_build_deps:
 
 terrarium_cockpit_plugin_bundle_enabled: true
 terrarium_cockpit_plugin_bundle_repo: terion-name/terrarium
+terrarium_cockpit_plugin_download_dir: /var/lib/terrarium/downloads/cockpit-plugins
+terrarium_cockpit_plugin_stage_dir: /var/lib/terrarium/staging/cockpit-plugins
 
 terrarium_cockpit_zfs_repo: https://github.com/45Drives/cockpit-zfs.git
 terrarium_cockpit_zfs_ref: v1.2.21-3
+terrarium_cockpit_zfs_commit: fa79a92adc73199645a16dce6cba0cf47819610f
+terrarium_cockpit_zfs_bundle_sha256:
+  amd64: f422e117c408ddbfcadb98af74a534a727bec081e0095ec31bd8198f2bd6e875
+  arm64: e450efc4a81886569fc8f85366114954a877064c8aa6d733bf12742fb16b6eca
 terrarium_cockpit_s3_repo: https://github.com/45Drives/cockpit-S3ObjectBroswer.git
 terrarium_cockpit_s3_ref: v1.1.0-6
+terrarium_cockpit_s3_commit: 62dccc3cd1954530ce4144d0d4d0a20616456107
+terrarium_cockpit_s3_bundle_sha256:
+  amd64: c817ef61b4bd66f700078c6a1d902ed0552634105bff458761413a0cfd3fc07c
+  arm64: cc7fcf3b463dd9efa7e92a0a1e71c8905d82f06c2d7e6d7e5a6f44370e7d4292

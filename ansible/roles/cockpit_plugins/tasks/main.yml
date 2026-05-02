@@ -31,12 +31,21 @@
   ansible.builtin.set_fact:
     terrarium_cockpit_zfs_bundle_url: >-
       https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_zfs_bundle_release }}/{{ terrarium_cockpit_zfs_bundle_filename }}
-    terrarium_cockpit_zfs_bundle_checksum_url: >-
-      https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_zfs_bundle_release }}/{{ terrarium_cockpit_zfs_bundle_filename }}.sha256
     terrarium_cockpit_s3_bundle_url: >-
       https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_s3_bundle_release }}/{{ terrarium_cockpit_s3_bundle_filename }}
-    terrarium_cockpit_s3_bundle_checksum_url: >-
-      https://github.com/{{ terrarium_cockpit_plugin_bundle_repo }}/releases/download/{{ terrarium_cockpit_s3_bundle_release }}/{{ terrarium_cockpit_s3_bundle_filename }}.sha256
+    terrarium_cockpit_zfs_bundle_checksum: "{{ terrarium_cockpit_zfs_bundle_sha256[terrarium_cockpit_plugin_bundle_arch] | default('') }}"
+    terrarium_cockpit_s3_bundle_checksum: "{{ terrarium_cockpit_s3_bundle_sha256[terrarium_cockpit_plugin_bundle_arch] | default('') }}"
+
+- name: Create private Cockpit plugin bundle work directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ terrarium_cockpit_plugin_download_dir }}"
+    - "{{ terrarium_cockpit_plugin_stage_dir }}"
 
 - name: Check cockpit-zfs install
   ansible.builtin.stat:
@@ -51,26 +60,32 @@
 - name: Download prebuilt cockpit-zfs bundle
   ansible.builtin.get_url:
     url: "{{ terrarium_cockpit_zfs_bundle_url }}"
-    dest: "/tmp/{{ terrarium_cockpit_zfs_bundle_release }}-{{ terrarium_cockpit_zfs_bundle_filename }}"
-    checksum: "sha256:{{ terrarium_cockpit_zfs_bundle_checksum_url }}"
-    mode: "0644"
+    dest: "{{ terrarium_cockpit_plugin_download_dir }}/{{ terrarium_cockpit_zfs_bundle_release }}-{{ terrarium_cockpit_zfs_bundle_filename }}"
+    checksum: "sha256:{{ terrarium_cockpit_zfs_bundle_checksum }}"
+    owner: root
+    group: root
+    mode: "0600"
   register: terrarium_cockpit_zfs_bundle_download
   ignore_errors: true
   when:
     - terrarium_cockpit_plugin_bundle_enabled
     - terrarium_cockpit_plugin_bundle_arch | length > 0
+    - terrarium_cockpit_zfs_bundle_checksum | length > 0
 
 - name: Download prebuilt cockpit-s3 bundle
   ansible.builtin.get_url:
     url: "{{ terrarium_cockpit_s3_bundle_url }}"
-    dest: "/tmp/{{ terrarium_cockpit_s3_bundle_release }}-{{ terrarium_cockpit_s3_bundle_filename }}"
-    checksum: "sha256:{{ terrarium_cockpit_s3_bundle_checksum_url }}"
-    mode: "0644"
+    dest: "{{ terrarium_cockpit_plugin_download_dir }}/{{ terrarium_cockpit_s3_bundle_release }}-{{ terrarium_cockpit_s3_bundle_filename }}"
+    checksum: "sha256:{{ terrarium_cockpit_s3_bundle_checksum }}"
+    owner: root
+    group: root
+    mode: "0600"
   register: terrarium_cockpit_s3_bundle_download
   ignore_errors: true
   when:
     - terrarium_cockpit_plugin_bundle_enabled
     - terrarium_cockpit_plugin_bundle_arch | length > 0
+    - terrarium_cockpit_s3_bundle_checksum | length > 0
 
 - name: Check downloaded cockpit-zfs bundle
   ansible.builtin.stat:
@@ -88,29 +103,69 @@
     - terrarium_cockpit_s3_bundle_download is defined
     - terrarium_cockpit_s3_bundle_download.dest is defined
 
-- name: Inspect prebuilt cockpit-zfs bundle paths
-  ansible.builtin.command:
-    argv:
-      - tar
-      - -tzf
-      - "{{ terrarium_cockpit_zfs_bundle_download.dest }}"
+- name: Validate prebuilt cockpit-zfs bundle metadata
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_cockpit_zfs_bundle_download.dest }}"
+    allowed="usr/share/cockpit/zfs"
+
+    tar -tzf "$archive" | while IFS= read -r member; do
+      [ -n "$member" ] || continue
+      case "$member" in
+        /*|../*|*/../*|*/..|..)
+          echo "unsafe archive member path: $member" >&2
+          exit 1
+          ;;
+      esac
+      case "$member" in
+        "$allowed"|"$allowed"/*) ;;
+        *)
+          echo "archive member outside $allowed: $member" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    tar -tvzf "$archive" | awk '$1 ~ /^[hlbcps]/ { print "unsafe archive member type: " $0 > "/dev/stderr"; bad = 1 } END { exit bad ? 1 : 0 }'
   register: terrarium_cockpit_zfs_bundle_paths
   changed_when: false
   ignore_errors: true
+  args:
+    executable: /bin/bash
   when:
     - terrarium_cockpit_zfs_bundle_download is defined
     - terrarium_cockpit_zfs_bundle_download.dest is defined
     - terrarium_cockpit_zfs_bundle_file.stat.exists | default(false)
 
-- name: Inspect prebuilt cockpit-s3 bundle paths
-  ansible.builtin.command:
-    argv:
-      - tar
-      - -tzf
-      - "{{ terrarium_cockpit_s3_bundle_download.dest }}"
+- name: Validate prebuilt cockpit-s3 bundle metadata
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_cockpit_s3_bundle_download.dest }}"
+    allowed="usr/share/cockpit/cockpit-s3-browser"
+
+    tar -tzf "$archive" | while IFS= read -r member; do
+      [ -n "$member" ] || continue
+      case "$member" in
+        /*|../*|*/../*|*/..|..)
+          echo "unsafe archive member path: $member" >&2
+          exit 1
+          ;;
+      esac
+      case "$member" in
+        "$allowed"|"$allowed"/*) ;;
+        *)
+          echo "archive member outside $allowed: $member" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    tar -tvzf "$archive" | awk '$1 ~ /^[hlbcps]/ { print "unsafe archive member type: " $0 > "/dev/stderr"; bad = 1 } END { exit bad ? 1 : 0 }'
   register: terrarium_cockpit_s3_bundle_paths
   changed_when: false
   ignore_errors: true
+  args:
+    executable: /bin/bash
   when:
     - terrarium_cockpit_s3_bundle_download is defined
     - terrarium_cockpit_s3_bundle_download.dest is defined
@@ -127,19 +182,6 @@
         and (terrarium_cockpit_zfs_bundle_file.stat.size | default(0) | int) > 0
         and terrarium_cockpit_zfs_bundle_paths is defined
         and terrarium_cockpit_zfs_bundle_paths is succeeded
-        and (terrarium_cockpit_zfs_bundle_paths.stdout_lines | default([]) | length) > 0
-        and (
-          terrarium_cockpit_zfs_bundle_paths.stdout_lines | default([])
-          | reject('match', '^usr/share/cockpit/zfs(/|$)')
-          | list
-          | length
-        ) == 0
-        and (
-          terrarium_cockpit_zfs_bundle_paths.stdout_lines | default([])
-          | select('search', '(^|/)\\.\\.(/|$)')
-          | list
-          | length
-        ) == 0
       }}
 
 - name: Determine whether prebuilt cockpit-s3 bundle is usable
@@ -153,35 +195,34 @@
         and (terrarium_cockpit_s3_bundle_file.stat.size | default(0) | int) > 0
         and terrarium_cockpit_s3_bundle_paths is defined
         and terrarium_cockpit_s3_bundle_paths is succeeded
-        and (terrarium_cockpit_s3_bundle_paths.stdout_lines | default([]) | length) > 0
-        and (
-          terrarium_cockpit_s3_bundle_paths.stdout_lines | default([])
-          | reject('match', '^usr/share/cockpit/cockpit-s3-browser(/|$)')
-          | list
-          | length
-        ) == 0
-        and (
-          terrarium_cockpit_s3_bundle_paths.stdout_lines | default([])
-          | select('search', '(^|/)\\.\\.(/|$)')
-          | list
-          | length
-        ) == 0
       }}
 
 - name: Install prebuilt cockpit-zfs bundle
-  ansible.builtin.unarchive:
-    src: "{{ terrarium_cockpit_zfs_bundle_download.dest }}"
-    dest: /
-    remote_src: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_cockpit_zfs_bundle_download.dest }}"
+    stage="{{ terrarium_cockpit_plugin_stage_dir }}/zfs"
+    rm -rf "$stage"
+    mkdir -p "$stage" /usr/share/cockpit/zfs
+    tar -xzf "$archive" -C "$stage" --no-same-owner --no-same-permissions
+    rsync -a --delete --chown=root:root "$stage/usr/share/cockpit/zfs/" /usr/share/cockpit/zfs/
+  args:
+    executable: /bin/bash
   when:
     - terrarium_cockpit_zfs_bundle_usable | default(false)
     - terrarium_cockpit_zfs_bundle_download.changed or not terrarium_cockpit_zfs_installed.stat.exists
 
 - name: Install prebuilt cockpit-s3 bundle
-  ansible.builtin.unarchive:
-    src: "{{ terrarium_cockpit_s3_bundle_download.dest }}"
-    dest: /
-    remote_src: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_cockpit_s3_bundle_download.dest }}"
+    stage="{{ terrarium_cockpit_plugin_stage_dir }}/s3"
+    rm -rf "$stage"
+    mkdir -p "$stage" /usr/share/cockpit/cockpit-s3-browser
+    tar -xzf "$archive" -C "$stage" --no-same-owner --no-same-permissions
+    rsync -a --delete --chown=root:root "$stage/usr/share/cockpit/cockpit-s3-browser/" /usr/share/cockpit/cockpit-s3-browser/
+  args:
+    executable: /bin/bash
   when:
     - terrarium_cockpit_s3_bundle_usable | default(false)
     - terrarium_cockpit_s3_bundle_download.changed or not terrarium_cockpit_s3_installed.stat.exists
@@ -218,6 +259,15 @@
   register: terrarium_cockpit_zfs_checkout
   when: not (terrarium_cockpit_zfs_bundle_usable | default(false))
 
+- name: Verify cockpit-zfs source commit
+  ansible.builtin.command: git rev-parse HEAD
+  args:
+    chdir: /usr/local/src/cockpit-zfs
+  register: terrarium_cockpit_zfs_source_commit
+  changed_when: false
+  failed_when: terrarium_cockpit_zfs_source_commit.stdout | trim != terrarium_cockpit_zfs_commit
+  when: not (terrarium_cockpit_zfs_bundle_usable | default(false))
+
 - name: Pin cockpit-zfs source bootstrap to the declared Yarn release
   ansible.builtin.shell: |
     set -euo pipefail
@@ -248,6 +298,15 @@
     version: "{{ terrarium_cockpit_s3_ref }}"
     force: true
   register: terrarium_cockpit_s3_checkout
+  when: not (terrarium_cockpit_s3_bundle_usable | default(false))
+
+- name: Verify cockpit-S3ObjectBroswer source commit
+  ansible.builtin.command: git rev-parse HEAD
+  args:
+    chdir: /usr/local/src/cockpit-S3ObjectBroswer
+  register: terrarium_cockpit_s3_source_commit
+  changed_when: false
+  failed_when: terrarium_cockpit_s3_source_commit.stdout | trim != terrarium_cockpit_s3_commit
   when: not (terrarium_cockpit_s3_bundle_usable | default(false))
 
 - name: Pin cockpit-S3ObjectBroswer source bootstrap to the declared Yarn release

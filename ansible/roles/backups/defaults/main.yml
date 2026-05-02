@@ -1,1 +1,7 @@
 terrarium_sanoid_recursion_root: "{{ terrarium_lxd_pool_name }}/containers"
+terrarium_awscli_version: "2.34.41"
+terrarium_awscli_download_dir: /var/lib/terrarium/downloads/awscli
+terrarium_awscli_stage_dir: /var/lib/terrarium/staging/awscli
+terrarium_awscli_sha256:
+  x86_64: 634b14ec79f0437d5f82562365532bb79f106478fa472fc199aa24fde10023d4
+  aarch64: b531b7def2b11646bd494f0e79dd1867d7c6b22c1ed0b59ff56f16dee6ca118b

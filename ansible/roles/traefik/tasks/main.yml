@@ -8,28 +8,71 @@
         }[ansible_architecture]
       }}
 
+- name: Compute Traefik release archive metadata
+  ansible.builtin.set_fact:
+    terrarium_traefik_archive: "traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
+    terrarium_traefik_archive_checksum: "{{ terrarium_traefik_sha256[terrarium_traefik_arch] }}"
+
+- name: Create private Traefik release work directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ terrarium_traefik_download_dir }}"
+    - "{{ terrarium_traefik_stage_dir }}"
+
 - name: Download Traefik release archive
   ansible.builtin.get_url:
-    url: "https://github.com/traefik/traefik/releases/download/{{ terrarium_traefik_version }}/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
-    dest: "/tmp/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
-    mode: "0644"
+    url: "https://github.com/traefik/traefik/releases/download/{{ terrarium_traefik_version }}/{{ terrarium_traefik_archive }}"
+    dest: "{{ terrarium_traefik_download_dir }}/{{ terrarium_traefik_archive }}"
+    checksum: "sha256:{{ terrarium_traefik_archive_checksum }}"
+    owner: root
+    group: root
+    mode: "0600"
   register: terrarium_traefik_download
   until: terrarium_traefik_download is succeeded
   retries: 5
   delay: 10
 
-- name: Extract Traefik binary
-  ansible.builtin.unarchive:
-    src: "/tmp/traefik_{{ terrarium_traefik_version }}_linux_{{ terrarium_traefik_arch }}.tar.gz"
-    dest: /tmp
-    remote_src: true
+- name: Validate Traefik release archive metadata
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_traefik_download.dest }}"
+    tar -tzf "$archive" | while IFS= read -r member; do
+      [ -n "$member" ] || continue
+      case "$member" in
+        /*|../*|*/../*|*/..|..)
+          echo "unsafe archive member path: $member" >&2
+          exit 1
+          ;;
+      esac
+      case "$member" in
+        traefik|CHANGELOG.md|LICENSE.md) ;;
+        *)
+          echo "unexpected Traefik archive member: $member" >&2
+          exit 1
+          ;;
+      esac
+    done
+    tar -tvzf "$archive" | awk '$1 ~ /^[hlbcps]/ { print "unsafe archive member type: " $0 > "/dev/stderr"; bad = 1 } END { exit bad ? 1 : 0 }'
+  args:
+    executable: /bin/bash
+  changed_when: false
 
 - name: Install Traefik binary
-  ansible.builtin.copy:
-    src: /tmp/traefik
-    dest: /usr/local/bin/traefik
-    mode: "0755"
-    remote_src: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_traefik_download.dest }}"
+    stage="{{ terrarium_traefik_stage_dir }}/{{ terrarium_traefik_version }}-{{ terrarium_traefik_arch }}"
+    rm -rf "$stage"
+    mkdir -p "$stage"
+    tar -xzf "$archive" -C "$stage" --no-same-owner --no-same-permissions
+    install -o root -g root -m 0755 "$stage/traefik" /usr/local/bin/traefik
+  args:
+    executable: /bin/bash
 
 - name: Install Traefik systemd service
   ansible.builtin.template:

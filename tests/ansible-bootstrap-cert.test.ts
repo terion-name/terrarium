@@ -70,4 +70,23 @@ describe("Traefik bootstrap certificate template", () => {
     expect(tasks).toContain("until: terrarium_traefik_download is succeeded");
     expect(tasks).toContain("retries: 5");
   });
+
+  test("installs Traefik from a pinned archive through private staging", () => {
+    const defaults = readFileSync(join(repoRoot, "ansible/roles/traefik/defaults/main.yml"), "utf8");
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/traefik/tasks/main.yml"), "utf8");
+
+    expect(defaults).toContain("terrarium_traefik_download_dir: /var/lib/terrarium/downloads/traefik");
+    expect(defaults).toContain("terrarium_traefik_stage_dir: /var/lib/terrarium/staging/traefik");
+    expect(defaults).toContain("terrarium_traefik_sha256:");
+    expect(tasks).toContain("Create private Traefik release work directories");
+    expect(tasks).toContain('mode: "0700"');
+    expect(tasks).toContain("checksum: \"sha256:{{ terrarium_traefik_archive_checksum }}\"");
+    expect(tasks).toContain("Validate Traefik release archive metadata");
+    expect(tasks).toContain("unexpected Traefik archive member");
+    expect(tasks).toContain("tar -tvzf \"$archive\" | awk '$1 ~ /^[hlbcps]/");
+    expect(tasks).toContain("install -o root -g root -m 0755");
+    expect(tasks).not.toContain("dest: /tmp");
+    expect(tasks).not.toContain("src: /tmp/traefik");
+    expect(tasks).not.toContain("ansible.builtin.unarchive");
+  });
 });

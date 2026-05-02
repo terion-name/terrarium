@@ -30,6 +30,14 @@
     - terrarium_enable_s3
     - terrarium_awscli_apt_install is failed
 
+- name: Compute AWS CLI fallback archive metadata
+  ansible.builtin.set_fact:
+    terrarium_awscli_archive: "awscli-exe-linux-{{ terrarium_awscli_arch }}-{{ terrarium_awscli_version }}.zip"
+    terrarium_awscli_archive_checksum: "{{ terrarium_awscli_sha256[terrarium_awscli_arch] }}"
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
 - name: Install AWS CLI fallback prerequisites
   ansible.builtin.apt:
     name:
@@ -39,35 +47,85 @@
     - terrarium_enable_s3
     - terrarium_awscli_apt_install is failed
 
+- name: Create private AWS CLI fallback work directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ terrarium_awscli_download_dir }}"
+    - "{{ terrarium_awscli_stage_dir }}"
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
 - name: Download AWS CLI v2 fallback archive
   ansible.builtin.get_url:
-    url: "https://awscli.amazonaws.com/awscli-exe-linux-{{ terrarium_awscli_arch }}.zip"
-    dest: "/tmp/awscliv2-{{ terrarium_awscli_arch }}.zip"
-    mode: "0644"
+    url: "https://awscli.amazonaws.com/{{ terrarium_awscli_archive }}"
+    dest: "{{ terrarium_awscli_download_dir }}/{{ terrarium_awscli_archive }}"
+    checksum: "sha256:{{ terrarium_awscli_archive_checksum }}"
+    owner: root
+    group: root
+    mode: "0600"
   when:
     - terrarium_enable_s3
     - terrarium_awscli_apt_install is failed
 
 - name: Remove extracted AWS CLI fallback directory
   ansible.builtin.file:
-    path: /tmp/awscliv2
+    path: "{{ terrarium_awscli_stage_dir }}/aws"
     state: absent
   when:
     - terrarium_enable_s3
     - terrarium_awscli_apt_install is failed
 
-- name: Extract AWS CLI v2 fallback archive
-  ansible.builtin.unarchive:
-    src: "/tmp/awscliv2-{{ terrarium_awscli_arch }}.zip"
-    dest: /tmp
-    remote_src: true
+- name: Validate AWS CLI v2 fallback archive metadata
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive="{{ terrarium_awscli_download_dir }}/{{ terrarium_awscli_archive }}"
+
+    unzip -Z1 "$archive" | while IFS= read -r member; do
+      [ -n "$member" ] || continue
+      case "$member" in
+        /*|../*|*/../*|*/..|..)
+          echo "unsafe archive member path: $member" >&2
+          exit 1
+          ;;
+      esac
+      case "$member" in
+        aws|aws/*) ;;
+        *)
+          echo "archive member outside aws installer tree: $member" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    unzip -Zl "$archive" | awk '$1 ~ /^[lbcps]/ { print "unsafe archive member type: " $0 > "/dev/stderr"; bad = 1 } END { exit bad ? 1 : 0 }'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - terrarium_enable_s3
+    - terrarium_awscli_apt_install is failed
+
+- name: Extract AWS CLI v2 fallback archive into private staging
+  ansible.builtin.command:
+    argv:
+      - unzip
+      - -q
+      - "{{ terrarium_awscli_download_dir }}/{{ terrarium_awscli_archive }}"
+      - -d
+      - "{{ terrarium_awscli_stage_dir }}"
   when:
     - terrarium_enable_s3
     - terrarium_awscli_apt_install is failed
 
 - name: Install AWS CLI v2 fallback
   ansible.builtin.command:
-    cmd: /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+    cmd: "{{ terrarium_awscli_stage_dir }}/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update"
   when:
     - terrarium_enable_s3
     - terrarium_awscli_apt_install is failed

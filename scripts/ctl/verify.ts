@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { normalizeS3Endpoint, runAllowFailure } from "../lib/common";
@@ -25,6 +25,65 @@ export type OidcVerificationOptions = {
   lxdDomain: string;
 };
 
+const AWS_CLI_VERSION = "2.34.41";
+const AWS_CLI_DOWNLOAD_DIR = "/var/lib/terrarium/downloads/awscli";
+const AWS_CLI_STAGE_DIR = "/var/lib/terrarium/staging/awscli";
+const AWS_CLI_SHA256: Record<string, string> = {
+  x86_64: "634b14ec79f0437d5f82562365532bb79f106478fa472fc199aa24fde10023d4",
+  aarch64: "b531b7def2b11646bd494f0e79dd1867d7c6b22c1ed0b59ff56f16dee6ca118b"
+};
+
+function ensurePrivateDirectory(path: string): void {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  chmodSync(path, 0o700);
+}
+
+async function runAwsInstallerStep(cmd: string[], message: string): Promise<void> {
+  const result = await runAllowFailure(cmd);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || message);
+  }
+}
+
+function validateAwsCliZipPath(member: string): void {
+  if (!member) {
+    return;
+  }
+  if (member.startsWith("/") || member === ".." || member.startsWith("../") || member.endsWith("/..") || member.includes("/../")) {
+    throw new Error(`unsafe AWS CLI archive member path: ${member}`);
+  }
+  if (member !== "aws" && !member.startsWith("aws/")) {
+    throw new Error(`AWS CLI archive member outside installer tree: ${member}`);
+  }
+}
+
+async function validateAwsCliArchive(archivePath: string, expectedSha256: string): Promise<void> {
+  const checksum = await runAllowFailure(["sha256sum", archivePath]);
+  const actualSha256 = checksum.stdout.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (checksum.exitCode !== 0 || actualSha256 !== expectedSha256) {
+    throw new Error(`AWS CLI archive checksum mismatch for ${archivePath}`);
+  }
+
+  const names = await runAllowFailure(["unzip", "-Z1", archivePath]);
+  if (names.exitCode !== 0) {
+    throw new Error(names.stderr.trim() || names.stdout.trim() || "failed to inspect AWS CLI fallback archive");
+  }
+  for (const member of names.stdout.split(/\r?\n/)) {
+    validateAwsCliZipPath(member.trim());
+  }
+
+  const details = await runAllowFailure(["unzip", "-Zl", archivePath]);
+  if (details.exitCode !== 0) {
+    throw new Error(details.stderr.trim() || details.stdout.trim() || "failed to inspect AWS CLI fallback archive metadata");
+  }
+  for (const line of details.stdout.split(/\r?\n/)) {
+    const mode = line.trim().split(/\s+/)[0] ?? "";
+    if (/^[lbcps]/.test(mode)) {
+      throw new Error(`unsafe AWS CLI archive member type: ${line.trim()}`);
+    }
+  }
+}
+
 /**
  * Ensures the AWS CLI is available before Terrarium performs S3 verification.
  *
@@ -44,51 +103,47 @@ async function ensureAwsCli(): Promise<void> {
   const fallbackArch = ({ x64: "x86_64", x86_64: "x86_64", amd64: "x86_64", aarch64: "aarch64", arm64: "aarch64" } as Record<string, string>)[
     process.arch
   ] ?? process.arch;
-  const tempDir = mkdtempSync(join(tmpdir(), "terrarium-awscli-install-"));
-  const archivePath = join(tempDir, `awscliv2-${fallbackArch}.zip`);
+  const expectedSha256 = AWS_CLI_SHA256[fallbackArch];
+  if (!expectedSha256) {
+    throw new Error(`unsupported AWS CLI fallback architecture: ${fallbackArch}`);
+  }
+
+  ensurePrivateDirectory(AWS_CLI_DOWNLOAD_DIR);
+  ensurePrivateDirectory(AWS_CLI_STAGE_DIR);
+  const archivePath = join(AWS_CLI_DOWNLOAD_DIR, `awscli-exe-linux-${fallbackArch}-${AWS_CLI_VERSION}.zip`);
+  const stageDir = mkdtempSync(join(AWS_CLI_STAGE_DIR, "awscli-"));
 
   try {
-    const update = await runAllowFailure(["apt-get", "update", "-y"]);
-    if (update.exitCode !== 0) {
-      throw new Error(update.stderr.trim() || update.stdout.trim() || "apt-get update failed");
-    }
-
-    const prereqs = await runAllowFailure(["apt-get", "install", "-y", "curl", "unzip"]);
-    if (prereqs.exitCode !== 0) {
-      throw new Error(prereqs.stderr.trim() || prereqs.stdout.trim() || "failed to install AWS CLI installer prerequisites");
-    }
-
-    const download = await runAllowFailure([
-      "curl",
-      "-fsSL",
-      `https://awscli.amazonaws.com/awscli-exe-linux-${fallbackArch}.zip`,
-      "-o",
-      archivePath
-    ]);
-    if (download.exitCode !== 0) {
-      throw new Error(download.stderr.trim() || download.stdout.trim() || "failed to download AWS CLI fallback archive");
-    }
-
-    const extract = await runAllowFailure(["unzip", "-q", archivePath, "-d", tempDir]);
-    if (extract.exitCode !== 0) {
-      throw new Error(extract.stderr.trim() || extract.stdout.trim() || "failed to extract AWS CLI fallback archive");
-    }
-
-    const fallbackInstall = await runAllowFailure([
-      join(tempDir, "aws", "install"),
-      "--bin-dir",
-      "/usr/local/bin",
-      "--install-dir",
-      "/usr/local/aws-cli",
-      "--update"
-    ]);
-    if (fallbackInstall.exitCode !== 0) {
-      throw new Error(fallbackInstall.stderr.trim() || fallbackInstall.stdout.trim() || "failed to install AWS CLI");
-    }
+    await runAwsInstallerStep(["apt-get", "update", "-y"], "apt-get update failed");
+    await runAwsInstallerStep(["apt-get", "install", "-y", "curl", "unzip"], "failed to install AWS CLI installer prerequisites");
+    await runAwsInstallerStep(
+      [
+        "curl",
+        "-fsSL",
+        `https://awscli.amazonaws.com/awscli-exe-linux-${fallbackArch}-${AWS_CLI_VERSION}.zip`,
+        "-o",
+        archivePath
+      ],
+      "failed to download AWS CLI fallback archive"
+    );
+    chmodSync(archivePath, 0o600);
+    await validateAwsCliArchive(archivePath, expectedSha256);
+    await runAwsInstallerStep(["unzip", "-q", archivePath, "-d", stageDir], "failed to extract AWS CLI fallback archive");
+    await runAwsInstallerStep(
+      [
+        join(stageDir, "aws", "install"),
+        "--bin-dir",
+        "/usr/local/bin",
+        "--install-dir",
+        "/usr/local/aws-cli",
+        "--update"
+      ],
+      "failed to install AWS CLI"
+    );
   } catch (error) {
     throw new Error(`failed to install awscli: ${String(error).replace(/^Error: /, "")}`);
   } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(stageDir, { recursive: true, force: true });
   }
 }
 
