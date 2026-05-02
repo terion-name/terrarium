@@ -36,6 +36,19 @@ describe("config store reconciliation", () => {
   });
 });
 
+describe("terrariumctl install alias", () => {
+  test("installs trm as a shorthand symlink to the installed CLI", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("Inspect existing terrariumctl shorthand alias");
+    expect(tasks).toContain("Install terrariumctl shorthand alias");
+    expect(tasks).toContain("src: /usr/local/bin/terrariumctl");
+    expect(tasks).toContain("dest: /usr/local/bin/trm");
+    expect(tasks).toContain("state: link");
+    expect(tasks).toContain("leaving it untouched");
+  });
+});
+
 describe("terrariumctl mount defaults", () => {
   test("disable client-side CIFS permission checks for single-credential managed mounts", () => {
     const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");

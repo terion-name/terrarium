@@ -243,6 +243,7 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
   ].join(" && ");
   await ssh.execDetached(installCommand, remoteScriptPath, remoteStatusPath, remoteLogPath);
   await waitForDetachedCommand(ssh, remoteStatusPath, remoteLogPath, 45 * 60 * 1000);
+  await ssh.exec("test -L /usr/local/bin/trm && /usr/local/bin/trm status >/dev/null");
 }
 
 /** Returns the local ZITADEL bootstrap credentials from an installed Terrarium host. */

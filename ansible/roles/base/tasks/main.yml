@@ -46,6 +46,35 @@
     mode: "0755"
     remote_src: true
 
+- name: Inspect existing terrariumctl shorthand alias
+  ansible.builtin.stat:
+    path: /usr/local/bin/trm
+    follow: false
+  register: terrarium_trm_alias
+
+- name: Install terrariumctl shorthand alias
+  ansible.builtin.file:
+    src: /usr/local/bin/terrariumctl
+    dest: /usr/local/bin/trm
+    state: link
+    force: true
+  when: >-
+    not terrarium_trm_alias.stat.exists
+    or (
+      terrarium_trm_alias.stat.islnk | default(false)
+      and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
+    )
+
+- name: Warn when terrariumctl shorthand alias is unavailable
+  ansible.builtin.debug:
+    msg: /usr/local/bin/trm already exists and is not managed by Terrarium; leaving it untouched.
+  when: >-
+    terrarium_trm_alias.stat.exists
+    and not (
+      terrarium_trm_alias.stat.islnk | default(false)
+      and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
+    )
+
 - name: Ensure root has a local password for Cockpit
   ansible.builtin.user:
     name: root
