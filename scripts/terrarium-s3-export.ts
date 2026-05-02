@@ -37,15 +37,25 @@ function s3Env(config: Record<string, unknown>): Record<string, string> {
   return env;
 }
 
-async function latestSnapshot(dataset: string): Promise<string> {
-  const stdout = await runText(["zfs", "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation"], PREFIX);
+export function chooseLatestExportSnapshot(snapshotNames: string[], dataset: string): string {
   let latest = "";
-  for (const line of stdout.split("\n")) {
-    if (line.startsWith(`${dataset}@`)) {
-      latest = line.trim();
+  for (const snapshot of snapshotNames) {
+    const trimmed = snapshot.trim();
+    if (!trimmed.startsWith(`${dataset}@`)) {
+      continue;
     }
+    const snapshotName = trimmed.split("@").at(-1) ?? "";
+    if (/(^|_)frequently$/.test(snapshotName)) {
+      continue;
+    }
+    latest = trimmed;
   }
   return latest;
+}
+
+async function latestSnapshot(dataset: string): Promise<string> {
+  const stdout = await runText(["zfs", "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation"], PREFIX);
+  return chooseLatestExportSnapshot(stdout.split("\n"), dataset);
 }
 
 export function isRetriableS3ExportError(message: string): boolean {

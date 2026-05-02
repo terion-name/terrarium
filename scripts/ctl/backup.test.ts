@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { rewriteRecoveredBackupMetadata } from "./backup";
-import { isRetriableS3ExportError } from "../terrarium-s3-export";
+import { chooseLatestExportSnapshot, isRetriableS3ExportError } from "../terrarium-s3-export";
 
 describe("backup restore metadata", () => {
   test("classifies transient S3 export errors for retry", () => {
@@ -11,6 +11,20 @@ describe("backup restore metadata", () => {
     ).toBe(true);
     expect(isRetriableS3ExportError("An error occurred (SlowDown) when calling the PutObject operation")).toBe(true);
     expect(isRetriableS3ExportError("An error occurred (InvalidAccessKeyId) when calling the PutObject operation")).toBe(false);
+  });
+
+  test("does not export short-lived frequent snapshots as backup chain parents", () => {
+    expect(
+      chooseLatestExportSnapshot(
+        [
+          "terrarium/containers/app@autosnap_2026-05-02_12:00:00_hourly",
+          "terrarium/containers/app@autosnap_2026-05-02_12:15:00_frequently",
+          "terrarium/containers/app@manual-keep",
+          "terrarium/containers/other@autosnap_2026-05-02_12:30:00_hourly"
+        ],
+        "terrarium/containers/app"
+      )
+    ).toBe("terrarium/containers/app@manual-keep");
   });
 
   test("renames restored LXD metadata and removes generated identity", () => {
