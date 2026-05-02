@@ -15,8 +15,8 @@
 | `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
 | `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
 | `terrariumctl cluster status` | none | n/a | Shows LXD cluster state and the Terrarium OVN workload network. |
-| `terrariumctl cluster init` | optional: `--member`, `--address`, `--central-addresses`, `--peer-cidr` | member from hostname, address/private peer CIDR auto-discovered when possible | Enables LXD clustering on the first member and reconciles Terrarium cluster networking. |
-| `terrariumctl cluster invite` | required: member name | n/a | Mints a single-use LXD cluster join token and prints the simplified join command for the new member. |
+| `terrariumctl cluster init` | optional: `--member`, `--address`, `--central-addresses`, `--peer-cidr` | member from hostname, address/exact local peer CIDR auto-discovered when possible | Enables LXD clustering on the first member and reconciles Terrarium cluster networking. |
+| `terrariumctl cluster invite` | required: member name; optional: peer IP/CIDR or `--peer-cidr` | member name resolution when possible | Mints a single-use LXD cluster join token, temporarily opens the joining peer, and prints the simplified join command. |
 | `terrariumctl cluster token` | required: member name | n/a | Mints only the single-use LXD cluster join token for another member. |
 | `terrariumctl cluster join` | required: `--token`; optional: `--address`, `--peer-cidr`, `--yes` | storage pool `terrarium`, address auto-discovered by routing to the token member | Joins this node to an existing LXD cluster and exports the shared Terrarium config. |
 | `terrariumctl cluster evacuate` | required: member name | n/a | Asks LXD to evacuate workloads from a member for maintenance. |
@@ -126,7 +126,7 @@ terrariumctl cluster init \
   --member node1 \
   --address 10.0.0.11:8443 \
   --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.0/24
+  --peer-cidr 10.0.0.12/32,10.0.0.13/32
 ```
 
 | Flag | Argument | Required | Default | Meaning |
@@ -136,7 +136,7 @@ terrariumctl cluster init \
 | `--network` | LXD network name | no | `terrarium-ovn` | Terrarium OVN workload network. |
 | `--parent` | LXD network name | no | `lxdbr0` | Managed parent/uplink network for OVN. |
 | `--central-addresses` | comma-separated IPs | no | local cluster address | OVN central member addresses. Use an odd-sized set for production. |
-| `--peer-cidr` | comma-separated CIDRs | no | discovered private peer CIDR when possible | Peer networks allowed through UFW for LXD and OVN cluster traffic. Public-only clusters should pass exact `/32` peer CIDRs. |
+| `--peer-cidr` | comma-separated IPs/CIDRs | no | exact local address when possible | Source addresses allowed through UFW for LXD and OVN cluster traffic. Plain IPs are stored as exact `/32` or `/128` peers; broad subnets intentionally trust every host in that range. |
 | `--skip-reconfigure` | none | no | reconfigure after cluster changes | Saves cluster config without reconciling the host. |
 
 ### cluster invite
@@ -145,11 +145,31 @@ terrariumctl cluster init \
 terrariumctl cluster invite node2
 ```
 
+Explicit peer example:
+
+```bash
+terrariumctl cluster invite node2 10.0.0.12
+```
+
 Prints a copy-paste join command:
 
 ```bash
 terrariumctl cluster join --token '<token-from-existing-member>'
 ```
+
+When `node2` resolves to an IP address, Terrarium pre-opens exact `/32` or
+`/128` firewall rules for that joining node and stores them in the shared
+config. If the name is not resolvable, Terrarium asks for the joining node
+address in interactive terminals. For automation, pass the joining node
+explicitly:
+
+```bash
+terrariumctl cluster invite node2 10.0.0.12
+```
+
+Invite peer rules are temporary until the LXD token expires. Terrarium
+schedules a one-shot systemd cleanup; joined peers are kept, and expired
+never-joined exact peers are removed from UFW and the shared config.
 
 Use this for normal operations. Use `cluster token` only when another tool will
 consume the raw token.
@@ -174,7 +194,7 @@ Manual override example:
 terrariumctl cluster join \
   --token '<token-from-existing-member>' \
   --address 10.0.0.12:8443 \
-  --peer-cidr 10.0.0.0/24 \
+  --peer-cidr 10.0.0.11/32 \
   --yes
 ```
 
@@ -183,7 +203,7 @@ terrariumctl cluster join \
 | `--token` | token | yes | none | Single-use token created by `terrariumctl cluster token`. |
 | `--address` | IP/DNS with optional port | no | auto-discovered by routing to an existing member from the token | Reachable LXD cluster address for this node. |
 | `--storage-pool` | pool name | no | `terrarium` | Member-local storage pool name used in the LXD join preseed. |
-| `--peer-cidr` | comma-separated CIDRs | no | exact existing member IPs from the token | Peer networks allowed through UFW before the LXD join runs. |
+| `--peer-cidr` | comma-separated IPs/CIDRs | no | exact existing member IPs from the token | Peers allowed through UFW before the LXD join runs. Plain IPs are stored as exact CIDRs. |
 | `--yes` | none | no | prompt before join | Confirms the destructive LXD cluster join operation. |
 | `--skip-export` | none | no | export shared config after join | Leaves `/etc/terrarium/config.yaml` untouched after joining. |
 | `--skip-reconfigure` | none | no | reconfigure after join | Joins without running local Terrarium reconciliation. |
@@ -281,7 +301,7 @@ Manual override example:
 ```bash
 terrariumctl cluster ovn configure \
   --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.0/24
+  --peer-cidr 10.0.0.11/32,10.0.0.12/32,10.0.0.13/32
 ```
 
 Use an odd number of central addresses. If there is no LXD cluster membership

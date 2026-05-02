@@ -9,6 +9,7 @@
     terrarium_lxd_pool_name: terrarium
     terrarium_cluster_enabled: false
     terrarium_cluster_peer_cidrs: []
+    terrarium_cluster_pending_peer_invites: []
     terrarium_lxd_network_parent: lxdbr0
     terrarium_lxd_network_name: terrarium-ovn
     terrarium_lxd_parent_ipv4: 10.154.0.1/24
@@ -72,6 +73,7 @@
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
       terrarium_cluster_enabled: "{{ terrarium_cluster_enabled }}"
       terrarium_cluster_peer_cidrs: "{{ terrarium_cluster_peer_cidrs }}"
+      terrarium_cluster_pending_peer_invites: "{{ terrarium_cluster_pending_peer_invites }}"
       terrarium_lxd_network_parent: "{{ terrarium_lxd_network_parent }}"
       terrarium_lxd_network_name: "{{ terrarium_lxd_network_name }}"
       terrarium_lxd_parent_ipv4: "{{ terrarium_lxd_parent_ipv4 }}"

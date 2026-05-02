@@ -1,4 +1,5 @@
-import { confirm } from "@inquirer/prompts";
+import { confirm, input } from "@inquirer/prompts";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { stringify } from "yaml";
 import { configString, runAllowFailure, runText, shellEscape } from "../lib/common";
@@ -29,6 +30,16 @@ const TRUNCATE = process.env.TERRARIUM_TRUNCATE_BIN ?? "truncate";
 const IP = process.env.TERRARIUM_IP_BIN ?? "ip";
 const HOSTNAME = process.env.TERRARIUM_HOSTNAME_BIN ?? "hostname";
 const TIMEOUT = process.env.TERRARIUM_TIMEOUT_BIN ?? "timeout";
+const GETENT = process.env.TERRARIUM_GETENT_BIN ?? "getent";
+const SYSTEMD_RUN = process.env.TERRARIUM_SYSTEMD_RUN_BIN ?? "systemd-run";
+const TERRARIUMCTL = process.env.TERRARIUMCTL_BIN ?? "/usr/local/bin/terrariumctl";
+const CLUSTER_FIREWALL_RULES = [
+  { port: "8443", proto: "tcp" },
+  { port: "6081", proto: "udp" },
+  { port: "6641", proto: "tcp" },
+  { port: "6642", proto: "tcp" }
+] as const;
+const PENDING_INVITES_KEY = "terrarium_cluster_pending_peer_invites";
 
 export type ClusterInitOptions = {
   member?: string;
@@ -48,6 +59,15 @@ export type ClusterJoinOptions = {
   yes?: boolean;
   skipExport?: boolean;
   skipReconfigure?: boolean;
+};
+
+export type ClusterInviteOptions = {
+  peerCidr?: string;
+};
+
+export type ClusterInviteCleanupOptions = {
+  peerCidr?: string;
+  expiresAt?: string;
 };
 
 export type ClusterOvnOptions = {
@@ -91,13 +111,6 @@ type AddressCandidate = {
   private: boolean;
 };
 
-type RouteCandidate = {
-  dst: string;
-  dev?: string;
-  prefsrc?: string;
-  src?: string;
-};
-
 type DiscoveredClusterNetwork = {
   address: string;
   peerCidr?: string;
@@ -129,6 +142,11 @@ export type ClusterMovePlanItem = {
   target: string;
 };
 
+type PendingClusterInvite = {
+  peer_cidr: string;
+  expires_at: string;
+};
+
 export function normalizeClusterEndpoint(value: string, defaultPort = DEFAULT_CLUSTER_PORT): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -148,6 +166,15 @@ export function parseCsv(value: string | undefined): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+export function parsePeerCidrs(value: string | undefined): string[] {
+  return parseCsv(value).map((item) => {
+    if (item.includes("/")) {
+      return item;
+    }
+    return exactPeerCidrForHost(endpointHost(item)) ?? item;
+  });
 }
 
 export function endpointHost(endpoint: string): string {
@@ -191,19 +218,6 @@ function ipv4ToInt(address: string): number | null {
   return (((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]) >>> 0;
 }
 
-function ipv4InCidr(address: string, cidr: string): boolean {
-  const [network, prefixRaw] = cidr.split("/");
-  const prefix = Number(prefixRaw);
-  const ip = ipv4ToInt(address);
-  const base = ipv4ToInt(network);
-  if (ip === null || base === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
-    return false;
-  }
-
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  return (ip & mask) === (base & mask);
-}
-
 function exactPeerCidrForHost(host: string): string | null {
   if (ipv4ToInt(host) !== null) {
     return `${host}/32`;
@@ -214,25 +228,42 @@ function exactPeerCidrForHost(host: string): string | null {
   return null;
 }
 
-export function decodeLxdJoinToken(token: string): { addresses: string[]; serverName?: string } {
+export function decodeLxdJoinToken(token: string): { addresses: string[]; serverName?: string; expiresAt?: string } {
   const normalized = token.trim();
   if (!normalized) {
     throw new Error("cluster token is empty");
   }
 
   const padded = normalized.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as { addresses?: unknown; server_name?: unknown };
+  const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as { addresses?: unknown; server_name?: unknown; expires_at?: unknown };
+  const expiresAt = typeof parsed.expires_at === "string" ? parsed.expires_at : undefined;
   const addresses = Array.isArray(parsed.addresses) ? parsed.addresses.filter((item): item is string => typeof item === "string") : [];
-  return {
+  const decoded: { addresses: string[]; serverName?: string; expiresAt?: string } = {
     addresses,
     serverName: typeof parsed.server_name === "string" ? parsed.server_name : undefined
   };
+  if (expiresAt) {
+    decoded.expiresAt = expiresAt;
+  }
+  return decoded;
 }
 
 export function peerCidrsFromJoinToken(token: string): string[] {
   return decodeLxdJoinToken(token)
     .addresses.map((address) => exactPeerCidrForHost(endpointHost(address)))
     .filter((cidr): cidr is string => cidr !== null);
+}
+
+export function peerCidrsFromHostsOutput(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(/\r?\n/)
+        .map((line) => line.trim().split(/\s+/)[0])
+        .map((host) => (host ? exactPeerCidrForHost(host) : null))
+        .filter((cidr): cidr is string => cidr !== null)
+    )
+  ];
 }
 
 export function addressCandidatesFromIpJson(value: string): AddressCandidate[] {
@@ -270,27 +301,8 @@ export function addressCandidatesFromIpJson(value: string): AddressCandidate[] {
   });
 }
 
-export function routeCandidatesFromIpJson(value: string): RouteCandidate[] {
-  const routes = JSON.parse(value || "[]") as Array<{ dst?: unknown; dev?: unknown; prefsrc?: unknown; src?: unknown }>;
-  return routes
-    .map((route) => ({
-      dst: typeof route.dst === "string" ? route.dst : "default",
-      dev: typeof route.dev === "string" ? route.dev : undefined,
-      prefsrc: typeof route.prefsrc === "string" ? route.prefsrc : undefined,
-      src: typeof route.src === "string" ? route.src : undefined
-    }))
-    .filter((route) => route.dst !== "default");
-}
-
-export function bestPeerCidrForAddress(candidate: AddressCandidate, routes: RouteCandidate[]): string | undefined {
-  if (candidate.family !== "inet") {
-    return candidate.cidr;
-  }
-
-  const route = routes
-    .filter((item) => item.dev === candidate.ifname && item.dst.includes("/") && ipv4InCidr(candidate.address, item.dst))
-    .sort((left, right) => Number(right.dst.split("/")[1] ?? 0) - Number(left.dst.split("/")[1] ?? 0))[0];
-  return route?.dst ?? candidate.cidr;
+export function bestPeerCidrForAddress(candidate: AddressCandidate): string | undefined {
+  return exactPeerCidrForHost(candidate.address) ?? candidate.cidr;
 }
 
 export function selectClusterAddressCandidate(candidates: AddressCandidate[], routeSource?: string): AddressCandidate | null {
@@ -503,12 +515,256 @@ async function converge(skipReconfigure: boolean | undefined): Promise<void> {
 }
 
 async function openClusterFirewall(peerCidrs: string[]): Promise<void> {
+  warnBroadPeerCidrs(peerCidrs);
   for (const cidr of peerCidrs) {
-    await runText([UFW, "allow", "from", cidr, "to", "any", "port", "8443", "proto", "tcp"], PREFIX);
-    await runText([UFW, "allow", "from", cidr, "to", "any", "port", "6081", "proto", "udp"], PREFIX);
-    await runText([UFW, "allow", "from", cidr, "to", "any", "port", "6641", "proto", "tcp"], PREFIX);
-    await runText([UFW, "allow", "from", cidr, "to", "any", "port", "6642", "proto", "tcp"], PREFIX);
+    for (const rule of CLUSTER_FIREWALL_RULES) {
+      await runText([UFW, "allow", "from", cidr, "to", "any", "port", rule.port, "proto", rule.proto], PREFIX);
+    }
   }
+}
+
+async function closeClusterFirewall(peerCidrs: string[]): Promise<void> {
+  for (const cidr of peerCidrs) {
+    for (const rule of CLUSTER_FIREWALL_RULES) {
+      const result = await runAllowFailure([UFW, "--force", "delete", "allow", "from", cidr, "to", "any", "port", rule.port, "proto", rule.proto]);
+      if (result.exitCode !== 0) {
+        const details = (result.stderr || result.stdout).trim();
+        console.warn(`Could not remove cluster firewall rule for ${cidr} ${rule.port}/${rule.proto}${details ? `: ${details}` : ""}`);
+      }
+    }
+  }
+}
+
+function isExactPeerCidr(cidr: string): boolean {
+  return exactHostFromPeerCidr(cidr) !== null;
+}
+
+function exactHostFromPeerCidr(cidr: string): string | null {
+  const [host, prefix] = cidr.split("/");
+  if (!host || !prefix) {
+    return null;
+  }
+  if (ipv4ToInt(host) !== null) {
+    return prefix === "32" ? host : null;
+  }
+  if (host.includes(":")) {
+    return prefix === "128" ? host : null;
+  }
+  return null;
+}
+
+function warnBroadPeerCidrs(peerCidrs: string[]): void {
+  const broad = peerCidrs.filter((cidr) => !isExactPeerCidr(cidr));
+  if (broad.length === 0) {
+    return;
+  }
+  console.warn(
+    `Warning: broad cluster peer CIDR(s) ${broad.join(", ")} can reach LXD/OVN control-plane ports. Prefer exact /32 or /128 peer addresses unless this subnet is fully trusted.`
+  );
+}
+
+function mergeClusterPeerCidrs(config: MutableConfig, peerCidrs: string[]): string[] {
+  const current = configStringArray(config, "terrarium_cluster_peer_cidrs");
+  const added = peerCidrs.filter((cidr) => !current.includes(cidr));
+  const next = [...new Set([...current, ...peerCidrs])];
+  if (next.length === current.length && next.every((cidr, index) => cidr === current[index])) {
+    return [];
+  }
+  setConfigValue(config, "terrarium_cluster_peer_cidrs", next);
+  return added;
+}
+
+function saveMergedClusterPeerCidrs(peerCidrs: string[]): boolean {
+  if (peerCidrs.length === 0) {
+    return false;
+  }
+  const config = loadMutableConfig();
+  if (mergeClusterPeerCidrs(config, peerCidrs).length === 0) {
+    return false;
+  }
+  saveMutableConfig(stringify(config));
+  return true;
+}
+
+function pendingClusterInvites(config: MutableConfig): PendingClusterInvite[] {
+  const value = config[PENDING_INVITES_KEY];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item): PendingClusterInvite[] => {
+    if (typeof item !== "object" || item === null) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    return typeof record.peer_cidr === "string" && typeof record.expires_at === "string"
+      ? [{ peer_cidr: record.peer_cidr, expires_at: record.expires_at }]
+      : [];
+  });
+}
+
+function setPendingClusterInvites(config: MutableConfig, invites: PendingClusterInvite[]): void {
+  setConfigValue(config, PENDING_INVITES_KEY, invites);
+}
+
+function upsertPendingClusterInvites(config: MutableConfig, peerCidrs: string[], expiresAt: string | undefined): string[] {
+  if (!expiresAt) {
+    return [];
+  }
+
+  const currentPeers = configStringArray(config, "terrarium_cluster_peer_cidrs");
+  const currentPending = pendingClusterInvites(config);
+  const pendingPeerCidrs = new Set(currentPending.map((invite) => invite.peer_cidr));
+  const temporaryPeers = peerCidrs.filter((cidr) => isExactPeerCidr(cidr) && (!currentPeers.includes(cidr) || pendingPeerCidrs.has(cidr)));
+  if (temporaryPeers.length === 0) {
+    return [];
+  }
+
+  const nextByPeer = new Map(currentPending.map((invite) => [invite.peer_cidr, invite]));
+  for (const peerCidr of temporaryPeers) {
+    nextByPeer.set(peerCidr, { peer_cidr: peerCidr, expires_at: expiresAt });
+  }
+  setPendingClusterInvites(config, [...nextByPeer.values()]);
+  return temporaryPeers;
+}
+
+function removeClusterPeerCidrs(config: MutableConfig, peerCidrs: string[]): boolean {
+  const remove = new Set(peerCidrs);
+  const current = configStringArray(config, "terrarium_cluster_peer_cidrs");
+  const next = current.filter((cidr) => !remove.has(cidr));
+  if (next.length === current.length) {
+    return false;
+  }
+  setConfigValue(config, "terrarium_cluster_peer_cidrs", next);
+  return true;
+}
+
+function removePendingClusterInvites(config: MutableConfig, peerCidrs: string[]): boolean {
+  const remove = new Set(peerCidrs);
+  const current = pendingClusterInvites(config);
+  const next = current.filter((invite) => !remove.has(invite.peer_cidr));
+  if (next.length === current.length) {
+    return false;
+  }
+  setPendingClusterInvites(config, next);
+  return true;
+}
+
+function saveInvitedPeerCidrs(peerCidrs: string[], expiresAt: string | undefined): { temporaryPeerCidrs: string[]; changed: boolean } {
+  if (peerCidrs.length === 0) {
+    return { temporaryPeerCidrs: [], changed: false };
+  }
+  const config = loadMutableConfig();
+  const temporaryPeerCidrs = upsertPendingClusterInvites(config, peerCidrs, expiresAt);
+  const added = mergeClusterPeerCidrs(config, peerCidrs);
+  if (temporaryPeerCidrs.length === 0 && added.length === 0) {
+    return { temporaryPeerCidrs: [], changed: false };
+  }
+  saveMutableConfig(stringify(config));
+  return { temporaryPeerCidrs, changed: true };
+}
+
+async function discoverPeerCidrsForInvite(member: string): Promise<string[]> {
+  const exact = exactPeerCidrForHost(member);
+  if (exact) {
+    return [exact];
+  }
+
+  const result = await runAllowFailure([GETENT, "hosts", member]);
+  return result.exitCode === 0 ? peerCidrsFromHostsOutput(result.stdout) : [];
+}
+
+async function peerCidrsForInvite(member: string, explicitPeerCidr: string | undefined): Promise<string[]> {
+  if (explicitPeerCidr !== undefined) {
+    return parsePeerCidrs(explicitPeerCidr);
+  }
+
+  const discovered = await discoverPeerCidrsForInvite(member);
+  if (discovered.length > 0 || !process.stdin.isTTY || !process.stdout.isTTY) {
+    return discovered;
+  }
+
+  const answer = await input({
+    message: `Private IP or exact CIDR for joining member ${member} (leave blank to skip firewall pre-open):`,
+    default: ""
+  });
+  return parsePeerCidrs(answer);
+}
+
+export function secondsUntilInviteCleanup(expiresAt: string, nowMs = Date.now()): number | null {
+  const expiresMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresMs)) {
+    return null;
+  }
+  return Math.max(60, Math.ceil((expiresMs - nowMs) / 1000));
+}
+
+function inviteCleanupUnitName(peerCidrs: string[], expiresAt: string): string {
+  const hash = createHash("sha256").update(`${peerCidrs.join(",")}|${expiresAt}`).digest("hex").slice(0, 16);
+  return `terrarium-cluster-invite-cleanup-${hash}`;
+}
+
+async function scheduleInviteCleanup(peerCidrs: string[], expiresAt: string | undefined): Promise<void> {
+  const exactPeerCidrs = peerCidrs.filter(isExactPeerCidr);
+  if (!expiresAt || exactPeerCidrs.length === 0) {
+    return;
+  }
+
+  const delaySeconds = secondsUntilInviteCleanup(expiresAt);
+  if (delaySeconds === null) {
+    console.warn(`LXD join token expiry ${expiresAt} could not be parsed; temporary firewall cleanup was not scheduled.`);
+    return;
+  }
+
+  try {
+    const result = await runAllowFailure([
+      SYSTEMD_RUN,
+      `--unit=${inviteCleanupUnitName(exactPeerCidrs, expiresAt)}`,
+      "--collect",
+      `--on-active=${delaySeconds}s`,
+      TERRARIUMCTL,
+      "cluster",
+      "invite-cleanup",
+      "--peer-cidr",
+      exactPeerCidrs.join(","),
+      "--expires-at",
+      expiresAt
+    ]);
+    if (result.exitCode !== 0) {
+      const details = (result.stderr || result.stdout).trim();
+      console.warn(`Could not schedule temporary cluster peer cleanup${details ? `: ${details}` : ""}`);
+    }
+  } catch (error) {
+    console.warn(`Could not schedule temporary cluster peer cleanup: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function expiredPendingInvitePeerCidrs(
+  config: MutableConfig,
+  requestedPeerCidrs: string[],
+  cleanupExpiresAt: string | undefined,
+  nowMs = Date.now()
+): string[] {
+  const requested = new Set(requestedPeerCidrs);
+  const cleanupExpiryMs = cleanupExpiresAt ? Date.parse(cleanupExpiresAt) : null;
+
+  return pendingClusterInvites(config)
+    .filter((invite) => requested.has(invite.peer_cidr))
+    .filter((invite) => {
+      const inviteExpiryMs = Date.parse(invite.expires_at);
+      if (Number.isFinite(cleanupExpiryMs) && Number.isFinite(inviteExpiryMs) && inviteExpiryMs > cleanupExpiryMs) {
+        return false;
+      }
+      return !Number.isFinite(inviteExpiryMs) || inviteExpiryMs <= nowMs;
+    })
+    .map((invite) => invite.peer_cidr);
+}
+
+export function unjoinedExactInvitePeerCidrs(peerCidrs: string[], memberAddresses: string[]): string[] {
+  const members = new Set(memberAddresses.map(endpointHost));
+  return peerCidrs.filter((cidr) => {
+    const host = exactHostFromPeerCidr(cidr);
+    return host !== null && !members.has(host);
+  });
 }
 
 async function commandSucceeds(cmd: string[]): Promise<boolean> {
@@ -534,16 +790,14 @@ function routeSourceFromRouteGetJson(value: string): string | undefined {
 
 async function discoverClusterNetwork(targetHost?: string): Promise<DiscoveredClusterNetwork> {
   const addressResult = await runAllowFailure([IP, "-j", "addr", "show", "scope", "global"]);
-  const routeResult = await runAllowFailure([IP, "-j", "route", "show"]);
   const routeGetResult = targetHost ? await runAllowFailure([IP, "-j", "route", "get", targetHost]) : undefined;
 
   const candidates = addressResult.exitCode === 0 ? addressCandidatesFromIpJson(addressResult.stdout) : [];
-  const routes = routeResult.exitCode === 0 ? routeCandidatesFromIpJson(routeResult.stdout) : [];
   const routeSource = routeGetResult?.exitCode === 0 ? routeSourceFromRouteGetJson(routeGetResult.stdout) : undefined;
   const selected = selectClusterAddressCandidate(candidates, routeSource);
 
   if (selected) {
-    const peerCidr = selected.private ? bestPeerCidrForAddress(selected, routes) : undefined;
+    const peerCidr = selected.private ? bestPeerCidrForAddress(selected) : undefined;
     return {
       address: selected.address,
       peerCidr,
@@ -608,13 +862,16 @@ async function reconcileAfterMemberRemove(removedAddress: string | undefined, sk
   const discoveredAddresses = await discoverClusterMemberAddresses();
   const removedExactCidr = removedAddress ? exactPeerCidrForHost(removedAddress) : null;
   const existingCentralAddresses = configStringArray(config, "terrarium_ovn_central_addresses").filter((address) => address !== removedAddress);
-  const existingPeerCidrs = configStringArray(config, "terrarium_cluster_peer_cidrs").filter((cidr) => cidr !== removedExactCidr);
   const centralAddresses =
     discoveredAddresses.length > 0 ? selectOvnCentralAddresses(discoveredAddresses) : selectOvnCentralAddresses(existingCentralAddresses);
   const discoveredPeerCidrs = discoveredAddresses
     .map((address) => exactPeerCidrForHost(address))
     .filter((cidr): cidr is string => cidr !== null);
-  const peerCidrs = [...new Set([...existingPeerCidrs, ...discoveredPeerCidrs])];
+  const pendingPeerCidrs = pendingClusterInvites(config).map((invite) => invite.peer_cidr);
+  const peerCidrs =
+    discoveredPeerCidrs.length > 0
+      ? [...new Set([...discoveredPeerCidrs, ...pendingPeerCidrs])]
+      : configStringArray(config, "terrarium_cluster_peer_cidrs").filter((cidr) => cidr !== removedExactCidr);
 
   applyClusterConfig(config, { network, parent, centralAddresses, peerCidrs });
   saveMutableConfig(stringify(config));
@@ -791,8 +1048,9 @@ export async function clusterInitCmd(options: ClusterInitOptions): Promise<void>
   const network = options.network || DEFAULT_OVN_NETWORK;
   const parent = options.parent || DEFAULT_OVN_PARENT;
   const centralAddresses = options.centralAddresses === undefined ? [endpointAddress] : parseCsv(options.centralAddresses);
+  const defaultPeerCidr = discovered?.peerCidr ?? exactPeerCidrForHost(endpointAddress) ?? undefined;
   const peerCidrs =
-    options.peerCidr === undefined ? (discovered?.peerCidr ? [discovered.peerCidr] : []) : parseCsv(options.peerCidr);
+    options.peerCidr === undefined ? (defaultPeerCidr ? [defaultPeerCidr] : []) : parsePeerCidrs(options.peerCidr);
 
   await openClusterFirewall(peerCidrs);
   await runText([LXC, "config", "set", "core.https_address", endpoint], PREFIX);
@@ -808,7 +1066,7 @@ export async function clusterInitCmd(options: ClusterInitOptions): Promise<void>
     console.log(success(`Auto-discovered cluster address ${endpoint}${discovered?.ifname ? ` on ${discovered.ifname}` : ""}`));
   }
   if (options.peerCidr === undefined && peerCidrs.length === 0) {
-    console.warn("Terrarium did not auto-open cluster peer firewall rules because no private peer CIDR was discovered. Pass --peer-cidr for public-only clusters.");
+    console.warn("Terrarium did not auto-open cluster peer firewall rules because no exact peer address was discovered. Pass --peer-cidr <peer-ip>/32 for public-only clusters.");
   }
 }
 
@@ -825,10 +1083,81 @@ export async function clusterTokenCmd(member: string): Promise<void> {
   console.log(await mintClusterToken(member));
 }
 
-export async function clusterInviteCmd(member: string): Promise<void> {
-  const token = await mintClusterToken(member);
+export async function clusterInviteCmd(member: string, options: ClusterInviteOptions = {}): Promise<void> {
+  const normalized = member.trim();
+  if (!normalized) {
+    throw new Error("cluster invite requires a member name");
+  }
+
+  const token = await mintClusterToken(normalized);
+  const tokenExpiry = decodeLxdJoinToken(token).expiresAt;
+  const peerCidrs = await peerCidrsForInvite(normalized, options.peerCidr);
+  if (peerCidrs.length > 0) {
+    await openClusterFirewall(peerCidrs);
+    const { temporaryPeerCidrs, changed } = saveInvitedPeerCidrs(peerCidrs, tokenExpiry);
+    if (temporaryPeerCidrs.length > 0) {
+      await scheduleInviteCleanup(temporaryPeerCidrs, tokenExpiry);
+    }
+    if (changed) {
+      console.log(success(`Allowed cluster peer ${peerCidrs.join(", ")}`));
+    }
+    if (!tokenExpiry && peerCidrs.some(isExactPeerCidr)) {
+      console.warn("LXD join token did not include an expiry; temporary cluster peer cleanup was not scheduled.");
+    }
+  } else {
+    console.warn(
+      `Terrarium could not resolve ${normalized} to an IP address, so this member's firewall was not pre-opened for the joining node. If join cannot reach this member, rerun with --peer-cidr <joining-node-ip>/32.`
+    );
+  }
+
   console.log("Run this on the new node:");
   console.log(`terrariumctl cluster join --token ${shellEscape(token)}`);
+}
+
+export async function clusterInviteCleanupCmd(options: ClusterInviteCleanupOptions): Promise<void> {
+  const peerCidrs = parsePeerCidrs(options.peerCidr);
+  if (peerCidrs.length === 0) {
+    throw new Error("cluster invite-cleanup requires --peer-cidr");
+  }
+  if (options.expiresAt) {
+    const expiresMs = Date.parse(options.expiresAt);
+    if (Number.isFinite(expiresMs) && Date.now() < expiresMs) {
+      console.log(`Invite cleanup for ${peerCidrs.join(", ")} is not due yet.`);
+      return;
+    }
+  }
+
+  const config = loadMutableConfig();
+  const expiredPeerCidrs = expiredPendingInvitePeerCidrs(config, peerCidrs, options.expiresAt);
+  if (expiredPeerCidrs.length === 0) {
+    console.log(`No expired pending invite peer rules found for ${peerCidrs.join(", ")}.`);
+    return;
+  }
+
+  let members: ClusterMember[];
+  try {
+    members = await discoverClusterMembers({ onlineOnly: false });
+  } catch (error) {
+    console.warn(`Could not inspect LXD cluster membership; keeping pending peer rules: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  const memberAddresses = members.map((member) => member.address);
+  const removablePeerCidrs = unjoinedExactInvitePeerCidrs(expiredPeerCidrs, memberAddresses);
+  const joinedPeerCidrs = expiredPeerCidrs.filter((cidr) => !removablePeerCidrs.includes(cidr));
+  const changedPending = removePendingClusterInvites(config, expiredPeerCidrs);
+  const changedPeers = removeClusterPeerCidrs(config, removablePeerCidrs);
+
+  if (changedPending || changedPeers) {
+    saveMutableConfig(stringify(config));
+  }
+  if (removablePeerCidrs.length > 0) {
+    await closeClusterFirewall(removablePeerCidrs);
+    console.log(success(`Removed expired cluster invite peer ${removablePeerCidrs.join(", ")}`));
+  }
+  if (joinedPeerCidrs.length > 0) {
+    console.log(success(`Kept joined cluster peer ${joinedPeerCidrs.join(", ")}`));
+  }
 }
 
 export async function clusterJoinCmd(options: ClusterJoinOptions): Promise<void> {
@@ -859,13 +1188,17 @@ export async function clusterJoinCmd(options: ClusterJoinOptions): Promise<void>
     clusterToken: options.token,
     storagePool
   });
-  const peerCidrs = options.peerCidr === undefined ? peerCidrsFromJoinToken(options.token) : parseCsv(options.peerCidr);
+  const peerCidrs = options.peerCidr === undefined ? peerCidrsFromJoinToken(options.token) : parsePeerCidrs(options.peerCidr);
   await openClusterFirewall(peerCidrs);
   await prepareLocalLxdForClusterJoin(storage);
   await runText([LXD, "init", "--preseed"], PREFIX, { stdin: preseed });
 
   if (!options.skipExport && !exportClusterStoreToConfigFile(CONFIG_PATH, PREFIX)) {
     throw new Error("joined cluster, but Terrarium config was not found in the LXD dqlite store");
+  }
+  if (!options.skipExport) {
+    const localPeerCidr = exactPeerCidrForHost(endpointHost(normalizeClusterEndpoint(address)));
+    saveMergedClusterPeerCidrs([...peerCidrs, localPeerCidr].filter((cidr): cidr is string => cidr !== null));
   }
   if (!options.skipReconfigure) {
     await reconfigureCmd({ applyHardening: false });
@@ -1032,8 +1365,14 @@ export async function clusterOvnConfigureCmd(options: ClusterOvnOptions): Promis
   const discoveredPeerCidrs = discoveredMemberAddresses
     .map((address) => exactPeerCidrForHost(address))
     .filter((cidr): cidr is string => cidr !== null);
+  const pendingPeerCidrs = pendingClusterInvites(config).map((invite) => invite.peer_cidr);
   const peerCidrs =
-    options.peerCidr === undefined ? [...new Set([...existingPeerCidrs, ...discoveredPeerCidrs])] : parseCsv(options.peerCidr);
+    options.peerCidr === undefined
+      ? discoveredPeerCidrs.length > 0
+        ? [...new Set([...discoveredPeerCidrs, ...pendingPeerCidrs])]
+        : existingPeerCidrs
+      : parsePeerCidrs(options.peerCidr);
+  warnBroadPeerCidrs(peerCidrs);
 
   if (centralAddresses.length > 0 && centralAddresses.length % 2 === 0) {
     throw new Error("--central-addresses should contain an odd number of OVN central members");

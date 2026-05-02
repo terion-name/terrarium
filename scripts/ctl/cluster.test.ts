@@ -18,11 +18,14 @@ import {
   ovnTcpEndpoints,
   partitionDeviceForStorageSource,
   parseCsv,
+  parsePeerCidrs,
+  peerCidrsFromHostsOutput,
   peerCidrsFromJoinToken,
-  routeCandidatesFromIpJson,
   selectClusterAddressCandidate,
   selectOvnCentralAddresses,
-  resolveJoinStorageConfig
+  resolveJoinStorageConfig,
+  secondsUntilInviteCleanup,
+  unjoinedExactInvitePeerCidrs
 } from "./cluster";
 
 describe("terrariumctl cluster", () => {
@@ -63,16 +66,28 @@ describe("terrariumctl cluster", () => {
     const token = Buffer.from(
       JSON.stringify({
         server_name: "node2",
-        addresses: ["10.0.0.11:8443", "[2001:db8::11]:8443"]
+        addresses: ["10.0.0.11:8443", "[2001:db8::11]:8443"],
+        expires_at: "2026-05-02T12:00:00Z"
       }),
       "utf8"
     ).toString("base64");
 
     expect(decodeLxdJoinToken(token)).toEqual({
       serverName: "node2",
-      addresses: ["10.0.0.11:8443", "[2001:db8::11]:8443"]
+      addresses: ["10.0.0.11:8443", "[2001:db8::11]:8443"],
+      expiresAt: "2026-05-02T12:00:00Z"
     });
     expect(peerCidrsFromJoinToken(token)).toEqual(["10.0.0.11/32", "2001:db8::11/128"]);
+  });
+
+  test("derives exact peer CIDRs from resolved host records", () => {
+    expect(
+      peerCidrsFromHostsOutput(`
+        10.0.0.12 node2
+        10.0.0.12 node2.local
+        2001:db8::12 node2
+      `)
+    ).toEqual(["10.0.0.12/32", "2001:db8::12/128"]);
   });
 
   test("extracts hosts from cluster endpoints", () => {
@@ -80,6 +95,22 @@ describe("terrariumctl cluster", () => {
     expect(endpointHost("cluster.example.test")).toBe("cluster.example.test");
     expect(endpointHost("https://10.0.0.11:8443")).toBe("10.0.0.11");
     expect(endpointHost("[2001:db8::11]:8443")).toBe("2001:db8::11");
+  });
+
+  test("normalizes peer IP input to exact CIDRs", () => {
+    expect(parsePeerCidrs("10.0.0.12, [2001:db8::12]:8443, 10.0.0.0/24")).toEqual([
+      "10.0.0.12/32",
+      "2001:db8::12/128",
+      "10.0.0.0/24"
+    ]);
+  });
+
+  test("plans temporary invite cleanup from token expiry and joined members", () => {
+    expect(secondsUntilInviteCleanup("2026-05-02T12:10:00Z", Date.parse("2026-05-02T12:00:00Z"))).toBe(600);
+    expect(secondsUntilInviteCleanup("not-a-date", Date.parse("2026-05-02T12:00:00Z"))).toBeNull();
+    expect(unjoinedExactInvitePeerCidrs(["10.0.0.12/32", "10.0.0.0/24", "2001:db8::12/128"], ["10.0.0.13", "2001:db8::12"])).toEqual([
+      "10.0.0.12/32"
+    ]);
   });
 
   test("derives safe OVN central defaults from LXD cluster JSON", () => {
@@ -155,16 +186,10 @@ describe("terrariumctl cluster", () => {
         }
       ])
     );
-    const routes = routeCandidatesFromIpJson(
-      JSON.stringify([
-        { dst: "default", dev: "eth0" },
-        { dst: "10.0.0.0/16", dev: "ens10", prefsrc: "10.0.0.12" }
-      ])
-    );
     const selected = selectClusterAddressCandidate(candidates);
 
     expect(selected?.address).toBe("10.0.0.12");
-    expect(selected && bestPeerCidrForAddress(selected, routes)).toBe("10.0.0.0/16");
+    expect(selected && bestPeerCidrForAddress(selected)).toBe("10.0.0.12/32");
   });
 
   test("resolves file-backed join storage from Terrarium config", () => {

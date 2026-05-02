@@ -69,7 +69,7 @@ workload network.
 
 - `terrariumctl cluster init` enables LXD clustering on the first member after
   setting a reachable `core.https_address`; by default it discovers the member
-  name, host address, and safe private peer CIDR.
+  name, host address, and exact peer firewall CIDR.
 - `terrariumctl cluster invite` wraps `lxc cluster add` and prints the
   simplified join command for the next member. `terrariumctl cluster token`
   prints only the raw token for automation.
@@ -78,8 +78,8 @@ workload network.
   routing toward the token's existing member, exports the shared Terrarium
   config, and reconfigures the joined node.
 - `terrariumctl cluster ovn configure` records the OVN central members and
-  peer CIDRs in the shared config, discovering current LXD member addresses
-  when explicit values are omitted, then reconciles host networking.
+  exact peer CIDRs in the shared config, discovering current LXD member
+  addresses when explicit values are omitted, then reconciles host networking.
 
 Terrarium keeps `lxdbr0` as the managed parent/uplink network and creates
 `terrarium-ovn` as the logical workload network. The default, `terrarium`, and
@@ -89,6 +89,10 @@ The cluster firewall model is explicit. Terrarium only opens LXD/OVN cluster
 ports for configured `terrarium_cluster_peer_cidrs`, covering LXD API `8443`,
 OVN northbound/southbound database ports `6641`/`6642`, and OVN Geneve
 `6081/udp`.
+
+The default cluster commands use exact `/32` IPv4 or `/128` IPv6 peer entries.
+Broader CIDRs are supported only as an explicit operator choice and should be
+reserved for fully trusted private networks.
 
 This is enough for one LXD management plane and cross-member container
 networking. It is not a blanket HA promise: storage locality, instance

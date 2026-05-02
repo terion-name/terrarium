@@ -59,3 +59,7 @@ When clustering is enabled, Terrarium only opens these ports for configured
 - `6641/tcp` for OVN northbound database traffic
 - `6642/tcp` for OVN southbound database traffic
 - `6081/udp` for OVN Geneve overlay traffic
+
+Default cluster commands store exact `/32` IPv4 or `/128` IPv6 peer CIDRs.
+Broad peer subnets are an explicit trust decision because every host in the
+range can reach the LXD/OVN control-plane ports above.

@@ -131,16 +131,18 @@ terrariumctl cluster invite node2
 
 Then run the printed `terrariumctl cluster join --token ...` command on the new
 node. Terrarium should auto-select the Hetzner private address. If it does not,
-pass the private address and peer subnet explicitly:
+pass the private address and exact peer addresses explicitly:
 
 ```bash
 terrariumctl cluster init \
   --address 10.42.0.11:8443 \
-  --peer-cidr 10.42.0.0/24
+  --peer-cidr 10.42.0.12/32
 ```
 
 Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
-restricted to the Hetzner Network subnet.
+restricted to the exact Hetzner Network member addresses. Only use a broader
+Hetzner Network subnet if every host attached to that network is trusted to
+reach the cluster control plane.
 
 ## Notes
 

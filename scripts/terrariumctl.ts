@@ -8,6 +8,7 @@ import { backupActionCmd } from "./ctl/backup";
 import {
   clusterEvacuateCmd,
   clusterInviteCmd,
+  clusterInviteCleanupCmd,
   clusterInitCmd,
   clusterJoinCmd,
   clusterMoveCmd,
@@ -109,7 +110,8 @@ cli
   .option("--network <name>", "Terrarium OVN workload network name", { ...STRING_OPTION, default: "terrarium-ovn" })
   .option("--parent <name>", "LXD parent/uplink network for the OVN network", { ...STRING_OPTION, default: "lxdbr0" })
   .option("--central-addresses <csv>", "Comma-separated OVN central member IPs; auto-discovered when omitted", STRING_OPTION)
-  .option("--peer-cidr <csv>", "Comma-separated CIDRs allowed to reach LXD and OVN cluster ports; auto-discovered when safe", STRING_OPTION)
+  .option("--peer-cidr <csv>", "Comma-separated source IPs/CIDRs allowed to reach LXD and OVN cluster ports; defaults to exact peers", STRING_OPTION)
+  .option("--expires-at <iso>", "Internal invite cleanup deadline", STRING_OPTION)
   .option("--target <member>", "Target member for cluster remove workload moves; omit to distribute", STRING_OPTION)
   .option("--move", "Move workloads off a member before cluster remove")
   .option("--force", "Force-remove an unreachable cluster member")
@@ -117,7 +119,7 @@ cli
   .option("--skip-export", "Do not export Terrarium config from the cluster store after join")
   .option("--skip-reconfigure", "Do not run Terrarium reconfigure after cluster changes")
   .usage(
-    "cluster status\n  terrariumctl cluster init [--member NAME] [--address IP[:8443]] [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]\n  terrariumctl cluster invite MEMBER\n  terrariumctl cluster token MEMBER\n  terrariumctl cluster join --token TOKEN [--address IP[:8443]] [--peer-cidr CIDR] [--yes]\n  terrariumctl cluster evacuate MEMBER [--yes]\n  terrariumctl cluster restore MEMBER [--yes]\n  terrariumctl cluster move WORKLOAD MEMBER\n  terrariumctl cluster remove MEMBER [--move] [--target MEMBER] [--force] [--yes]\n  terrariumctl cluster ovn configure [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]"
+    "cluster status\n  terrariumctl cluster init [--member NAME] [--address IP[:8443]] [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]\n  terrariumctl cluster invite MEMBER [PEER_IP_OR_CIDR]\n  terrariumctl cluster token MEMBER\n  terrariumctl cluster join --token TOKEN [--address IP[:8443]] [--peer-cidr CIDR] [--yes]\n  terrariumctl cluster evacuate MEMBER [--yes]\n  terrariumctl cluster restore MEMBER [--yes]\n  terrariumctl cluster move WORKLOAD MEMBER\n  terrariumctl cluster remove MEMBER [--move] [--target MEMBER] [--force] [--yes]\n  terrariumctl cluster ovn configure [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]"
   )
   .action(async (action, args, options) => {
     const commandArgs = (args as string[]) ?? [];
@@ -145,7 +147,19 @@ cli
       return;
     }
     if (normalizedAction === "invite") {
-      await clusterInviteCmd(commandArgs[0] ?? "");
+      if (commandArgs[1] !== undefined && rawOptions.peerCidr !== undefined) {
+        throw new Error("pass the joining peer either as a positional argument or --peer-cidr, not both");
+      }
+      await clusterInviteCmd(commandArgs[0] ?? "", {
+        peerCidr: (commandArgs[1] as string | undefined) ?? (rawOptions.peerCidr as string | undefined)
+      });
+      return;
+    }
+    if (normalizedAction === "invite-cleanup") {
+      await clusterInviteCleanupCmd({
+        peerCidr: rawOptions.peerCidr as string | undefined,
+        expiresAt: rawOptions.expiresAt as string | undefined
+      });
       return;
     }
     if (normalizedAction === "join") {

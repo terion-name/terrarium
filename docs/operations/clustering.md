@@ -33,19 +33,19 @@ What this does:
 - uses the host shortname as the LXD member name
 - auto-selects a reachable non-container host address for LXD port `8443`
 - prefers a private/VPC address when one exists
-- opens LXD/OVN firewall rules for the discovered private peer CIDR when safe
+- opens LXD/OVN firewall rules only for exact cluster peer addresses
 - configures this node as the first OVN central member
 - sets LXD's reachable cluster API listener
 - enables LXD clustering on the local server
 - stores Terrarium cluster/OVN settings in the shared config
 - runs Terrarium reconfiguration so OVN, firewall rules, and profiles converge
 
-If your hosts only have public addresses, Terrarium does not guess a broad
-public firewall range. Pass exact peers explicitly, or preferably add a private
-provider network first:
+If your hosts only have public addresses, Terrarium still does not guess a
+broad public firewall range. Pass exact peers explicitly, or preferably add a
+private provider network first:
 
 ```bash
-terrariumctl cluster init --peer-cidr 10.0.0.0/24
+terrariumctl cluster init --peer-cidr 203.0.113.12/32
 ```
 
 All discovery can be overridden when needed:
@@ -55,8 +55,16 @@ terrariumctl cluster init \
   --member node1 \
   --address 10.0.0.11:8443 \
   --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.0/24
+  --peer-cidr 10.0.0.12/32,10.0.0.13/32
 ```
+
+`--peer-cidr` is a firewall trust boundary. It controls which source addresses
+may reach LXD `8443/tcp`, OVN database ports `6641/tcp`/`6642/tcp`, and OVN
+Geneve `6081/udp`. Prefer exact `/32` IPv4 or `/128` IPv6 peer addresses.
+For convenience, Terrarium accepts plain peer IPs and stores them as exact
+CIDRs.
+Only pass a subnet such as `10.0.0.0/24` when every host in that subnet is
+trusted to reach the cluster control plane.
 
 ## Join Additional Members
 
@@ -65,6 +73,22 @@ On an existing cluster member, create an invite:
 ```bash
 terrariumctl cluster invite node2
 ```
+
+The command pre-opens this member's firewall for the joining node when `node2`
+resolves to an IP address. If the name is not resolvable, Terrarium asks for
+the joining node's address in interactive terminals. For automation, pass the
+joining node's exact address:
+
+```bash
+terrariumctl cluster invite node2 10.0.0.12
+```
+
+`cluster invite` reads the LXD token expiry and schedules a one-shot systemd
+timer to clean up temporary exact peer firewall rules after that expiry. If the
+node joins before the token expires, cleanup sees the new LXD member and keeps
+the peer rule. If the node never joins, cleanup removes the exact peer rule
+from UFW and from the shared Terrarium config. Broad explicit CIDRs are treated
+as operator-managed trust boundaries and are not auto-cleaned.
 
 The command prints the join command to run on the new node:
 
@@ -138,7 +162,7 @@ failover, place a health-checked load balancer, health-checked DNS service,
 floating IP automation, anycast/BGP setup, or provider load balancer in front
 of the Terrarium nodes.
 
-To update OVN central members or peer firewall ranges after the cluster exists,
+To update OVN central members or peer firewall peers after the cluster exists,
 run:
 
 ```bash
@@ -146,14 +170,14 @@ terrariumctl cluster ovn configure
 ```
 
 Without flags, Terrarium reads LXD cluster membership, keeps an odd-sized OVN
-central set, and adds exact member CIDRs to the shared peer firewall list. Use
-explicit flags when you want a specific central set or broad private peer
-network:
+central set, and writes exact member CIDRs to the shared peer firewall list. Use
+explicit flags when you want a specific central set or a deliberately broader
+trusted peer network:
 
 ```bash
 terrariumctl cluster ovn configure \
   --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.0/24
+  --peer-cidr 10.0.0.11/32,10.0.0.12/32,10.0.0.13/32
 ```
 
 Use an odd number of OVN central addresses. Terrarium starts `ovn-central` on

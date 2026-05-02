@@ -128,17 +128,18 @@ terrariumctl cluster invite node2
 
 Then run the printed `terrariumctl cluster join --token ...` command on the new
 node. Terrarium should auto-select the VPC address. If it does not, pass the
-private address and peer subnet explicitly:
+private address and exact peer addresses explicitly:
 
 ```bash
 terrariumctl cluster init \
   --address 10.42.0.11:8443 \
-  --peer-cidr 10.42.0.0/24
+  --peer-cidr 10.42.0.12/32
 ```
 
 Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
-restricted to the VPC subnet. Public firewall rules should only cover the
-normal Terrarium ingress ports documented in
+restricted to exact VPC member addresses. Only use a broader VPC subnet if
+every host in that subnet is trusted to reach the cluster control plane. Public
+firewall rules should only cover the normal Terrarium ingress ports documented in
 [Services and Endpoints](../reference/services-and-endpoints.md).
 
 ## Notes
