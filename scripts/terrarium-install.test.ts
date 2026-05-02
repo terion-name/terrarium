@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { cac } from "cac";
-import { partitionEndForCandidate, readCliOption, registerInstallCommand } from "./terrarium-install";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { generateRootPassword, partitionEndForCandidate, readCliOption, registerInstallCommand } from "./terrarium-install";
+
+const repoRoot = join(import.meta.dir, "..");
 
 describe("terrarium install CLI parsing", () => {
   test("recovers exact numeric-looking OIDC client IDs from argv when cac coerces them", () => {
@@ -44,5 +48,24 @@ describe("terrarium install CLI parsing", () => {
         "32G"
       )
     ).toBe("34816MiB");
+  });
+
+  test("does not expose the Cockpit root password as an argv option", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
+
+    expect(source).not.toContain('.option("--root-pwd <password>"');
+    expect(source).not.toContain('readSecretCliOption(cliOptions, "rootPwd", "rootPwdFile"');
+    expect(source).toContain('.option("--generate-root-pwd"');
+    expect(source).toContain('readSecretFileCliOption(cliOptions, "rootPwdFile", ["root-pwd-file"])');
+    expect(source).toContain('const GENERATED_ROOT_PASSWORD_PATH = "/etc/terrarium/secrets/cockpit_root_password"');
+    expect(source).toContain("mode: 0o600");
+  });
+
+  test("generates a strong root password without shell-sensitive whitespace", () => {
+    const generated = generateRootPassword();
+
+    expect(generated.startsWith("trm-")).toBe(true);
+    expect(generated.length).toBeGreaterThanOrEqual(40);
+    expect(generated).toMatch(/^trm-[A-Za-z0-9_-]+$/);
   });
 });

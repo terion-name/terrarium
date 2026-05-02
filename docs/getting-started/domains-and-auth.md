@@ -62,9 +62,9 @@ That means:
 If `root` does not already have one:
 
 - interactive install prompts for it
-- non-interactive install requires `--root-pwd-file` or `--root-pwd`
+- non-interactive install requires `--generate-root-pwd` or `--root-pwd-file`
 
-Terrarium uses that password during provisioning and does not store the plaintext in `/etc/terrarium/config.yaml`.
+When generated, Terrarium saves the password to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions. Terrarium does not store the plaintext in `/etc/terrarium/config.yaml`.
 
 ### LXD
 

@@ -2,8 +2,9 @@ import { $ } from "bun";
 import { confirm, input, password, select } from "@inquirer/prompts";
 import type { CAC } from "cac";
 import chalk from "chalk";
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
 import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
@@ -14,6 +15,7 @@ const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
 const REPO_DIR = process.env.TERRARIUM_REPO_DIR ?? "/opt/terrarium";
 const BUNDLE_DIR = process.env.TERRARIUM_BUNDLE_DIR ?? "";
+const GENERATED_ROOT_PASSWORD_PATH = "/etc/terrarium/secrets/cockpit_root_password";
 // CAC's string transform runs after numeric coercion; readCliOption recovers exact argv values instead.
 const STRING_OPTION = {};
 
@@ -68,6 +70,8 @@ type InstallOptions = {
   lxdOidcClientSecret: string;
   zitadelAdminEmail: string;
   rootPassword: string;
+  generateRootPassword: boolean;
+  generatedRootPasswordPath: string;
   storageMode: string;
   storageSource: string;
   storageSize: string;
@@ -153,6 +157,30 @@ async function promptPasswordWithConfirmation(message: string): Promise<string> 
     fail("password confirmation does not match");
   }
   return first;
+}
+
+export function generateRootPassword(): string {
+  return `trm-${randomBytes(32).toString("base64url")}`;
+}
+
+function persistGeneratedRootPassword(passwordValue: string): void {
+  const secretDir = dirname(GENERATED_ROOT_PASSWORD_PATH);
+  mkdirSync(secretDir, { recursive: true, mode: 0o700 });
+  chmodSync(secretDir, 0o700);
+  writeFileSync(GENERATED_ROOT_PASSWORD_PATH, `${passwordValue}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(GENERATED_ROOT_PASSWORD_PATH, 0o600);
+}
+
+function applyGeneratedRootPassword(options: InstallOptions): void {
+  if (!options.generateRootPassword) {
+    return;
+  }
+  if (options.rootPassword) {
+    fail("use only one of --generate-root-pwd or --root-pwd-file");
+  }
+  options.rootPassword = generateRootPassword();
+  options.generatedRootPasswordPath = GENERATED_ROOT_PASSWORD_PATH;
+  persistGeneratedRootPassword(options.rootPassword);
 }
 
 export function normalizeOidcIssuer(value: string, fieldName: string): string {
@@ -814,7 +842,7 @@ function validateNonInteractive(options: InstallOptions): void {
   options.email = validateEmail(options.email, "--email");
   options.acmeEmail = validateEmail(options.acmeEmail || options.email, "--acme-email");
   if (!options.rootPassword && rootPasswordState() !== "usable") {
-    fail("--root-pwd or --root-pwd-file is required in non-interactive mode when root has no usable local password");
+    fail("--generate-root-pwd or --root-pwd-file is required in non-interactive mode when root has no usable local password");
   }
 
   if (options.idpMode === "local") {
@@ -1020,6 +1048,8 @@ function defaultOptions(): InstallOptions {
     lxdOidcClientSecret: "",
     zitadelAdminEmail: "",
     rootPassword: "",
+    generateRootPassword: false,
+    generatedRootPasswordPath: "",
     storageMode: "",
     storageSource: "",
     storageSize: "",
@@ -1091,6 +1121,18 @@ function readSecretCliOption(
   }
 }
 
+function readSecretFileCliOption(rawOptions: Record<string, unknown>, fileKey: string, fileAliases: string[] = []): string {
+  const filePath = readCliOption(rawOptions, fileKey, fileAliases);
+  if (!filePath) {
+    return "";
+  }
+  try {
+    return readFileSync(filePath, "utf8").trim();
+  } catch (error) {
+    fail(`failed to read secret file ${filePath}: ${String(error).replace(/^Error: /, "")}`);
+  }
+}
+
 async function installTerrarium(options: InstallOptions): Promise<void> {
   printSplash();
   requireRoot();
@@ -1099,6 +1141,7 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   await prepareRepo(options.ref);
 
   options.publicIp = await detectPublicIp(options.publicIp);
+  applyGeneratedRootPassword(options);
   if (options.mode === "interactive") {
     await interactiveConfig(options);
   } else {
@@ -1133,7 +1176,9 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
   console.log(`${chalk.cyan("Management admin group:")} ${chalk.white(options.adminGroup)}`);
   console.log(`${chalk.cyan("Resolved config:")} ${chalk.white("/etc/terrarium/config.yaml")}`);
-  if (options.rootPassword) {
+  if (options.generatedRootPasswordPath) {
+    console.log(`${chalk.cyan("Cockpit login:")} ${chalk.white(`generated root password saved to ${options.generatedRootPasswordPath}`)}`);
+  } else if (options.rootPassword) {
     console.log(`${chalk.cyan("Cockpit login:")} ${chalk.white("root password was set during install")}`);
   }
 }
@@ -1161,7 +1206,7 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--lxd-oidc-secret-file <path>", "Read the optional LXD OIDC client secret from a root-readable file", STRING_OPTION)
     .option("--auth-domain <domain>", "ZITADEL auth domain", STRING_OPTION)
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL", STRING_OPTION)
-    .option("--root-pwd <password>", "Set or update the root password used for Cockpit login", STRING_OPTION)
+    .option("--generate-root-pwd", "Generate the Cockpit root password and save it under /etc/terrarium/secrets")
     .option("--root-pwd-file <path>", "Read the root password used for Cockpit login from a root-readable file", STRING_OPTION)
     .option("--storage-mode <mode>", "Storage mode: disk, partition, or file", STRING_OPTION)
     .option("--storage-source <pathOrAuto>", "Disk or partition path for disk/partition mode, or auto", STRING_OPTION)
@@ -1211,7 +1256,11 @@ export function registerInstallCommand(cli: CAC): void {
       );
       options.authDomain = readCliOption(cliOptions, "authDomain", ["auth-domain"]);
       options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail", ["zitadel-admin-email"]);
-      options.rootPassword = readSecretCliOption(cliOptions, "rootPwd", "rootPwdFile", ["root-pwd"], ["root-pwd-file"]);
+      options.generateRootPassword = Boolean(cliOptions.generateRootPwd || cliOptions["generate-root-pwd"]);
+      if (options.generateRootPassword && readCliOption(cliOptions, "rootPwdFile", ["root-pwd-file"])) {
+        fail("use only one of --generate-root-pwd or --root-pwd-file");
+      }
+      options.rootPassword = readSecretFileCliOption(cliOptions, "rootPwdFile", ["root-pwd-file"]);
       options.storageMode = readCliOption(cliOptions, "storageMode", ["storage-mode"]).replace("loop", "file");
       options.storageSource = readCliOption(cliOptions, "storageSource", ["storage-source"]);
       options.storageSize = readCliOption(cliOptions, "storageSize", ["storage-size"]);

@@ -113,7 +113,8 @@ workload design decisions.
 - Cockpit is now gated by host-level OIDC through Traefik `ForwardAuth` and `oauth2-proxy`.
 - Only members of `terrarium_admin_group` are allowed through the OIDC gate for Cockpit and LXD management access.
 - Cockpit still authenticates against the host's local PAM accounts after the OIDC gate, so `root` needs a usable local password for Cockpit login.
-- If root does not already have one, Terrarium prompts for a password during interactive install or requires `--root-pwd-file` or `--root-pwd` in non-interactive mode.
+- If root does not already have one, Terrarium prompts for a password during interactive install or requires `--generate-root-pwd` or `--root-pwd-file` in non-interactive mode.
+- Generated Cockpit root passwords are saved under `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions and are not written to `/etc/terrarium/config.yaml`.
 - IDP mode has two variants:
   - `local`: Terrarium deploys ZITADEL and derives the OIDC issuer from the Terrarium auth domain.
   - `oidc`: Terrarium uses an external OIDC issuer and stores the issuer URL plus client credentials.
