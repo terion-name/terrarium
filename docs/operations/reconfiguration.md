@@ -25,12 +25,18 @@ There is also:
 - `terrariumctl reconfigure`
 - `terrariumctl config import`
 - `terrariumctl config export`
+- `terrariumctl cluster ovn configure`
 
 `terrariumctl reconfigure` re-runs the local Ansible reconciliation using the current saved config. When the LXD dqlite-backed store is present, it exports that config to `/etc/terrarium/config.yaml` first so Ansible sees the cluster copy.
 
 `terrariumctl config import` publishes the local YAML export into the LXD dqlite-backed store. Terrarium runs this automatically after install/reconfigure once LXD exists.
 
 `terrariumctl config export` recreates `/etc/terrarium/config.yaml` from the dqlite-backed store. This is mostly useful for cluster admission and debugging workflows.
+
+`terrariumctl cluster ovn configure` updates the shared cluster networking
+settings and then runs the same local reconciliation path. Without flags, it
+discovers online LXD member addresses, keeps an odd OVN central set, and adds
+exact member CIDRs to the peer firewall list.
 
 ## What Gets Updated On Change
 

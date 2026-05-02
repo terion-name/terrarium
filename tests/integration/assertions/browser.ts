@@ -17,6 +17,7 @@ type LoginOptions = {
 
 const BROWSER_WAIT_TIMEOUT_MS = 120000;
 const BROWSER_FLOW_TIMEOUT_MS = 180000;
+const BROWSER_LIFECYCLE_TIMEOUT_MS = 15 * 60 * 1000;
 const BROWSER_CLOSE_TIMEOUT_MS = 10000;
 const BROWSER_CLICK_TIMEOUT_MS = 10000;
 const BROWSER_POLL_TIMEOUT_MS = 1000;
@@ -24,6 +25,7 @@ const BROWSER_INPUT_ATTEMPT_TIMEOUT_MS = 10000;
 const BROWSER_INPUT_TOTAL_TIMEOUT_MS = 45000;
 const BROWSER_LOGIN_DOCUMENT_TIMEOUT_MS = 30000;
 const BROWSER_OIDC_START_TIMEOUT_MS = 30000;
+const BROWSER_METADATA_TIMEOUT_MS = 5000;
 const BODY_SNIPPET_LENGTH = 4000;
 const DENIAL_TEXT_MARKERS = ["403", "forbidden", "access denied", "not authorized", "permission denied"] as const;
 const ERROR_TEXT_MARKERS = [
@@ -665,17 +667,14 @@ export async function withBrowser<T>(
     "browser launch"
   );
   try {
-    return await runFlow(browser);
+    return await withTimeout(runFlow(browser), BROWSER_LIFECYCLE_TIMEOUT_MS, "browser lifecycle");
   } finally {
     await withCloseTimeout(browser.close());
   }
 }
 
 async function withCloseTimeout(close: Promise<unknown>): Promise<void> {
-  await Promise.race([
-    close.then(() => undefined).catch(() => undefined),
-    Bun.sleep(BROWSER_CLOSE_TIMEOUT_MS)
-  ]);
+  await maybeWithTimeout(close.then(() => undefined).catch(() => undefined), BROWSER_CLOSE_TIMEOUT_MS);
 }
 
 async function loginThroughZitadelWithBrowser(
@@ -698,6 +697,10 @@ async function loginThroughZitadelWithBrowser(
     page = await context.newPage();
     page.setDefaultTimeout(BROWSER_WAIT_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(BROWSER_WAIT_TIMEOUT_MS);
+    page.on("close", () => {
+      browserEvents.push("page: closed");
+      browserEvents.splice(0, Math.max(0, browserEvents.length - 30));
+    });
     page.on("console", (message) => {
       browserEvents.push(`console:${message.type()}: ${message.text()}`);
       browserEvents.splice(0, Math.max(0, browserEvents.length - 30));
@@ -750,9 +753,13 @@ async function loginThroughZitadelWithBrowser(
         }
         stage = "capturing success screenshot";
         await page.screenshot({ path: screenshotPath, fullPage: true });
+        stage = "reading success page metadata";
         const finalUrl = page.url();
-        const title = await page.title().catch(() => "");
-        const bodyText = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+        const title = (await maybeWithTimeout(page.title().catch(() => ""), BROWSER_METADATA_TIMEOUT_MS)) ?? "";
+        const bodyText = (await maybeWithTimeout(
+          page.locator("body").innerText({ timeout: 1000 }).catch(() => ""),
+          BROWSER_METADATA_TIMEOUT_MS
+        )) ?? "";
         return { finalUrl, screenshotPath, bodyText, title };
       })(),
       BROWSER_FLOW_TIMEOUT_MS,
@@ -795,8 +802,8 @@ async function loginThroughZitadelWithBrowser(
   }
 }
 
-/** Completes the ZITADEL login flow and returns on the post-login target page. */
-export async function loginThroughZitadel(
+async function loginThroughZitadelWithBrowserRetry(
+  browser: Browser,
   url: string,
   user: OidcTestUser,
   options: LoginOptions
@@ -804,11 +811,7 @@ export async function loginThroughZitadel(
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await withBrowser(
-        options.outputDir,
-        async (browser) => await loginThroughZitadelWithBrowser(browser, url, user, options),
-        { resolveHosts: options.resolveHosts, ignoreHTTPSErrors: options.ignoreHTTPSErrors }
-      );
+      return await loginThroughZitadelWithBrowser(browser, url, user, options);
     } catch (error) {
       lastError = error;
       if (attempt >= 3 || !isRetryableBlankNavigationError(error)) {
@@ -818,6 +821,19 @@ export async function loginThroughZitadel(
   }
 
   throw lastError;
+}
+
+/** Completes the ZITADEL login flow and returns on the post-login target page. */
+export async function loginThroughZitadel(
+  url: string,
+  user: OidcTestUser,
+  options: LoginOptions
+): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
+  return await withBrowser(
+    options.outputDir,
+    async (browser) => await loginThroughZitadelWithBrowserRetry(browser, url, user, options),
+    { resolveHosts: options.resolveHosts, ignoreHTTPSErrors: options.ignoreHTTPSErrors }
+  );
 }
 
 export function isRetryableBlankNavigationError(error: unknown): boolean {
@@ -842,6 +858,17 @@ export function isRetryableBlankNavigationError(error: unknown): boolean {
       message.includes("goto: Timeout") &&
       message.includes("stage: opening target URL") &&
       message.includes("url: about:blank")
+    ) ||
+    (
+      message.includes("Target page, context or browser has been closed") &&
+      message.includes("/ui/v2/login/") &&
+      (
+        message.includes("stage: waiting for identity login document") ||
+        message.includes("stage: waiting for username input") ||
+        message.includes("stage: entering username") ||
+        message.includes("stage: waiting for password input") ||
+        message.includes("stage: entering password")
+      )
     )
   );
 }
@@ -884,7 +911,8 @@ export async function expectManagementUi(
       : {})
   };
   await withBrowser(outputDir, async (browser) => {
-    const cockpit = await loginThroughZitadelWithBrowser(browser, manageUrl, user, { outputDir });
+    const browserOptions = { outputDir };
+    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, browserOptions);
     const cockpitFinal = new URL(cockpit.finalUrl);
     const cockpitTarget = new URL(manageUrl);
     if (cockpitFinal.host !== cockpitTarget.host) {
@@ -892,7 +920,7 @@ export async function expectManagementUi(
     }
     assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
-    const proxy = await loginThroughZitadelWithBrowser(browser, proxyUrl, user, { outputDir });
+    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, browserOptions);
     if (!proxy.finalUrl.includes("/dashboard")) {
       throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
     }
@@ -920,7 +948,8 @@ export async function expectManagementSurfaces(
       : {})
   };
   await withBrowser(outputDir, async (browser) => {
-    const cockpit = await loginThroughZitadelWithBrowser(browser, manageUrl, user, { outputDir });
+    const browserOptions = { outputDir };
+    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, browserOptions);
     const cockpitFinal = new URL(cockpit.finalUrl);
     const cockpitTarget = new URL(manageUrl);
     if (cockpitFinal.host !== cockpitTarget.host) {
@@ -928,13 +957,13 @@ export async function expectManagementSurfaces(
     }
     assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
-    const proxy = await loginThroughZitadelWithBrowser(browser, proxyUrl, user, { outputDir });
+    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, browserOptions);
     if (!proxy.finalUrl.includes("/dashboard")) {
       throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
     }
     assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
 
-    const lxd = await loginThroughZitadelWithBrowser(browser, lxdUrl, user, {
+    const lxd = await loginThroughZitadelWithBrowserRetry(browser, lxdUrl, user, {
       outputDir,
       postLoginBodyMarkers: LXD_TEXT_MARKERS,
       postLoginLabel: "LXD UI"

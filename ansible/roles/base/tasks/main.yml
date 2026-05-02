@@ -99,6 +99,22 @@
     - "80"
     - "443"
 
+- name: Allow LXD cluster API from configured peer networks
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ item }}"
+    port: "8443"
+    proto: tcp
+  loop: "{{ terrarium_cluster_peer_cidrs | default([]) }}"
+
+- name: Allow OVN cluster database and overlay traffic from configured peer networks
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ item.0 }}"
+    port: "{{ item.1.port }}"
+    proto: "{{ item.1.proto }}"
+  loop: "{{ (terrarium_cluster_peer_cidrs | default([])) | product([{'port': '6081', 'proto': 'udp'}, {'port': '6641', 'proto': 'tcp'}, {'port': '6642', 'proto': 'tcp'}]) | list }}"
+
 - name: Enable UFW
   community.general.ufw:
     state: enabled

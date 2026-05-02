@@ -7,6 +7,15 @@
     terrarium_config_path: /etc/terrarium/config.yaml
     terrarium_state_dir: /var/lib/terrarium
     terrarium_lxd_pool_name: terrarium
+    terrarium_cluster_enabled: false
+    terrarium_cluster_peer_cidrs: []
+    terrarium_lxd_network_parent: lxdbr0
+    terrarium_lxd_network_name: terrarium-ovn
+    terrarium_lxd_parent_ipv4: 10.154.0.1/24
+    terrarium_lxd_parent_dhcp_range: 10.154.0.2-10.154.0.199
+    terrarium_lxd_parent_ovn_range: 10.154.0.200-10.154.0.254
+    terrarium_ovn_central_addresses: []
+    terrarium_ovn_local_address: "{{ ansible_default_ipv4.address }}"
     terrarium_storage_mode: file
     terrarium_storage_source: ""
     terrarium_storage_size: ""
@@ -61,6 +70,14 @@
       terrarium_admin_group: "{{ terrarium_admin_group }}"
       terrarium_zitadel_admin_email: "{{ terrarium_zitadel_admin_email }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
+      terrarium_cluster_enabled: "{{ terrarium_cluster_enabled }}"
+      terrarium_cluster_peer_cidrs: "{{ terrarium_cluster_peer_cidrs }}"
+      terrarium_lxd_network_parent: "{{ terrarium_lxd_network_parent }}"
+      terrarium_lxd_network_name: "{{ terrarium_lxd_network_name }}"
+      terrarium_lxd_parent_ipv4: "{{ terrarium_lxd_parent_ipv4 }}"
+      terrarium_lxd_parent_dhcp_range: "{{ terrarium_lxd_parent_dhcp_range }}"
+      terrarium_lxd_parent_ovn_range: "{{ terrarium_lxd_parent_ovn_range }}"
+      terrarium_ovn_central_addresses: "{{ terrarium_ovn_central_addresses }}"
       terrarium_storage_mode: "{{ terrarium_storage_mode }}"
       terrarium_storage_source: "{{ terrarium_storage_source }}"
       terrarium_storage_size: "{{ terrarium_storage_size }}"

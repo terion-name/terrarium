@@ -13,6 +13,18 @@ describe("base role packages", () => {
   });
 });
 
+describe("cluster firewall", () => {
+  test("opens LXD and OVN ports only for configured peer networks", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("Allow LXD cluster API from configured peer networks");
+    expect(tasks).toContain("terrarium_cluster_peer_cidrs");
+    expect(tasks).toContain("'6081'");
+    expect(tasks).toContain("'6641'");
+    expect(tasks).toContain("'6642'");
+  });
+});
+
 describe("config store reconciliation", () => {
   test("imports the local config export into the LXD dqlite store before proxy sync", () => {
     const site = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");

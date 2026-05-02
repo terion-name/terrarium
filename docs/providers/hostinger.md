@@ -70,3 +70,27 @@ hapi vps vm stop <vm_id>
 ```
 
 The current official support article does not document end-to-end VPS creation through `hapi`, so for Terrarium provisioning the most reliable documented path is still hPanel plus SSH.
+
+## Private network for clustering
+
+Hostinger's current public VPS docs do not document a VPC/private-network
+feature for connecting multiple VPS instances on a non-public subnet. That
+makes Hostinger a poor fit for Terrarium clustering.
+
+You can technically form an LXD cluster over public IP addresses, but that is
+not the recommended Hostinger path. If you do it anyway:
+
+- pass exact `/32` public peer CIDRs instead of a broad range
+- keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
+  restricted to the other cluster members only
+- expect less isolation than providers with a real private VPC/network
+
+Example public-only shape:
+
+```bash
+terrariumctl cluster init --peer-cidr 203.0.113.12/32
+terrariumctl cluster join --token '<token>' --peer-cidr 203.0.113.11/32 --yes
+```
+
+For production clustering, prefer a provider that documents private networking,
+such as Hetzner Cloud Networks, DigitalOcean VPC, or Vultr VPC 2.0.

@@ -10,6 +10,9 @@ type SearchProjectResult = { result?: Array<{ id?: string; name?: string }> };
 type SearchAppResult = { result?: Array<{ id?: string; name?: string }> };
 type ActionResult = { result?: Array<{ id?: string; name?: string; script?: string }> };
 type Flow = { flow?: { triggerActions?: Array<{ triggerType?: { id?: string }; actions?: Array<{ id?: string }> }> } };
+type FixtureOptions = {
+  extraDomains?: DomainBundle[];
+};
 export type ZitadelFixtureProgress =
   | {
       type: "project";
@@ -80,12 +83,25 @@ function normalizeRouteCallbackUri(value: string): string {
   return `https://${trimmed}/oauth2/callback`;
 }
 
-export function buildZitadelCloudRedirectUris(domains: DomainBundle, routeCallbackUris: string[] = []): string[] {
-  return [...new Set([...buildZitadelCloudManagementRedirectUris(domains, routeCallbackUris), ...buildZitadelCloudLxdRedirectUris(domains)])];
+export function buildZitadelCloudRedirectUris(domains: DomainBundle, routeCallbackUris: string[] = [], extraDomains: DomainBundle[] = []): string[] {
+  return [
+    ...new Set([
+      ...buildZitadelCloudManagementRedirectUris(domains, routeCallbackUris, extraDomains),
+      ...buildZitadelCloudLxdRedirectUris(domains, extraDomains)
+    ])
+  ];
 }
 
-export function buildZitadelCloudManagementRedirectUris(domains: DomainBundle, routeCallbackUris: string[] = []): string[] {
-  const redirectUris = new Set([`https://${domains.manage}/oauth2/callback`, `https://${domains.manage}/oauth2/app/callback`]);
+export function buildZitadelCloudManagementRedirectUris(
+  domains: DomainBundle,
+  routeCallbackUris: string[] = [],
+  extraDomains: DomainBundle[] = []
+): string[] {
+  const redirectUris = new Set<string>();
+  for (const domainBundle of [domains, ...extraDomains]) {
+    redirectUris.add(`https://${domainBundle.manage}/oauth2/callback`);
+    redirectUris.add(`https://${domainBundle.manage}/oauth2/app/callback`);
+  }
   for (const callbackUri of routeCallbackUris) {
     const normalized = normalizeRouteCallbackUri(callbackUri);
     if (normalized) {
@@ -95,8 +111,8 @@ export function buildZitadelCloudManagementRedirectUris(domains: DomainBundle, r
   return [...redirectUris];
 }
 
-export function buildZitadelCloudLxdRedirectUris(domains: DomainBundle): string[] {
-  return [`https://${domains.lxd}/oidc/callback`];
+export function buildZitadelCloudLxdRedirectUris(domains: DomainBundle, extraDomains: DomainBundle[] = []): string[] {
+  return [...new Set([domains, ...extraDomains].map((domainBundle) => `https://${domainBundle.lxd}/oidc/callback`))];
 }
 
 function isRetryableZitadelStatus(status: number): boolean {
@@ -510,6 +526,7 @@ export class ZitadelCloudProvider {
     domains: DomainBundle,
     adminGroup: string,
     routeCallbackUris: string[] = [],
+    options: FixtureOptions = {},
     onProgress?: ZitadelFixtureProgressHandler
   ): Promise<ExternalOidcFixture> {
     await this.ensureGroupsAction();
@@ -530,7 +547,7 @@ export class ZitadelCloudProvider {
       projectId,
       appName,
       {
-        redirectUris: buildZitadelCloudManagementRedirectUris(domains, routeCallbackUris),
+        redirectUris: buildZitadelCloudManagementRedirectUris(domains, routeCallbackUris, options.extraDomains ?? []),
         appType: "OIDC_APP_TYPE_WEB",
         authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
         grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
@@ -542,7 +559,7 @@ export class ZitadelCloudProvider {
       }
     );
     const lxdApp = await this.createOidcApp(projectId, lxdAppName, {
-      redirectUris: buildZitadelCloudLxdRedirectUris(domains),
+      redirectUris: buildZitadelCloudLxdRedirectUris(domains, options.extraDomains ?? []),
       appType: "OIDC_APP_TYPE_NATIVE",
       authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
       grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN", "OIDC_GRANT_TYPE_DEVICE_CODE"],

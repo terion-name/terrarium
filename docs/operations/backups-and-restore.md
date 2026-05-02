@@ -59,8 +59,12 @@ terrariumctl backup restore --instance my-app --as-new my-app-restored
 Terrarium will:
 
 1. reconstruct or clone the dataset
-2. print a clear notice about what happens next
-3. launch interactive `lxd recover`
+2. rewrite the recovered LXD metadata for the new instance name
+3. remove host-bound proxy devices and Terrarium `user.proxy` labels from the recovered copy
+4. print a clear notice about what happens next
+5. launch interactive `lxd recover`
+
+The recovered instance is intentionally private until you publish it again. This prevents a restored copy from binding the same host ports or hijacking the same public route as the source instance.
 
 Why this is interactive:
 

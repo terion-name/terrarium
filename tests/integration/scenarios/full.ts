@@ -1,6 +1,7 @@
 import { IntegrationContext } from "../context";
 import { expectRemoteContains } from "../assertions/host";
 import {
+  assertInstalledHost,
   captureFailureArtifacts,
   createHttpFixtureContainer,
   expectedRouteAuthRedirectUris,
@@ -15,12 +16,290 @@ function shellArg(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
+function lastNonEmptyLine(value: string): string {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines[lines.length - 1] ?? "";
+}
+
 function joinRemotePath(...segments: string[]): string {
   const joined = segments
     .map((segment) => segment.replace(/^\/+|\/+$/g, ""))
     .filter(Boolean)
     .join("/");
   return `/${joined}`;
+}
+
+async function waitForClusterMembers(host: ReturnType<IntegrationContext["ssh"]>, members: string[]): Promise<void> {
+  const script = `
+set -euo pipefail
+timeout 300s bash -lc ${shellArg(
+    `until lxc cluster list --format json | jq -r '.[].server_name' | grep -Fx ${shellArg(members[0])} >/dev/null; do sleep 2; done`
+  )}
+${members
+  .slice(1)
+  .map(
+    (member) =>
+      `timeout 300s bash -lc ${shellArg(`until lxc cluster list --format json | jq -r '.[].server_name' | grep -Fx ${shellArg(member)} >/dev/null; do sleep 2; done`)}`
+  )
+  .join("\n")}
+`.trim();
+  await host.exec(`bash -lc ${shellArg(script)}`);
+}
+
+async function verifyClusterOvnWorkloads(
+  host: ReturnType<IntegrationContext["ssh"]>,
+  firstMember: string,
+  secondMember: string,
+  slug: string
+): Promise<void> {
+  const firstInstance = `cluster-a-${slug}`;
+  const secondInstance = `cluster-b-${slug}`;
+  const script = `
+set -euo pipefail
+
+wait_running() {
+  local instance="$1"
+  local deadline=$((SECONDS + 300))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if lxc info "$instance" | grep -F 'Status: RUNNING' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+instance_ip() {
+  local instance="$1"
+  local deadline=$((SECONDS + 300))
+  local ip=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    ip="$(lxc query "/1.0/instances/$instance/state" | jq -er '(.network // {} | to_entries[] | .value.addresses[]? | select(.family == "inet" and .scope == "global") | .address)' | head -n1 || true)"
+    if [ -n "$ip" ]; then
+      printf '%s\\n' "$ip"
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+lxc delete ${shellArg(firstInstance)} --force >/dev/null 2>&1 || true
+lxc delete ${shellArg(secondInstance)} --force >/dev/null 2>&1 || true
+
+lxc launch ubuntu:24.04 ${shellArg(firstInstance)} --target ${shellArg(firstMember)}
+lxc launch ubuntu:24.04 ${shellArg(secondInstance)} --target ${shellArg(secondMember)}
+wait_running ${shellArg(firstInstance)}
+wait_running ${shellArg(secondInstance)}
+
+first_ip="$(instance_ip ${shellArg(firstInstance)})"
+second_ip="$(instance_ip ${shellArg(secondInstance)})"
+test -n "$first_ip"
+test -n "$second_ip"
+
+lxc exec ${shellArg(firstInstance)} -- ping -c 3 -W 5 "$second_ip"
+lxc exec ${shellArg(secondInstance)} -- ping -c 3 -W 5 "$first_ip"
+lxc list
+`.trim();
+
+  try {
+    await host.exec(`bash -lc ${shellArg(script)}`, { timeoutMs: 15 * 60 * 1000 });
+  } finally {
+    await host.execAllowFailure(`lxc delete ${shellArg(firstInstance)} --force`, { timeoutMs: 120000 });
+    await host.execAllowFailure(`lxc delete ${shellArg(secondInstance)} --force`, { timeoutMs: 120000 });
+  }
+}
+
+async function verifyClusterRemoveWithMove(
+  host: ReturnType<IntegrationContext["ssh"]>,
+  remainingMember: string,
+  removedMember: string,
+  slug: string
+): Promise<void> {
+  const instance = `cluster-remove-${slug}`;
+  const script = `
+set -euo pipefail
+
+wait_running() {
+  local instance="$1"
+  local deadline=$((SECONDS + 300))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if lxc info "$instance" | grep -F 'Status: RUNNING' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+lxc delete ${shellArg(instance)} --force >/dev/null 2>&1 || true
+lxc launch ubuntu:24.04 ${shellArg(instance)} --target ${shellArg(removedMember)}
+wait_running ${shellArg(instance)}
+
+terrariumctl cluster remove ${shellArg(removedMember)} --move --yes
+timeout 300s bash -lc ${shellArg(`until ! lxc cluster list --format json | jq -r '.[].server_name' | grep -Fx ${shellArg(removedMember)} >/dev/null; do sleep 2; done`)}
+test "$(lxc query ${shellArg(`/1.0/instances/${instance}`)} | jq -r '.location')" = ${shellArg(remainingMember)}
+wait_running ${shellArg(instance)}
+`.trim();
+
+  try {
+    await host.exec(`bash -lc ${shellArg(script)}`, { timeoutMs: 20 * 60 * 1000 });
+  } finally {
+    await host.execAllowFailure(`lxc delete ${shellArg(instance)} --force`, { timeoutMs: 120000 });
+  }
+}
+
+async function verifyClusterWorkloadOperations(
+  host: ReturnType<IntegrationContext["ssh"]>,
+  firstMember: string,
+  secondMember: string,
+  slug: string
+): Promise<void> {
+  const moveInstance = `cluster-move-${slug}`;
+  const evacuateInstance = `cluster-evacuate-${slug}`;
+  const restoreProbeInstance = `cluster-restore-${slug}`;
+  const script = `
+set -euo pipefail
+
+wait_running() {
+  local instance="$1"
+  local deadline=$((SECONDS + 300))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if lxc info "$instance" | grep -F 'Status: RUNNING' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+wait_location() {
+  local instance="$1"
+  local member="$2"
+  local deadline=$((SECONDS + 300))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if [ "$(lxc query "/1.0/instances/$instance" | jq -r '.location')" = "$member" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+lxc delete ${shellArg(moveInstance)} --force >/dev/null 2>&1 || true
+lxc delete ${shellArg(evacuateInstance)} --force >/dev/null 2>&1 || true
+lxc delete ${shellArg(restoreProbeInstance)} --force >/dev/null 2>&1 || true
+
+lxc launch ubuntu:24.04 ${shellArg(moveInstance)} --target ${shellArg(firstMember)}
+wait_running ${shellArg(moveInstance)}
+terrariumctl cluster move ${shellArg(moveInstance)} ${shellArg(secondMember)}
+wait_location ${shellArg(moveInstance)} ${shellArg(secondMember)}
+wait_running ${shellArg(moveInstance)}
+terrariumctl cluster move ${shellArg(moveInstance)} ${shellArg(firstMember)}
+wait_location ${shellArg(moveInstance)} ${shellArg(firstMember)}
+wait_running ${shellArg(moveInstance)}
+
+lxc launch ubuntu:24.04 ${shellArg(evacuateInstance)} --target ${shellArg(secondMember)}
+wait_running ${shellArg(evacuateInstance)}
+terrariumctl cluster evacuate ${shellArg(secondMember)} --yes
+wait_location ${shellArg(evacuateInstance)} ${shellArg(firstMember)}
+wait_running ${shellArg(evacuateInstance)}
+
+terrariumctl cluster restore ${shellArg(secondMember)} --yes
+lxc launch ubuntu:24.04 ${shellArg(restoreProbeInstance)} --target ${shellArg(secondMember)}
+wait_running ${shellArg(restoreProbeInstance)}
+wait_location ${shellArg(restoreProbeInstance)} ${shellArg(secondMember)}
+`.trim();
+
+  try {
+    await host.exec(`bash -lc ${shellArg(script)}`, { timeoutMs: 30 * 60 * 1000 });
+  } finally {
+    await host.execAllowFailure(`lxc delete ${shellArg(moveInstance)} --force`, { timeoutMs: 120000 });
+    await host.execAllowFailure(`lxc delete ${shellArg(evacuateInstance)} --force`, { timeoutMs: 120000 });
+    await host.execAllowFailure(`lxc delete ${shellArg(restoreProbeInstance)} --force`, { timeoutMs: 120000 });
+  }
+}
+
+async function verifyTerrariumCluster(context: IntegrationContext, sshKeyId: number): Promise<void> {
+  const seed = await provisionHost(context, { label: "cluster-seed", withVolume: false }, sshKeyId);
+  const joiner = await provisionHost(context, { label: "cluster-join", withVolume: false }, sshKeyId);
+  const seedSsh = context.ssh(seed);
+  const joinSsh = context.ssh(joiner);
+  const seedMember = "cluster-seed";
+  const joinMember = "cluster-join";
+
+  try {
+    await context.publicDns.waitForHosts(
+      [seed.domains.manage, seed.domains.proxy, seed.domains.lxd, seed.domains.auth],
+      seed.server.ipv4
+    );
+    await context.publicDns.waitForHosts(
+      [joiner.domains.manage, joiner.domains.proxy, joiner.domains.lxd, joiner.domains.auth],
+      joiner.server.ipv4
+    );
+
+    const fixture = await context.provisionZitadelFixture(
+      `${context.config.slug}-cluster`,
+      seed.domains,
+      "terrarium-admins",
+      [],
+      [joiner.domains]
+    );
+
+    await installTerrarium(context, seed, {
+      idpMode: "oidc",
+      storageMode: "file",
+      storageSize: "32G",
+      oidcIssuer: context.config.zitadelCloudIssuer,
+      oidcClientId: fixture.clientId,
+      oidcClientSecret: fixture.clientSecret,
+      lxdOidcClientId: fixture.lxdClientId,
+      lxdOidcClientSecret: fixture.lxdClientSecret,
+      adminGroup: fixture.adminGroup
+    });
+    await installTerrarium(context, joiner, {
+      idpMode: "oidc",
+      storageMode: "file",
+      storageSize: "32G",
+      oidcIssuer: context.config.zitadelCloudIssuer,
+      oidcClientId: fixture.clientId,
+      oidcClientSecret: fixture.clientSecret,
+      lxdOidcClientId: fixture.lxdClientId,
+      lxdOidcClientSecret: fixture.lxdClientSecret,
+      adminGroup: fixture.adminGroup
+    });
+
+    await assertInstalledHost(seedSsh);
+    await assertInstalledHost(joinSsh);
+
+    await seedSsh.exec(`terrariumctl cluster init --member ${shellArg(seedMember)} --peer-cidr ${shellArg(`${joiner.server.ipv4}/32`)}`, {
+      timeoutMs: 30 * 60 * 1000
+    });
+    await waitForClusterMembers(seedSsh, [seedMember]);
+
+    const token = lastNonEmptyLine(await seedSsh.exec(`terrariumctl cluster token ${shellArg(joinMember)}`, { timeoutMs: 120000 }));
+    if (!token) {
+      throw new Error("cluster token command returned an empty token");
+    }
+
+    await joinSsh.exec(`terrariumctl cluster join --token ${shellArg(token)} --yes`, { timeoutMs: 30 * 60 * 1000 });
+
+    await waitForClusterMembers(seedSsh, [seedMember, joinMember]);
+    await waitForClusterMembers(joinSsh, [seedMember, joinMember]);
+    await seedSsh.exec("terrariumctl cluster ovn configure", { timeoutMs: 30 * 60 * 1000 });
+    await expectRemoteContains(seedSsh, "terrariumctl cluster status", "terrarium-ovn");
+    await expectRemoteContains(joinSsh, "terrariumctl cluster status", "terrarium-ovn");
+    await expectRemoteContains(joinSsh, "grep -F 'terrarium_cluster_enabled: true' /etc/terrarium/config.yaml", "terrarium_cluster_enabled: true");
+    await verifyClusterOvnWorkloads(seedSsh, seedMember, joinMember, context.config.slug);
+    await verifyClusterWorkloadOperations(seedSsh, seedMember, joinMember, context.config.slug);
+    await verifyClusterRemoveWithMove(seedSsh, seedMember, joinMember, context.config.slug);
+  } catch (error) {
+    await captureFailureArtifacts(context, [seed, joiner]);
+    throw error;
+  }
 }
 
 async function verifySharedCifsStorage(context: IntegrationContext, fileSsh: ReturnType<IntegrationContext["ssh"]>): Promise<void> {
@@ -212,6 +491,8 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     if (badOidc.exitCode === 0) {
       throw new Error("expected bad OIDC credentials to fail");
     }
+
+    await verifyTerrariumCluster(context, sshKeyId);
   } catch (error) {
     await captureFailureArtifacts(context, [fileHost, partitionHost]);
     throw error;

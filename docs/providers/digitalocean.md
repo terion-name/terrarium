@@ -10,6 +10,8 @@ Official references:
 - [doctl compute droplet create](https://docs.digitalocean.com/reference/doctl/reference/compute/droplet/create/)
 - [doctl compute volume create](https://docs.digitalocean.com/reference/doctl/reference/compute/volume/create/)
 - [doctl compute volume-action attach](https://docs.digitalocean.com/reference/doctl/reference/compute/volume-action/attach/)
+- [How to Create a VPC](https://docs.digitalocean.com/products/networking/vpc/how-to/create/)
+- [doctl vpcs create](https://docs.digitalocean.com/reference/doctl/reference/vpcs/create/)
 
 ## Recommended shape
 
@@ -84,6 +86,60 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/ins
   --storage-mode disk \
   --storage-source auto
 ```
+
+## Private network for clustering
+
+For clustered Terrarium, put every Droplet in the same DigitalOcean VPC in the
+same region. DigitalOcean VPC networks are private to your account and are not
+reachable from the public internet.
+
+Create a VPC:
+
+```bash
+doctl vpcs create \
+  --name terrarium-cluster \
+  --region fra1 \
+  --ip-range 10.42.0.0/24
+```
+
+Capture the VPC UUID:
+
+```bash
+doctl vpcs list
+```
+
+Create each Terrarium Droplet in that VPC:
+
+```bash
+doctl compute droplet create terrarium-1 \
+  --region fra1 \
+  --size s-4vcpu-8gb \
+  --image ubuntu-24-04-x64 \
+  --ssh-keys <ssh-key-id-or-fingerprint> \
+  --vpc-uuid <vpc-uuid>
+```
+
+After installing Terrarium on each node, run:
+
+```bash
+terrariumctl cluster init
+terrariumctl cluster invite node2
+```
+
+Then run the printed `terrariumctl cluster join --token ...` command on the new
+node. Terrarium should auto-select the VPC address. If it does not, pass the
+private address and peer subnet explicitly:
+
+```bash
+terrariumctl cluster init \
+  --address 10.42.0.11:8443 \
+  --peer-cidr 10.42.0.0/24
+```
+
+Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
+restricted to the VPC subnet. Public firewall rules should only cover the
+normal Terrarium ingress ports documented in
+[Services and Endpoints](../reference/services-and-endpoints.md).
 
 ## Notes
 

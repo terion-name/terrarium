@@ -2,3 +2,11 @@ terrarium_lxd_snap_channel: latest/stable
 terrarium_lxd_auth_group: terrarium-management
 terrarium_lxd_oidc_groups_claim: groups
 terrarium_lxd_idp_group_state_path: "{{ terrarium_state_dir }}/lxd-idp-admin-group"
+terrarium_cluster_enabled: false
+terrarium_lxd_network_parent: lxdbr0
+terrarium_lxd_network_name: terrarium-ovn
+terrarium_lxd_parent_ipv4: 10.154.0.1/24
+terrarium_lxd_parent_dhcp_range: 10.154.0.2-10.154.0.199
+terrarium_lxd_parent_ovn_range: 10.154.0.200-10.154.0.254
+terrarium_ovn_central_addresses: []
+terrarium_ovn_local_address: "{{ ansible_default_ipv4.address }}"

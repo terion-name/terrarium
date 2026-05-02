@@ -1,10 +1,12 @@
 config:
   core.https_address: 127.0.0.1:8443
 networks:
-  - name: lxdbr0
+  - name: {{ terrarium_lxd_network_parent }}
     type: bridge
     config:
-      ipv4.address: auto
+      ipv4.address: {{ terrarium_lxd_parent_ipv4 }}
+      ipv4.dhcp.ranges: {{ terrarium_lxd_parent_dhcp_range }}
+      ipv4.ovn.ranges: {{ terrarium_lxd_parent_ovn_range }}
       ipv4.nat: "true"
       ipv6.address: none
 storage_pools:
@@ -24,7 +26,7 @@ profiles:
       eth0:
         type: nic
         name: eth0
-        network: lxdbr0
+        network: {{ terrarium_lxd_network_parent }}
       root:
         type: disk
         path: /

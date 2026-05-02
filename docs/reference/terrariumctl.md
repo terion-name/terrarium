@@ -14,7 +14,17 @@
 | `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the saved config. |
 | `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
 | `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
-| `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
+| `terrariumctl cluster status` | none | n/a | Shows LXD cluster state and the Terrarium OVN workload network. |
+| `terrariumctl cluster init` | optional: `--member`, `--address`, `--central-addresses`, `--peer-cidr` | member from hostname, address/private peer CIDR auto-discovered when possible | Enables LXD clustering on the first member and reconciles Terrarium cluster networking. |
+| `terrariumctl cluster invite` | required: member name | n/a | Mints a single-use LXD cluster join token and prints the simplified join command for the new member. |
+| `terrariumctl cluster token` | required: member name | n/a | Mints only the single-use LXD cluster join token for another member. |
+| `terrariumctl cluster join` | required: `--token`; optional: `--address`, `--peer-cidr`, `--yes` | storage pool `terrarium`, address auto-discovered by routing to the token member | Joins this node to an existing LXD cluster and exports the shared Terrarium config. |
+| `terrariumctl cluster evacuate` | required: member name | n/a | Asks LXD to evacuate workloads from a member for maintenance. |
+| `terrariumctl cluster restore` | required: member name | n/a | Restores an evacuated member to normal cluster service. |
+| `terrariumctl cluster move` | required: workload name, target member | n/a | Moves one workload to another LXD cluster member without renaming it. |
+| `terrariumctl cluster remove` | required: member name; optional: `--move`, `--target`, `--force`, `--yes` | prompts before workload moves and removal | Removes a member from the LXD cluster, optionally moving workloads first. |
+| `terrariumctl cluster ovn configure` | optional: `--central-addresses`, `--peer-cidr` | discovers LXD member addresses and keeps an odd OVN central set | Updates shared OVN and cluster firewall settings, then reconciles the host. |
+| `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config, host-loopback LXD proxy backend devices, and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
 | `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=0`, `gid=0`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
 | `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
@@ -88,6 +98,199 @@ Terrarium keeps its canonical day-2 config in LXD's dqlite-backed project metada
 Use `terrariumctl config import` to copy the local export into the dqlite-backed store. Terrarium runs this automatically after LXD has been initialized during install and reconfigure.
 
 Use `terrariumctl config export` to recreate the local export from the dqlite-backed store. `terrariumctl reconfigure` does this automatically before invoking Ansible when the dqlite-backed store exists.
+
+## cluster
+
+Terrarium cluster commands wrap LXD's native clustering flow. They do not create
+a separate Terrarium consensus layer.
+
+### cluster status
+
+```bash
+terrariumctl cluster status
+```
+
+Prints `lxc cluster list` and, when present, the Terrarium OVN workload network
+definition.
+
+### cluster init
+
+```bash
+terrariumctl cluster init
+```
+
+Manual override example:
+
+```bash
+terrariumctl cluster init \
+  --member node1 \
+  --address 10.0.0.11:8443 \
+  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
+  --peer-cidr 10.0.0.0/24
+```
+
+| Flag | Argument | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `--member` | name | no | `hostname -s` | Local LXD cluster member name. |
+| `--address` | IP/DNS with optional port | no | auto-discovered host address, port `8443` | Reachable LXD cluster address for this node. |
+| `--network` | LXD network name | no | `terrarium-ovn` | Terrarium OVN workload network. |
+| `--parent` | LXD network name | no | `lxdbr0` | Managed parent/uplink network for OVN. |
+| `--central-addresses` | comma-separated IPs | no | local cluster address | OVN central member addresses. Use an odd-sized set for production. |
+| `--peer-cidr` | comma-separated CIDRs | no | discovered private peer CIDR when possible | Peer networks allowed through UFW for LXD and OVN cluster traffic. Public-only clusters should pass exact `/32` peer CIDRs. |
+| `--skip-reconfigure` | none | no | reconfigure after cluster changes | Saves cluster config without reconciling the host. |
+
+### cluster invite
+
+```bash
+terrariumctl cluster invite node2
+```
+
+Prints a copy-paste join command:
+
+```bash
+terrariumctl cluster join --token '<token-from-existing-member>'
+```
+
+Use this for normal operations. Use `cluster token` only when another tool will
+consume the raw token.
+
+### cluster token
+
+```bash
+terrariumctl cluster token node2
+```
+
+Prints the single-use token returned by `lxc cluster add node2`.
+
+### cluster join
+
+```bash
+terrariumctl cluster join --token '<token-from-existing-member>'
+```
+
+Manual override example:
+
+```bash
+terrariumctl cluster join \
+  --token '<token-from-existing-member>' \
+  --address 10.0.0.12:8443 \
+  --peer-cidr 10.0.0.0/24 \
+  --yes
+```
+
+| Flag | Argument | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `--token` | token | yes | none | Single-use token created by `terrariumctl cluster token`. |
+| `--address` | IP/DNS with optional port | no | auto-discovered by routing to an existing member from the token | Reachable LXD cluster address for this node. |
+| `--storage-pool` | pool name | no | `terrarium` | Member-local storage pool name used in the LXD join preseed. |
+| `--peer-cidr` | comma-separated CIDRs | no | exact existing member IPs from the token | Peer networks allowed through UFW before the LXD join runs. |
+| `--yes` | none | no | prompt before join | Confirms the destructive LXD cluster join operation. |
+| `--skip-export` | none | no | export shared config after join | Leaves `/etc/terrarium/config.yaml` untouched after joining. |
+| `--skip-reconfigure` | none | no | reconfigure after join | Joins without running local Terrarium reconciliation. |
+
+### cluster evacuate
+
+```bash
+terrariumctl cluster evacuate node2
+```
+
+Asks LXD to evacuate workloads from `node2` for planned maintenance.
+
+### cluster restore
+
+```bash
+terrariumctl cluster restore node2
+```
+
+Restores an evacuated member to normal service. This does not guarantee that
+workloads evacuated earlier move back automatically.
+
+### cluster move
+
+```bash
+terrariumctl cluster move app1 node2
+```
+
+Moves workload `app1` to cluster member `node2` without renaming the workload.
+This follows normal LXD move behavior; stop the workload first if your storage
+or runtime cannot migrate it while running.
+
+### cluster remove
+
+```bash
+terrariumctl cluster remove node2
+```
+
+If `node2` still has workloads, Terrarium asks whether to move them first. In
+automation:
+
+```bash
+terrariumctl cluster remove node2 --move --yes
+```
+
+When `--target` is omitted, Terrarium creates a best-effort distribution plan
+across the remaining online members. It prefers members with fewer existing
+workloads, and uses lower memory pressure as a tie-breaker when LXD reports
+resource data. Add `--target node1` when you intentionally want every workload
+to land on one member.
+
+Running workloads are stopped before the move and started again on the target
+member. Use application-level failover or LXD evacuation policy when a workload
+needs stricter availability behavior.
+
+For dead members:
+
+```bash
+terrariumctl cluster remove node2 --force
+```
+
+Force removal updates cluster metadata only. Workloads that only existed on the
+dead member's local storage must be recovered from backups or replicated/shared
+storage.
+
+| Flag | Argument | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `--move` | none | no | prompt when workloads exist | Moves workloads off the member before removing it. |
+| `--target` | member name | no | best-effort distribution across remaining online members | Target member for all moved workloads when you do not want automatic distribution. |
+| `--force` | none | no | clean member removal | Force-removes an unreachable member from LXD metadata. |
+| `--yes` | none | no | prompt before movement/removal | Confirms prompts for automation. |
+| `--skip-reconfigure` | none | no | reconfigure after cluster config changes | Saves shared cluster config without reconciling the host. |
+
+### cluster ovn configure
+
+```bash
+terrariumctl cluster ovn configure
+```
+
+Updates the shared Terrarium config and reconciles:
+
+- OVN central service membership
+- Open vSwitch southbound connection
+- LXD OVN northbound connection
+- `terrarium-ovn` workload network
+- UFW rules for peer-only cluster traffic
+
+Without flags, Terrarium reads LXD cluster membership, uses an odd number of
+online member addresses as OVN central addresses, and adds exact member CIDRs
+to the shared peer firewall list. If a larger manually configured central set
+already exists, Terrarium keeps it instead of shrinking it because one member is
+temporarily unreachable.
+
+Manual override example:
+
+```bash
+terrariumctl cluster ovn configure \
+  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
+  --peer-cidr 10.0.0.0/24
+```
+
+Use an odd number of central addresses. If there is no LXD cluster membership
+yet and `--central-addresses` is omitted, Terrarium keeps the existing local
+OVN setting.
+
+This command reconciles the node where it runs. If the central set changes
+after other members have already joined, run `terrariumctl reconfigure` on
+those members so their local OVN services consume the shared config.
 
 ## backup restore
 

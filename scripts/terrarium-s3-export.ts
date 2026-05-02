@@ -7,7 +7,6 @@ import {
   normalizeS3Endpoint,
   runAllowFailure,
   runJson,
-  runShell,
   runText,
   shellEscape,
   writeJsonFile
@@ -16,6 +15,8 @@ import {
 const PREFIX = "terrariumctl backup export";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
 const STATE_DIR = "/var/lib/terrarium";
+const S3_EXPORT_ATTEMPTS = 4;
+const S3_EXPORT_RETRY_MS = 5000;
 
 type LxcInstance = {
   name: string;
@@ -31,6 +32,8 @@ function s3Env(config: Record<string, unknown>): Record<string, string> {
   if (secretKey) env.AWS_SECRET_ACCESS_KEY = secretKey;
   if (region) env.AWS_DEFAULT_REGION = region;
   env.AWS_EC2_METADATA_DISABLED = "true";
+  env.AWS_RETRY_MODE = "standard";
+  env.AWS_MAX_ATTEMPTS = "5";
   return env;
 }
 
@@ -43,6 +46,59 @@ async function latestSnapshot(dataset: string): Promise<string> {
     }
   }
   return latest;
+}
+
+export function isRetriableS3ExportError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return [
+    "gatewaytimeout",
+    "gateway timeout",
+    "uploadpart",
+    "requesttimeout",
+    "request timeout",
+    "slowdown",
+    "service unavailable",
+    "connection reset",
+    "connection broken",
+    "connection aborted",
+    "timeout",
+    "timed out",
+    "503",
+    "504"
+  ].some((needle) => lowered.includes(needle));
+}
+
+function formatCommandFailure(result: Awaited<ReturnType<typeof runAllowFailure>>): string {
+  const parts = [`exit code ${result.exitCode}`];
+  const stdout = result.stdout.trim();
+  const stderr = result.stderr.trim();
+  if (stdout) {
+    parts.push(`stdout:\n${stdout}`);
+  }
+  if (stderr) {
+    parts.push(`stderr:\n${stderr}`);
+  }
+  return parts.join("\n\n");
+}
+
+async function runRetriableS3Command(command: string, awsEnv: Record<string, string>, label: string): Promise<void> {
+  let lastError = "";
+  for (let attempt = 1; attempt <= S3_EXPORT_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(["bash", "-lc", `set -o pipefail; ${command}`], { env: awsEnv });
+    if (result.exitCode === 0) {
+      return;
+    }
+
+    lastError = formatCommandFailure(result);
+    if (attempt >= S3_EXPORT_ATTEMPTS || !isRetriableS3ExportError(lastError)) {
+      throw new Error(lastError);
+    }
+
+    console.warn(`${PREFIX}: ${label} failed on attempt ${attempt}; retrying: ${lastError}`);
+    await Bun.sleep(S3_EXPORT_RETRY_MS);
+  }
+
+  throw new Error(lastError || `${label} failed`);
 }
 
 export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
@@ -98,10 +154,10 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
         ? `zfs send -I ${shellEscape(last)} ${shellEscape(latest)}`
         : `zfs send ${shellEscape(latest)}`;
 
-    await runShell(
+    await runRetriableS3Command(
       `${streamSource} | zstd -T0 | ${awsBase.map(shellEscape).join(" ")} s3 cp - ${shellEscape(`s3://${bucket}/${objectKey}`)}`,
-      PREFIX,
-      { env: awsEnv }
+      awsEnv,
+      `S3 stream upload for ${instance.name}@${snapName}`
     );
 
     const manifest = {
@@ -114,7 +170,11 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
       created_at: new Date().toISOString()
     };
     writeJsonFile(manifestPath, manifest);
-    await runText([...awsBase, "s3", "cp", manifestPath, `s3://${bucket}/${manifestKey}`], PREFIX, { env: awsEnv });
+    await runRetriableS3Command(
+      `${awsBase.map(shellEscape).join(" ")} s3 cp ${shellEscape(manifestPath)} ${shellEscape(`s3://${bucket}/${manifestKey}`)}`,
+      awsEnv,
+      `S3 manifest upload for ${instance.name}@${snapName}`
+    );
     writeFileSync(stateFile, `${latest}\n`, "utf8");
   }
 }

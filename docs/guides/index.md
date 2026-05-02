@@ -21,4 +21,5 @@ Start here:
 - [VSCodium Web IDE](./vscode)
 - [Isolated Docker Compose deployments](./compose)
 - [Dokploy](./dokploy)
+- [Coolify](./coolify)
 - [Protecting published services with OIDC](./auth-protection)

@@ -98,6 +98,18 @@ describe("browser assertion helpers", () => {
       isRetryableBlankNavigationError(
         new Error(
           [
+            'failed to type stable value into [data-testid="username-text-input"]; final value length was 0',
+            "current URL: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123",
+            "body:\n<empty>"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
             "goto: Timeout 120000ms exceeded.",
             'Call log: - navigating to "https://group.example.test/", waiting until "commit"',
             "stage: opening target URL",
@@ -106,5 +118,29 @@ describe("browser assertion helpers", () => {
         )
       )
     ).toBe(true);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "forTimeout: Target page, context or browser has been closed",
+            "stage: waiting for password input",
+            "url: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "forTimeout: Target page, context or browser has been closed",
+            "stage: waiting for dashboard markers",
+            "url: https://app.example.test/dashboard"
+          ].join("\n")
+        )
+      )
+    ).toBe(false);
   });
 });

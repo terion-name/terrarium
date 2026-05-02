@@ -5,6 +5,18 @@ import { proxySyncCmd as syncProxyConfig } from "./terrarium-traefik-sync";
 import { idpSyncCmd as syncIdpConfig } from "./terrarium-zitadel-sync";
 import { TERRARIUM_VERSION } from "./generated/build-info";
 import { backupActionCmd } from "./ctl/backup";
+import {
+  clusterEvacuateCmd,
+  clusterInviteCmd,
+  clusterInitCmd,
+  clusterJoinCmd,
+  clusterMoveCmd,
+  clusterOvnConfigureCmd,
+  clusterRemoveCmd,
+  clusterRestoreCmd,
+  clusterStatusCmd,
+  clusterTokenCmd
+} from "./ctl/cluster";
 import { normalizedArgv, parseBooleanOption, PREFIX } from "./ctl/context";
 import {
   configExportCmd,
@@ -86,6 +98,102 @@ cli
       return;
     }
     throw new Error(`unsupported config action: ${action}`);
+  });
+
+cli
+  .command("cluster <action> [...args]", "Cluster operations")
+  .option("--member <name>", "Local cluster member name for cluster init; defaults to hostname", STRING_OPTION)
+  .option("--address <ipOrHostPort>", "Reachable LXD cluster address for this node; auto-discovered when omitted", STRING_OPTION)
+  .option("--token <token>", "Single-use LXD cluster join token", STRING_OPTION)
+  .option("--storage-pool <name>", "Local storage pool name for cluster join", { ...STRING_OPTION, default: "terrarium" })
+  .option("--network <name>", "Terrarium OVN workload network name", { ...STRING_OPTION, default: "terrarium-ovn" })
+  .option("--parent <name>", "LXD parent/uplink network for the OVN network", { ...STRING_OPTION, default: "lxdbr0" })
+  .option("--central-addresses <csv>", "Comma-separated OVN central member IPs; auto-discovered when omitted", STRING_OPTION)
+  .option("--peer-cidr <csv>", "Comma-separated CIDRs allowed to reach LXD and OVN cluster ports; auto-discovered when safe", STRING_OPTION)
+  .option("--target <member>", "Target member for cluster remove workload moves; omit to distribute", STRING_OPTION)
+  .option("--move", "Move workloads off a member before cluster remove")
+  .option("--force", "Force-remove an unreachable cluster member")
+  .option("--yes", "Confirm destructive cluster prompts")
+  .option("--skip-export", "Do not export Terrarium config from the cluster store after join")
+  .option("--skip-reconfigure", "Do not run Terrarium reconfigure after cluster changes")
+  .usage(
+    "cluster status\n  terrariumctl cluster init [--member NAME] [--address IP[:8443]] [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]\n  terrariumctl cluster invite MEMBER\n  terrariumctl cluster token MEMBER\n  terrariumctl cluster join --token TOKEN [--address IP[:8443]] [--peer-cidr CIDR] [--yes]\n  terrariumctl cluster evacuate MEMBER [--yes]\n  terrariumctl cluster restore MEMBER [--yes]\n  terrariumctl cluster move WORKLOAD MEMBER\n  terrariumctl cluster remove MEMBER [--move] [--target MEMBER] [--force] [--yes]\n  terrariumctl cluster ovn configure [--central-addresses IP1,IP2,IP3] [--peer-cidr CIDR]"
+  )
+  .action(async (action, args, options) => {
+    const commandArgs = (args as string[]) ?? [];
+    const rawOptions = options as Record<string, unknown>;
+    const normalizedAction = action.trim().toLowerCase();
+
+    if (normalizedAction === "status") {
+      await clusterStatusCmd();
+      return;
+    }
+    if (normalizedAction === "init") {
+      await clusterInitCmd({
+        member: rawOptions.member as string | undefined,
+        address: rawOptions.address as string | undefined,
+        network: rawOptions.network as string | undefined,
+        parent: rawOptions.parent as string | undefined,
+        centralAddresses: rawOptions.centralAddresses as string | undefined,
+        peerCidr: rawOptions.peerCidr as string | undefined,
+        skipReconfigure: Boolean(rawOptions.skipReconfigure)
+      });
+      return;
+    }
+    if (normalizedAction === "token") {
+      await clusterTokenCmd(commandArgs[0] ?? "");
+      return;
+    }
+    if (normalizedAction === "invite") {
+      await clusterInviteCmd(commandArgs[0] ?? "");
+      return;
+    }
+    if (normalizedAction === "join") {
+      await clusterJoinCmd({
+        token: rawOptions.token as string | undefined,
+        address: rawOptions.address as string | undefined,
+        storagePool: rawOptions.storagePool as string | undefined,
+        peerCidr: rawOptions.peerCidr as string | undefined,
+        yes: Boolean(rawOptions.yes),
+        skipExport: Boolean(rawOptions.skipExport),
+        skipReconfigure: Boolean(rawOptions.skipReconfigure)
+      });
+      return;
+    }
+    if (normalizedAction === "evacuate") {
+      await clusterEvacuateCmd(commandArgs[0] ?? "", { yes: Boolean(rawOptions.yes) });
+      return;
+    }
+    if (normalizedAction === "restore") {
+      await clusterRestoreCmd(commandArgs[0] ?? "", { yes: Boolean(rawOptions.yes) });
+      return;
+    }
+    if (normalizedAction === "move") {
+      await clusterMoveCmd(commandArgs[0] ?? "", commandArgs[1] ?? "");
+      return;
+    }
+    if (normalizedAction === "remove") {
+      await clusterRemoveCmd(commandArgs[0] ?? "", {
+        move: Boolean(rawOptions.move),
+        target: rawOptions.target as string | undefined,
+        force: Boolean(rawOptions.force),
+        yes: Boolean(rawOptions.yes),
+        skipReconfigure: Boolean(rawOptions.skipReconfigure)
+      });
+      return;
+    }
+    if (normalizedAction === "ovn" && commandArgs[0] === "configure") {
+      await clusterOvnConfigureCmd({
+        network: rawOptions.network as string | undefined,
+        parent: rawOptions.parent as string | undefined,
+        centralAddresses: rawOptions.centralAddresses as string | undefined,
+        peerCidr: rawOptions.peerCidr as string | undefined,
+        skipReconfigure: Boolean(rawOptions.skipReconfigure)
+      });
+      return;
+    }
+
+    throw new Error(`unsupported cluster action: ${[action, ...commandArgs].join(" ")}`);
   });
 
 cli

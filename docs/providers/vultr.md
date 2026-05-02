@@ -11,6 +11,8 @@ Official references:
 - [Block Storage create](https://docs.vultr.com/reference/vultr-cli/block-storage/create)
 - [Block Storage attach](https://docs.vultr.com/reference/vultr-cli/block-storage/attach)
 - [How to Mount Vultr Block Storage Volume on Linux](https://docs.vultr.com/products/cloud-storage/block-storage/mount/linux)
+- [VPC 2.0 create](https://docs.vultr.com/reference/vultr-cli/vpc-2/create)
+- [Attach an instance to VPC 2.0](https://docs.vultr.com/reference/vultr-cli/instance/vpc2/attach)
 
 ## Recommended shape
 
@@ -83,6 +85,62 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/ins
   --storage-mode disk \
   --storage-source auto
 ```
+
+## Private network for clustering
+
+For clustered Terrarium, create one Vultr VPC 2.0 network and attach every
+Terrarium instance to it. Use the VPC 2.0 subnet for LXD cluster traffic and
+OVN traffic.
+
+Create a VPC 2.0 network:
+
+```bash
+vultr-cli vpc2 create \
+  --region=fra \
+  --description=terrarium-cluster \
+  --ip-type=v4 \
+  --ip-block=10.42.0.0 \
+  --prefix-length=24
+```
+
+Create each instance in that VPC:
+
+```bash
+vultr-cli instance create \
+  --region=fra \
+  --plan=vc2-4c-8gb \
+  --os=2284 \
+  --label=terrarium-1 \
+  --host=terrarium-1 \
+  --ssh-keys="<ssh-key-id>" \
+  --vpc-ids="<vpc2-id>"
+```
+
+If you already created the instance, attach it afterward:
+
+```bash
+vultr-cli instance vpc2 attach <instance-id> --vpc-id="<vpc2-id>"
+```
+
+After installing Terrarium on each node, run:
+
+```bash
+terrariumctl cluster init
+terrariumctl cluster invite node2
+```
+
+Then run the printed `terrariumctl cluster join --token ...` command on the new
+node. Terrarium should auto-select the VPC private address. If it does not,
+pass the private address and peer subnet explicitly:
+
+```bash
+terrariumctl cluster init \
+  --address 10.42.0.11:8443 \
+  --peer-cidr 10.42.0.0/24
+```
+
+Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
+restricted to the VPC 2.0 subnet.
 
 ## Notes
 

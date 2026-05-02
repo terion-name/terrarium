@@ -235,6 +235,94 @@ describe("ZITADEL Cloud provider", () => {
     ]);
   });
 
+  test("can register one external OIDC fixture for multiple Terrarium node domains", async () => {
+    const calls = installFetchMock((call) => {
+      const method = call.init?.method ?? "GET";
+      const path = callPath(call);
+      if (method === "POST" && path === "/management/v1/actions/_search") {
+        return Response.json({ result: [] });
+      }
+      if (method === "POST" && path === "/management/v1/actions") {
+        return Response.json({ id: "action-1" });
+      }
+      if (method === "GET" && path === "/management/v1/flows/2") {
+        return Response.json({ flow: { triggerActions: [] } });
+      }
+      if (method === "POST" && path.startsWith("/management/v1/flows/2/trigger/")) {
+        return Response.json({});
+      }
+      if (method === "POST" && path === "/management/v1/projects") {
+        return Response.json({ id: "project-1" });
+      }
+      if (method === "POST" && path === "/management/v1/projects/project-1/roles") {
+        return Response.json({});
+      }
+      if (method === "POST" && path === "/management/v1/projects/project-1/apps/oidc") {
+        const appName = String(jsonBody(call).name ?? "");
+        return Response.json(
+          appName.endsWith("-lxd")
+            ? { appId: "lxd-app-1", clientId: "lxd-client-1" }
+            : { appId: "app-1", clientId: "client-1", clientSecret: "secret-1" }
+        );
+      }
+      if (method === "GET" && path === "/.well-known/openid-configuration") {
+        return Response.json({
+          authorization_endpoint: "https://zitadel.example.test/oauth/v2/authorize",
+          token_endpoint: "https://zitadel.example.test/oauth/v2/token"
+        });
+      }
+      if (method === "POST" && path === "/oauth/v2/token") {
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      if (method === "GET" && path === "/oauth/v2/authorize") {
+        return new Response("", {
+          status: 302,
+          headers: { location: "https://zitadel.example.test/ui/login" }
+        });
+      }
+      if (method === "POST" && path === "/management/v1/users/human/_import") {
+        return Response.json({ userId: `user-${calls.length}` });
+      }
+      if (method === "POST" && path.startsWith("/management/v1/users/") && path.endsWith("/grants")) {
+        return Response.json({});
+      }
+      throw new Error(`unexpected ${method} ${path}`);
+    });
+    const provider = createProvider();
+
+    await provider.provisionFixture(
+      "run-e",
+      {
+        manage: "seed-manage.example.test",
+        proxy: "seed-proxy.example.test",
+        lxd: "seed-lxd.example.test",
+        auth: "seed-auth.example.test"
+      },
+      "terrarium-admins",
+      [],
+      {
+        extraDomains: [
+          {
+            manage: "join-manage.example.test",
+            proxy: "join-proxy.example.test",
+            lxd: "join-lxd.example.test",
+            auth: "join-auth.example.test"
+          }
+        ]
+      }
+    );
+
+    const appBodies = calls
+      .filter((call) => call.init?.method === "POST" && callPath(call) === "/management/v1/projects/project-1/apps/oidc")
+      .map((call) => jsonBody(call));
+    expect(appBodies[0].redirectUris).toEqual(
+      expect.arrayContaining(["https://seed-manage.example.test/oauth2/callback", "https://join-manage.example.test/oauth2/callback"])
+    );
+    expect(appBodies[1].redirectUris).toEqual(
+      expect.arrayContaining(["https://seed-lxd.example.test/oidc/callback", "https://join-lxd.example.test/oidc/callback"])
+    );
+  });
+
   test("waits for newly-created OIDC clients to reach the token endpoint", async () => {
     const calls = installFetchMock((call, index) => {
       const method = call.init?.method ?? "GET";

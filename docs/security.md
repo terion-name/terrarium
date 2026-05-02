@@ -13,7 +13,11 @@ The short version:
 
 This is one of Terrarium's most important properties.
 
-LXC containers live behind LXD's private bridge and NAT by default. They do not sit on the public internet with every open service directly reachable from the outside.
+LXC containers live on Terrarium's private LXD network by default. On current installs that workload network is OVN-backed, with `lxdbr0` kept as the parent/uplink. Containers do not sit on the public internet with every open service directly reachable from the outside.
+
+Published services still terminate at host-side Traefik. For OVN-backed
+containers, Terrarium reaches the workload through LXD-managed OVN network
+forwards rather than exposing the container's private address directly.
 
 That means:
 
@@ -106,7 +110,7 @@ lxc launch images:ubuntu/24.04 locked-down --profile strict
 ```
 
 The `strict` profile keeps isolated ID maps, the Terrarium ZFS root disk, and
-the private bridge NIC, but omits the Docker-friendly nesting and syscall
+the private OVN NIC, but omits the Docker-friendly nesting and syscall
 intercept settings.
 
 When the host exposes `/dev/kvm`, Terrarium additionally creates a layered

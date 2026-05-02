@@ -168,12 +168,43 @@ function scrubGeneratedLxdIdentity(value: unknown): unknown {
   return next;
 }
 
+function scrubRestoreAsNewHostState(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => scrubRestoreAsNewHostState(item));
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const next: JsonRecord = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "config" && isRecord(item)) {
+      next[key] = Object.fromEntries(Object.entries(item).filter(([configKey]) => configKey !== "user.proxy"));
+      continue;
+    }
+
+    if (key === "devices" && isRecord(item)) {
+      next[key] = Object.fromEntries(
+        Object.entries(item)
+          .filter(([, device]) => !(isRecord(device) && device.type === "proxy"))
+          .map(([deviceName, device]) => [deviceName, scrubRestoreAsNewHostState(device)])
+      );
+      continue;
+    }
+
+    next[key] = scrubRestoreAsNewHostState(item);
+  }
+
+  return next;
+}
+
 export function rewriteRecoveredBackupMetadata(backup: JsonRecord, oldName: string, newName: string): JsonRecord {
   const renamed = rewriteNameReferences(backup, oldName, newName);
   if (!renamed.changed) {
     throw new Error(`recovered LXD backup metadata did not reference source instance '${oldName}'`);
   }
-  return scrubGeneratedLxdIdentity(renamed.value) as JsonRecord;
+  return scrubRestoreAsNewHostState(scrubGeneratedLxdIdentity(renamed.value)) as JsonRecord;
 }
 
 function rewriteBackupYaml(mountPath: string, oldName: string, newName: string): void {

@@ -9,23 +9,28 @@ function readRepoFile(path: string): string {
 }
 
 describe("LXD profiles", () => {
-  test("makes the Docker-friendly Terrarium profile the LXD default", () => {
+  test("makes the Docker-friendly Terrarium profile the LXD default on OVN", () => {
     const preseed = readRepoFile("ansible/roles/lxd/templates/lxd-preseed.yml.j2");
     const defaultProfile = readRepoFile("ansible/roles/lxd/templates/default-profile.yml.j2");
     const terrariumProfile = readRepoFile("ansible/roles/lxd/templates/terrarium-profile.yml.j2");
     const tasks = readRepoFile("ansible/roles/lxd/tasks/main.yml");
 
-    for (const content of [preseed, defaultProfile, terrariumProfile]) {
+    expect(preseed).toContain("ipv4.ovn.ranges: {{ terrarium_lxd_parent_ovn_range }}");
+    expect(preseed).toContain("network: {{ terrarium_lxd_network_parent }}");
+
+    for (const content of [defaultProfile, terrariumProfile]) {
       expect(content).toContain('security.idmap.isolated: "true"');
       expect(content).toContain('security.nesting: "true"');
       expect(content).toContain('security.syscalls.intercept.mknod: "true"');
       expect(content).toContain('security.syscalls.intercept.setxattr: "true"');
-      expect(content).toContain("network: lxdbr0");
+      expect(content).toContain("network: {{ terrarium_lxd_network_name }}");
       expect(content).toContain("pool: {{ terrarium_lxd_pool_name }}");
     }
 
     expect(defaultProfile).toContain("name: default");
     expect(terrariumProfile).toContain("name: terrarium");
+    expect(tasks).toContain("Install OVN networking packages");
+    expect(tasks).toContain("Create Terrarium OVN workload network");
     expect(tasks).toContain("Apply Terrarium-managed LXD profiles");
     expect(tasks).toContain('name: "default"');
     expect(tasks).toContain('name: "terrarium"');
@@ -40,7 +45,7 @@ describe("LXD profiles", () => {
     expect(strictProfile).toContain('security.idmap.isolated: "true"');
     expect(strictProfile).not.toContain("security.nesting");
     expect(strictProfile).not.toContain("security.syscalls.intercept");
-    expect(strictProfile).toContain("network: lxdbr0");
+    expect(strictProfile).toContain("network: {{ terrarium_lxd_network_name }}");
     expect(strictProfile).toContain("pool: {{ terrarium_lxd_pool_name }}");
 
     expect(kvmProfile).toContain("name: kvm");

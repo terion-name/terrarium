@@ -59,7 +59,7 @@ features:
 
 The most important part is not flashy, but it changes how comfortable the whole system feels.
 
-Containers are not exposed directly to the internet. They sit behind LXD's private bridge and NAT, which means:
+Containers are not exposed directly to the internet. They sit on Terrarium's private LXD network, which means:
 
 - random scans and probes do not hit them directly
 - a service listening on `0.0.0.0` inside the container is still not automatically public

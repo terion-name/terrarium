@@ -506,16 +506,24 @@ export async function verifyProtectedRoutes(
   bodyText: string
 ): Promise<void> {
   const readiness = { timeoutMs: 300000, resolveIp: host.server.ipv4 };
-  await waitForHttpStatusResolved(`https://${plainHost}`, [200, 302], readiness);
-  await waitForHttpStatusResolved(`https://${authHost}`, [302, 303], readiness);
-  await waitForHttpStatusResolved(`https://${groupedHost}`, [302, 303], readiness);
+  context.logger.info(`verify ${host.label} route matrix readiness`);
+  await withStepTimeout(`plain route readiness for ${plainHost}`, 6 * 60 * 1000, () => waitForHttpStatusResolved(`https://${plainHost}`, [200, 302], readiness));
+  await withStepTimeout(`auth route readiness for ${authHost}`, 6 * 60 * 1000, () => waitForHttpStatusResolved(`https://${authHost}`, [302, 303], readiness));
+  await withStepTimeout(`group route readiness for ${groupedHost}`, 6 * 60 * 1000, () =>
+    waitForHttpStatusResolved(`https://${groupedHost}`, [302, 303], readiness)
+  );
 
   const outputDir = join(context.localArtifactsDir, host.label, "routes");
   mkdirSync(outputDir, { recursive: true });
-  await expectHttpBodyContains(`https://${plainHost}`, bodyText, readiness);
+  context.logger.info(`verify ${host.label} plain route body`);
+  await withStepTimeout(`plain route body for ${plainHost}`, 6 * 60 * 1000, () => expectHttpBodyContains(`https://${plainHost}`, bodyText, readiness));
+  context.logger.info(`verify ${host.label} auth route allows ${fixture.routeUser.email}`);
   await expectProtectedRoute(`https://${authHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
+  context.logger.info(`verify ${host.label} grouped route allows ${fixture.routeUser.email}`);
   await expectProtectedRoute(`https://${groupedHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
+  context.logger.info(`verify ${host.label} grouped route denies ${fixture.deniedUser.email}`);
   await expectProtectedRoute(`https://${groupedHost}`, fixture.deniedUser, "deny", outputDir, "", { resolveIp: host.server.ipv4 });
+  context.logger.info(`verified ${host.label} route matrix`);
 }
 
 /** Applies a handful of `terrariumctl set ...` operations and validates convergence. */
@@ -563,6 +571,8 @@ export async function assertInstalledHost(host: SshHost): Promise<void> {
   await expectRemoteContains(host, remoteCtl("status"), "terrarium-oauth2-proxy.service");
   await expectSystemdActive(host, "traefik");
   await expectSystemdActive(host, "terrarium-traefik-sync.timer");
+  await expectRemoteContains(host, "lxc network show terrarium-ovn", "type: ovn");
+  await expectRemoteContains(host, "lxc profile show default", "network: terrarium-ovn");
 }
 
 /** Creates a partitioned disk layout with a large free extent for partition-mode install tests. */
@@ -619,6 +629,22 @@ async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath
 
   const tail = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`, { timeoutMs: 20000 });
   throw new Error(`timed out waiting for remote command to finish\n${tail.stdout || tail.stderr}`);
+}
+
+async function withStepTimeout<T>(label: string, timeoutMs: number, task: () => Promise<T>): Promise<T> {
+  let timer: Timer | undefined;
+  try {
+    return await Promise.race([
+      task(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 async function waitForRemoteCommandSuccess(

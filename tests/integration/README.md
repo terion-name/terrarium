@@ -58,14 +58,18 @@ Flags:
 `smoke` is the high-signal end-to-end release gate. It provisions a replica and
 a primary host, installs local ZITADEL, verifies management login surfaces,
 checks LXD API/UI access, publishes plain and OIDC-protected routes, verifies
-local restore, S3 restore, syncoid replication, switches to external OIDC,
+the OVN-backed default LXD workload network, verifies local restore, S3 restore,
+syncoid replication, switches to external OIDC,
 checks protected-route allow/deny behavior, switches back to local ZITADEL, and
 exercises day-2 reconfiguration commands.
 
 `full` starts by running the complete smoke suite, then adds slower and broader
 coverage: external-OIDC install from scratch, CIFS host mount usage from an LXD
 container, partition-mode install, restore-as-new with `lxd recover`, and
-negative verification for bad S3 and OIDC credentials.
+negative verification for bad S3 and OIDC credentials. It also builds a real
+two-member LXD/Terrarium cluster, verifies `cluster init`/`token`/`join`,
+checks OVN workload reachability across members, and removes a member after
+moving a workload away.
 
 ## Required environment
 

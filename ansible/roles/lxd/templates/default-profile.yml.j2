@@ -7,7 +7,7 @@ description: Terrarium default container profile
 devices:
   eth0:
     name: eth0
-    network: lxdbr0
+    network: {{ terrarium_lxd_network_name }}
     type: nic
   root:
     path: /

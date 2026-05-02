@@ -8,6 +8,10 @@ Official references:
 - [hcloud server create](https://github.com/hetznercloud/cli/blob/main/docs/reference/manual/hcloud_server_create.md)
 - [hcloud volume create](https://github.com/hetznercloud/cli/blob/main/docs/reference/manual/hcloud_volume_create.md)
 - [hcloud volume attach](https://github.com/hetznercloud/cli/blob/main/docs/reference/manual/hcloud_volume_attach.md)
+- [Hetzner Networks overview](https://docs.hetzner.com/networking/networks/overview/)
+- [hcloud network create](https://github.com/hetznercloud/cli/blob/main/docs/reference/manual/hcloud_network_create.md)
+- [hcloud network add-subnet](https://github.com/hetznercloud/cli/blob/main/docs/reference/manual/hcloud_network_add-subnet.md)
+- [hcloud server attach-to-network](https://github.com/hetznercloud/cli/blob/main/docs/reference/manual/hcloud_server_attach-to-network.md)
 
 ## Recommended shape
 
@@ -79,6 +83,64 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/ins
   --storage-mode disk \
   --storage-source auto
 ```
+
+## Private network for clustering
+
+For clustered Terrarium, create a Hetzner Cloud Network first and attach every
+Terrarium node to it. Hetzner Networks give servers private IP addresses that
+are not on the public internet, which is the right place for LXD cluster and
+OVN traffic.
+
+Example private network:
+
+```bash
+hcloud network create \
+  --name terrarium-cluster \
+  --ip-range 10.42.0.0/16
+
+hcloud network add-subnet terrarium-cluster \
+  --type server \
+  --network-zone eu-central \
+  --ip-range 10.42.0.0/24
+```
+
+Create each node in the same location and attach it to the network:
+
+```bash
+hcloud server create \
+  --name terrarium-1 \
+  --type cpx31 \
+  --image ubuntu-24.04 \
+  --location nbg1 \
+  --ssh-key terrarium \
+  --network terrarium-cluster
+```
+
+If you already created the server, attach it afterward:
+
+```bash
+hcloud server attach-to-network terrarium-1 --network terrarium-cluster
+```
+
+After installing Terrarium on each node, run the normal cluster flow:
+
+```bash
+terrariumctl cluster init
+terrariumctl cluster invite node2
+```
+
+Then run the printed `terrariumctl cluster join --token ...` command on the new
+node. Terrarium should auto-select the Hetzner private address. If it does not,
+pass the private address and peer subnet explicitly:
+
+```bash
+terrariumctl cluster init \
+  --address 10.42.0.11:8443 \
+  --peer-cidr 10.42.0.0/24
+```
+
+Keep LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, and Geneve `6081/udp`
+restricted to the Hetzner Network subnet.
 
 ## Notes
 

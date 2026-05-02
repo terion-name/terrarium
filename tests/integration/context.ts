@@ -155,9 +155,10 @@ export class IntegrationContext {
     slug: string,
     domains: DomainBundle,
     adminGroup: string,
-    routeCallbackUris: string[] = []
+    routeCallbackUris: string[] = [],
+    extraDomains: DomainBundle[] = []
   ): Promise<ExternalOidcFixture> {
-    return await this.zitadelCloud.provisionFixture(slug, domains, adminGroup, routeCallbackUris, (progress) => {
+    return await this.zitadelCloud.provisionFixture(slug, domains, adminGroup, routeCallbackUris, { extraDomains }, (progress) => {
       if (progress.type === "project") {
         this.resources.recordZitadelFixtureProject({
           slug: progress.fixtureSlug,

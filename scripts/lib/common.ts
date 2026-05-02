@@ -1,4 +1,3 @@
-import { $ } from "bun";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -92,35 +91,66 @@ export function yamlStringify(value: unknown): string {
 }
 
 type CommandOptions = { cwd?: string; stdin?: string | Uint8Array; env?: Record<string, string> };
+type CommandResult = { exitCode: number; stdout: string; stderr: string };
+
+function commandEnv(extra: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!extra) {
+    return undefined;
+  }
+
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return { ...env, ...extra };
+}
+
+async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (!stream) {
+    return "";
+  }
+  return await new Response(stream).text();
+}
 
 /**
- * Runs a command through Bun’s shell wrapper with consistent quiet/no-throw semantics.
+ * Runs a command with consistent quiet/no-throw semantics.
  *
  * Higher-level helpers build on this so the rest of the codebase can choose
  * between fail-fast behavior and explicit exit-code handling.
  */
-async function shellCommand(cmd: string[], options: CommandOptions = {}) {
-  const proc = $`${cmd}`.quiet().nothrow();
-  if (options.cwd) {
-    proc.cwd(options.cwd);
-  }
-  if (options.env) {
-    proc.env(options.env);
-  }
+async function shellCommand(cmd: string[], options: CommandOptions = {}): Promise<CommandResult> {
+  const proc = Bun.spawn({
+    cmd,
+    cwd: options.cwd,
+    env: commandEnv(options.env),
+    stdin: options.stdin === undefined ? "ignore" : "pipe",
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  const stdout = readStream(proc.stdout);
+  const stderr = readStream(proc.stderr);
+
   if (options.stdin !== undefined) {
-    const writer = proc.stdin.getWriter();
-    await writer.write(typeof options.stdin === "string" ? new TextEncoder().encode(options.stdin) : options.stdin);
-    await writer.close();
+    const stdin = proc.stdin as { write(input: string | Uint8Array): unknown; end(): unknown } | undefined;
+    if (!stdin) {
+      throw new Error(`failed to open stdin pipe for command: ${cmd.join(" ")}`);
+    }
+    await stdin.write(options.stdin);
+    await stdin.end();
   }
-  return await proc;
+
+  const [exitCode, stdoutText, stderrText] = await Promise.all([proc.exited, stdout, stderr]);
+  return { exitCode, stdout: stdoutText, stderr: stderrText };
 }
 
 /** Runs a command and returns stdout, failing the process if it exits non-zero. */
 export async function runText(cmd: string[], prefix: string, options: CommandOptions = {}): Promise<string> {
   const proc = await shellCommand(cmd, options);
   if (proc.exitCode !== 0) {
-    const stdout = proc.stdout.toString().trim();
-    const stderr = proc.stderr.toString().trim();
+    const stdout = proc.stdout.trim();
+    const stderr = proc.stderr.trim();
     const details = [
       `command failed (${proc.exitCode}): ${cmd.join(" ")}`,
       stdout ? `stdout:\n${stdout}` : "",
@@ -129,7 +159,7 @@ export async function runText(cmd: string[], prefix: string, options: CommandOpt
     const rendered = details.join("\n\n");
     fail(prefix, rendered);
   }
-  return proc.stdout.toString();
+  return proc.stdout;
 }
 
 /** Runs a command and parses its stdout as JSON. */
@@ -146,8 +176,8 @@ export async function runAllowFailure(
   const proc = await shellCommand(cmd, options);
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString()
+    stdout: proc.stdout,
+    stderr: proc.stderr
   };
 }
 

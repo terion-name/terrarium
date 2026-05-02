@@ -13,6 +13,7 @@ Terrarium provisions the host with:
 - [Traefik](https://github.com/traefik/traefik) with the built-in dashboard
 - [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy)
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel)
+- Open vSwitch/OVN for the Terrarium LXD workload network
 - [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening)
 
 ## Default Public Endpoints
@@ -48,3 +49,13 @@ These can be overridden with:
 - route-auth oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy-routes`
 - S3 catalog: `/var/lib/terrarium/catalog`
 - last exported snapshots: `/var/lib/terrarium/lastsnapshots`
+
+## Internal Cluster Ports
+
+When clustering is enabled, Terrarium only opens these ports for configured
+`terrarium_cluster_peer_cidrs`:
+
+- `8443/tcp` for LXD cluster/API traffic
+- `6641/tcp` for OVN northbound database traffic
+- `6642/tcp` for OVN southbound database traffic
+- `6081/udp` for OVN Geneve overlay traffic

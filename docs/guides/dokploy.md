@@ -128,6 +128,56 @@ In Dokploy:
 
 Repeat this pattern for `apps-b`, `apps-c`, or any other deployment boundary you want.
 
+## Clustered Terrarium notes
+
+On a Terrarium cluster, the model stays the same, but the placement changes:
+
+- keep one Dokploy UI/control-plane LXC
+- create one or more deployment-server LXCs
+- add those deployment-server LXCs to Dokploy as remote servers over the private OVN network
+- let Terrarium publish the Dokploy UI and app domains from any healthy cluster node
+
+Before adding a deployment-server LXC to Dokploy, consider pinning a stable OVN
+address for it:
+
+```bash
+lxc config show --expanded apps-a
+lxc config device override apps-a eth0 ipv4.address=10.154.0.50
+```
+
+If your NIC is not named `eth0`, use the NIC name shown by
+`lxc config show --expanded`. A stable address keeps Dokploy's remote-server
+record boring when you later move the LXC:
+
+```bash
+terrariumctl cluster move apps-a node2
+```
+
+After a move, run:
+
+```bash
+lxc list apps-a -c n4L
+terrariumctl proxy sync
+```
+
+Dokploy should still SSH to the same private OVN address, and Terrarium's local
+proxy sync will recreate the host-loopback proxy device on whichever Terrarium
+node is serving public traffic.
+
+For ingress, publish app hostnames to the deployment-server LXC, not to a
+specific physical cluster member:
+
+```bash
+lxc config set apps-a user.proxy "https://whoami.example.com:80,https://notes.example.com:80"
+terrariumctl proxy sync
+```
+
+If your public DNS points the same app hostname at multiple Terrarium node IPs,
+each node's Terrarium Traefik can still reach the workload through LXD/OVN.
+That is Terrarium node redundancy. It is not application high availability by
+itself; a given Docker workload still lives inside one deployment-server LXC
+unless you deliberately deploy multiple copies and add app-level load balancing.
+
 ## Deploy an app
 
 In Dokploy, create a Project, then create a Docker Compose service.

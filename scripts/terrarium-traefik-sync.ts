@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { URL } from "node:url";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { configString, loadConfig, readJsonFile, runAllowFailure, runText, writeIfChanged, writeJsonFile, yamlStringify } from "./lib/common";
 
 const PREFIX = "terrariumctl proxy sync";
@@ -22,6 +23,14 @@ const ZITADEL_ROUTES_APP_NAME = "terrarium-routes";
 const ZITADEL_WAIT_ATTEMPTS = 12;
 const ZITADEL_WAIT_INTERVAL_MS = 3000;
 const ZITADEL_HTTP_STATUS_MARKER = "__terrarium_http_status__:";
+const PROXY_BACKEND_STATE_PATH = "/var/lib/terrarium/proxy-backends.json";
+const PROXY_BACKEND_DEVICE_PREFIX = "terrarium-proxy";
+const PROXY_BACKEND_BASE_PORT = 18081;
+const PROXY_BACKEND_MAX_PORT = 18999;
+const PROXY_SYNC_LOCK_DIR = "/run/terrarium/proxy-sync.lock";
+const PROXY_SYNC_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
+const PROXY_SYNC_LOCK_STALE_MS = 60 * 60 * 1000;
+const PROXY_SYNC_LOCK_POLL_MS = 500;
 
 type LxcAddress = {
   family?: string;
@@ -66,6 +75,25 @@ type HttpProxyItem = {
 
 type TransportProxyItem = { kind: "tcp" | "udp"; hostPort: number; containerPort: number };
 
+type ProxyBackendProtocol = "tcp" | "udp";
+
+type ProxyBackendSpec = {
+  key: string;
+  containerName: string;
+  proto: ProxyBackendProtocol;
+  targetPort: number;
+  deviceName: string;
+};
+
+type ProxyBackendStateEntry = ProxyBackendSpec & {
+  hostPort: number;
+};
+
+export type ProxyBackendTarget = {
+  address: string;
+  port: number;
+};
+
 type RouteAuthProfile = {
   key: string;
   host: string;
@@ -93,12 +121,18 @@ type CommandResult = Awaited<ReturnType<typeof runAllowFailure>>;
 type ProxySyncErrorGroups = {
   dynamicErrors?: string[];
   ufwErrors?: string[];
+  backendErrors?: string[];
   localRouteClientErrors?: string[];
   routeAuthErrors?: string[];
 };
 
 type ZitadelProject = { id?: string; name?: string };
 type ZitadelApp = { id?: string; name?: string };
+type ProxySyncLockOwner = {
+  token?: string;
+  pid?: number;
+  acquiredAt?: number;
+};
 
 function compactCommandOutput(value: string): string {
   const trimmed = value.trim();
@@ -139,6 +173,7 @@ export function buildProxySyncFailureMessage(errorGroups: ProxySyncErrorGroups):
   const errors: string[] = [];
   appendLabeledErrors(errors, "dynamic config", errorGroups.dynamicErrors);
   appendLabeledErrors(errors, "ufw", errorGroups.ufwErrors);
+  appendLabeledErrors(errors, "backend", errorGroups.backendErrors);
   appendLabeledErrors(errors, "local route client", errorGroups.localRouteClientErrors);
   appendLabeledErrors(errors, "route auth", errorGroups.routeAuthErrors);
 
@@ -153,6 +188,83 @@ export function assertProxySyncSucceeded(errorGroups: ProxySyncErrorGroups): voi
   const message = buildProxySyncFailureMessage(errorGroups);
   if (message) {
     throw new Error(message);
+  }
+}
+
+function errorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+}
+
+function readProxySyncLockOwner(): ProxySyncLockOwner {
+  try {
+    return JSON.parse(readFileSync(join(PROXY_SYNC_LOCK_DIR, "owner.json"), "utf8")) as ProxySyncLockOwner;
+  } catch {
+    return {};
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errorCode(error) !== "ESRCH";
+  }
+}
+
+function proxySyncLockIsStale(owner: ProxySyncLockOwner, now = Date.now()): boolean {
+  if (typeof owner.pid === "number" && owner.pid > 0 && !processIsAlive(owner.pid)) {
+    return true;
+  }
+  if (typeof owner.acquiredAt === "number" && now - owner.acquiredAt > PROXY_SYNC_LOCK_STALE_MS) {
+    return true;
+  }
+  return false;
+}
+
+async function acquireProxySyncLock(): Promise<() => void> {
+  mkdirSync(dirname(PROXY_SYNC_LOCK_DIR), { recursive: true, mode: 0o755 });
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const deadline = Date.now() + PROXY_SYNC_LOCK_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      mkdirSync(PROXY_SYNC_LOCK_DIR, { mode: 0o700 });
+      writeFileSync(
+        join(PROXY_SYNC_LOCK_DIR, "owner.json"),
+        `${JSON.stringify({ token, pid: process.pid, acquiredAt: Date.now() }, null, 2)}\n`,
+        { mode: 0o600 }
+      );
+      return () => {
+        const owner = readProxySyncLockOwner();
+        if (owner.token === token) {
+          rmSync(PROXY_SYNC_LOCK_DIR, { recursive: true, force: true });
+        }
+      };
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") {
+        throw error;
+      }
+    }
+
+    const owner = readProxySyncLockOwner();
+    if (proxySyncLockIsStale(owner)) {
+      rmSync(PROXY_SYNC_LOCK_DIR, { recursive: true, force: true });
+      continue;
+    }
+    await Bun.sleep(PROXY_SYNC_LOCK_POLL_MS);
+  }
+
+  const owner = readProxySyncLockOwner();
+  throw new Error(`timed out waiting for proxy sync lock at ${PROXY_SYNC_LOCK_DIR}; current owner: ${JSON.stringify(owner)}`);
+}
+
+async function withProxySyncLock<T>(run: () => Promise<T>): Promise<T> {
+  const release = await acquireProxySyncLock();
+  try {
+    return await run();
+  } finally {
+    release();
   }
 }
 
@@ -656,6 +768,234 @@ async function loadInstancesForProxySync(): Promise<LxcInstance[]> {
   return parsed;
 }
 
+function containersWithProxyLabels(containers: LxcInstance[]): LxcInstance[] {
+  return containers.filter((container) => (container.config?.["user.proxy"]?.trim() ?? "").length > 0);
+}
+
+function proxyBackendKey(containerName: string, proto: ProxyBackendProtocol, targetPort: number): string {
+  return `${containerName}:${proto}:${targetPort}`;
+}
+
+function proxyBackendDeviceName(key: string, proto: ProxyBackendProtocol, targetPort: number): string {
+  const hash = createHash("sha256").update(key).digest("hex").slice(0, 10);
+  return `${PROXY_BACKEND_DEVICE_PREFIX}-${proto}-${targetPort}-${hash}`;
+}
+
+function collectDesiredProxyBackendSpecs(containers: LxcInstance[]): ProxyBackendSpec[] {
+  const specs = new Map<string, ProxyBackendSpec>();
+
+  for (const container of containersWithProxyLabels(containers)) {
+    if (!container.name) {
+      continue;
+    }
+
+    for (const rawItem of splitProxyItems(container.config?.["user.proxy"] ?? "")) {
+      let item: ReturnType<typeof parseProxyItem>;
+      try {
+        item = parseProxyItem(rawItem);
+      } catch {
+        continue;
+      }
+
+      const proto = item.kind === "http" ? "tcp" : item.kind;
+      const targetPort = item.kind === "http" ? item.targetPort : item.containerPort;
+      const key = proxyBackendKey(container.name, proto, targetPort);
+      specs.set(key, {
+        key,
+        containerName: container.name,
+        proto,
+        targetPort,
+        deviceName: proxyBackendDeviceName(key, proto, targetPort)
+      });
+    }
+  }
+
+  return [...specs.values()].sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function isProxyBackendStateEntry(value: unknown): value is ProxyBackendStateEntry {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.key === "string" &&
+    typeof entry.containerName === "string" &&
+    (entry.proto === "tcp" || entry.proto === "udp") &&
+    Number.isInteger(entry.targetPort) &&
+    Number.isInteger(entry.hostPort) &&
+    typeof entry.deviceName === "string"
+  );
+}
+
+function loadProxyBackendState(): ProxyBackendStateEntry[] {
+  const raw = readJsonFile<unknown>(PROXY_BACKEND_STATE_PATH, []);
+  return Array.isArray(raw) ? raw.filter(isProxyBackendStateEntry) : [];
+}
+
+function allocateProxyBackendPort(usedPorts: Set<number>): number {
+  for (let port = PROXY_BACKEND_BASE_PORT; port <= PROXY_BACKEND_MAX_PORT; port += 1) {
+    if (!usedPorts.has(port)) {
+      return port;
+    }
+  }
+  throw new Error(`no free Terrarium proxy backend ports in ${PROXY_BACKEND_BASE_PORT}-${PROXY_BACKEND_MAX_PORT}`);
+}
+
+function backendListenAddress(entry: ProxyBackendStateEntry): string {
+  return `${entry.proto}:127.0.0.1:${entry.hostPort}`;
+}
+
+function backendConnectAddress(entry: ProxyBackendStateEntry): string {
+  return `${entry.proto}:127.0.0.1:${entry.targetPort}`;
+}
+
+function deviceMissing(output: string): boolean {
+  const lowered = output.toLowerCase();
+  return lowered.includes("not found") || lowered.includes("does not exist") || lowered.includes("doesn't exist");
+}
+
+async function readLxdProxyDeviceValue(containerName: string, deviceName: string, key: string): Promise<string | null> {
+  const result = await runAllowFailure(["timeout", "15s", "lxc", "config", "device", "get", containerName, deviceName, key]);
+  if (result.exitCode !== 0) {
+    return null;
+  }
+  return result.stdout.trim();
+}
+
+async function removeLxdProxyDevice(entry: ProxyBackendStateEntry): Promise<string | null> {
+  const result = await runAllowFailure([
+    "timeout",
+    "30s",
+    "lxc",
+    "config",
+    "device",
+    "remove",
+    entry.containerName,
+    entry.deviceName
+  ]);
+  if (result.exitCode === 0 || deviceMissing(result.stderr || result.stdout)) {
+    return null;
+  }
+  return `failed to remove stale LXD proxy device ${entry.containerName}/${entry.deviceName}: ${compactCommandOutput(result.stderr || result.stdout)}`;
+}
+
+async function ensureLxdProxyDevice(entry: ProxyBackendStateEntry): Promise<string | null> {
+  const expectedListen = backendListenAddress(entry);
+  const expectedConnect = backendConnectAddress(entry);
+  const listen = await readLxdProxyDeviceValue(entry.containerName, entry.deviceName, "listen");
+  const connect = await readLxdProxyDeviceValue(entry.containerName, entry.deviceName, "connect");
+  if (listen === expectedListen && connect === expectedConnect) {
+    return null;
+  }
+
+  if (listen !== null || connect !== null) {
+    const removeError = await removeLxdProxyDevice(entry);
+    if (removeError) {
+      return removeError;
+    }
+  }
+
+  const result = await runAllowFailure([
+    "timeout",
+    "30s",
+    "lxc",
+    "config",
+    "device",
+    "add",
+    entry.containerName,
+    entry.deviceName,
+    "proxy",
+    `listen=${expectedListen}`,
+    `connect=${expectedConnect}`,
+    "bind=host"
+  ]);
+  if (result.exitCode !== 0) {
+    return `failed to add LXD proxy device ${entry.containerName}/${entry.deviceName}: ${compactCommandOutput(result.stderr || result.stdout)}`;
+  }
+
+  return null;
+}
+
+async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ targets: Record<string, ProxyBackendTarget>; errors: string[] }> {
+  const specs = collectDesiredProxyBackendSpecs(containers);
+  const desiredKeys = new Set(specs.map((spec) => spec.key));
+  const previous = loadProxyBackendState();
+  const previousByKey = new Map<string, ProxyBackendStateEntry>();
+  const errors: string[] = [];
+
+  for (const entry of previous) {
+    if (!previousByKey.has(entry.key)) {
+      previousByKey.set(entry.key, entry);
+    }
+    if (!desiredKeys.has(entry.key)) {
+      const removeError = await removeLxdProxyDevice(entry);
+      if (removeError) {
+        errors.push(removeError);
+      }
+    }
+  }
+
+  const usedPorts = new Set(
+    previous
+      .map((entry) => entry.hostPort)
+      .filter((port) => Number.isInteger(port) && port >= PROXY_BACKEND_BASE_PORT && port <= PROXY_BACKEND_MAX_PORT)
+  );
+  const next: ProxyBackendStateEntry[] = [];
+
+  for (const spec of specs) {
+    const previousEntry = previousByKey.get(spec.key);
+    let hostPort =
+      previousEntry?.hostPort &&
+      previousEntry.hostPort >= PROXY_BACKEND_BASE_PORT &&
+      previousEntry.hostPort <= PROXY_BACKEND_MAX_PORT &&
+      !next.some((entry) => entry.hostPort === previousEntry.hostPort)
+        ? previousEntry.hostPort
+        : undefined;
+    if (!hostPort) {
+      try {
+        hostPort = allocateProxyBackendPort(usedPorts);
+      } catch (error) {
+        errors.push(`${spec.containerName}: ${String(error).replace(/^Error: /, "")}`);
+        continue;
+      }
+    }
+    usedPorts.add(hostPort);
+
+    if (previousEntry && previousEntry.deviceName !== spec.deviceName) {
+      const removeError = await removeLxdProxyDevice(previousEntry);
+      if (removeError) {
+        errors.push(removeError);
+        continue;
+      }
+    }
+
+    const entry: ProxyBackendStateEntry = { ...spec, hostPort };
+    const deviceError = await ensureLxdProxyDevice(entry);
+    if (deviceError) {
+      errors.push(deviceError);
+      continue;
+    }
+    next.push(entry);
+  }
+
+  if (errors.length === 0) {
+    writeJsonFile(PROXY_BACKEND_STATE_PATH, next);
+  }
+
+  const targets = Object.fromEntries(
+    next.map((entry) => [
+      entry.key,
+      {
+        address: "127.0.0.1",
+        port: entry.hostPort
+      }
+    ])
+  );
+
+  return { targets, errors };
+}
+
 function routeHostAllowedForSharedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
   if (!rootDomain) {
     return host === manageDomain;
@@ -959,7 +1299,7 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
   });
 }
 
-export function buildDynamicConfig(containers: LxcInstance[], config: Record<string, unknown>): {
+export function buildDynamicConfig(containers: LxcInstance[], config: Record<string, unknown>, backendTargets: Record<string, ProxyBackendTarget> = {}): {
   dynamicYaml: string;
   extraEntrypoints: Record<string, { address: string }>;
   ufwPorts: DesiredPort[];
@@ -1071,10 +1411,6 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
     }
 
     const ipAddress = findIpv4(container);
-    if (!ipAddress) {
-      errors.push(`${name}: skipped because no global IPv4 address is available`);
-      continue;
-    }
 
     for (const [index, rawItem] of splitProxyItems(label).entries()) {
       let item: ReturnType<typeof parseProxyItem>;
@@ -1086,6 +1422,14 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
       }
 
       if (item.kind === "http") {
+        const backend = backendTargets[proxyBackendKey(name, "tcp", item.targetPort)];
+        const backendAddress = backend?.address ?? ipAddress;
+        const backendPort = backend?.port ?? item.targetPort;
+        if (!backendAddress) {
+          errors.push(`${name}: skipped HTTP route ${rawItem} because no backend address is available`);
+          continue;
+        }
+
         const authProfile = item.auth.enabled ? authProfileByKey.get(routeAuthProfileKey(item.host, item.auth.groups)) : undefined;
         if (item.auth.enabled && !authProfile) {
           continue;
@@ -1102,7 +1446,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
         const serviceName = `lxc-${suffix}`;
         httpServices[serviceName] = {
           loadBalancer: {
-            servers: [{ url: `http://${ipAddress}:${item.targetPort}` }]
+            servers: [{ url: `http://${backendAddress}:${backendPort}` }]
           }
         };
 
@@ -1156,6 +1500,14 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
       }
       portClaims.add(claim);
 
+      const backend = backendTargets[proxyBackendKey(name, item.kind, item.containerPort)];
+      const backendAddress = backend?.address ?? ipAddress;
+      const backendPort = backend?.port ?? item.containerPort;
+      if (!backendAddress) {
+        errors.push(`${name}: skipped ${item.kind.toUpperCase()} route ${rawItem} because no backend address is available`);
+        continue;
+      }
+
       const entrypointName = `${item.kind}-${item.hostPort}`;
       extraEntrypoints[entrypointName] = {
         address: `:${item.hostPort}/${item.kind}`
@@ -1167,7 +1519,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
       if (item.kind === "tcp") {
         tcpServices[serviceName] = {
           loadBalancer: {
-            servers: [{ address: `${ipAddress}:${item.containerPort}` }]
+            servers: [{ address: `${backendAddress}:${backendPort}` }]
           }
         };
         tcpRouters[`${serviceName}-router`] = {
@@ -1178,7 +1530,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
       } else {
         udpServices[serviceName] = {
           loadBalancer: {
-            servers: [{ address: `${ipAddress}:${item.containerPort}` }]
+            servers: [{ address: `${backendAddress}:${backendPort}` }]
           }
         };
         udpRouters[`${serviceName}-router`] = {
@@ -1212,32 +1564,36 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
 }
 
 export async function proxySyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void> {
-  const config = loadConfig(configPath, PREFIX);
-  const containers = await enrichInstanceState(await loadInstancesForProxySync());
-  const { dynamicYaml, extraEntrypoints, ufwPorts, authProfiles, errors } = buildDynamicConfig(containers, config);
-  const staticYaml = buildStaticConfig(config, extraEntrypoints);
+  await withProxySyncLock(async () => {
+    const config = loadConfig(configPath, PREFIX);
+    const containers = await enrichInstanceState(await loadInstancesForProxySync());
+    const { targets: backendTargets, errors: backendErrors } = await syncLxdProxyBackends(containers);
+    const { dynamicYaml, extraEntrypoints, ufwPorts, authProfiles, errors } = buildDynamicConfig(containers, config, backendTargets);
+    const staticYaml = buildStaticConfig(config, extraEntrypoints);
 
-  const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
-  const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
-  assertProxySyncSucceeded({
-    dynamicErrors: errors,
-    ufwErrors: [],
-    localRouteClientErrors,
-    routeAuthErrors
-  });
+    const localRouteClientErrors = authProfiles.length > 0 ? await syncLocalRoutesClient(config, authProfiles) : [];
+    const routeAuthErrors = await syncRouteAuthStack(config, authProfiles);
+    assertProxySyncSucceeded({
+      dynamicErrors: errors,
+      ufwErrors: [],
+      backendErrors,
+      localRouteClientErrors,
+      routeAuthErrors
+    });
 
-  const staticChanged = writeIfChanged(STATIC_CONFIG_PATH, staticYaml);
-  writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml);
-  const ufwErrors = await syncUfw(ufwPorts);
+    const staticChanged = writeIfChanged(STATIC_CONFIG_PATH, staticYaml);
+    writeIfChanged(DYNAMIC_CONFIG_PATH, dynamicYaml);
+    const ufwErrors = await syncUfw(ufwPorts);
 
-  if (staticChanged) {
-    await runText(["systemctl", "restart", "traefik"], PREFIX);
-  }
+    if (staticChanged) {
+      await runText(["systemctl", "restart", "traefik"], PREFIX);
+    }
 
-  assertProxySyncSucceeded({
-    dynamicErrors: [],
-    ufwErrors,
-    localRouteClientErrors: [],
-    routeAuthErrors: []
+    assertProxySyncSucceeded({
+      dynamicErrors: [],
+      ufwErrors,
+      localRouteClientErrors: [],
+      routeAuthErrors: []
+    });
   });
 }

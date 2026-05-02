@@ -19,4 +19,5 @@ Important: not every workload should be exposed the same way.
 - [OpenClaw](openclaw.md) is different. Upstream recommends keeping the gateway on loopback and accessing it through SSH or Tailscale unless you are intentionally configuring a secured non-loopback deployment.
 - [Isolated Docker Compose deployments](compose.md) are a good fit when you want a whole app stack inside one time-machine-enabled container.
 - [Dokploy](dokploy.md) is the next step when you want a UI-driven deployment control plane and want to treat multiple Terrarium LXCs as Dokploy servers.
+- [Coolify](coolify.md) is another UI-driven deployment platform that fits Terrarium when each LXC is treated as a small SSH-managed Docker server.
 - [Protecting published services with OIDC](auth-protection.md) explains the recommended SSO pattern for routes that should not rely on weak or missing built-in auth.

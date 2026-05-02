@@ -154,6 +154,22 @@ describe("terrarium route auth generation", () => {
     }
   });
 
+  test("uses reconciled backend targets when LXD uses host-side proxy devices", () => {
+    const { dynamicYaml, errors } = buildDynamicConfig(
+      [container("app", "https://app.example.test:8080")],
+      routeAuthConfig,
+      { "app:tcp:8080": { address: "127.0.0.1", port: 18081 } }
+    );
+    const dynamic = parse(dynamicYaml) as {
+      http: {
+        services: Record<string, { loadBalancer: { servers: { url: string }[] } }>;
+      };
+    };
+
+    expect(errors).toEqual([]);
+    expect(Object.values(dynamic.http.services)[0].loadBalancer.servers[0].url).toBe("http://127.0.0.1:18081");
+  });
+
   test("external ZITADEL redirect URIs include exact generated route callback paths", () => {
     const { redirectUris, errors } = buildRouteAuthRedirectUris(
       [
@@ -201,6 +217,7 @@ describe("terrarium proxy sync failure handling", () => {
       assertProxySyncSucceeded({
         dynamicErrors: ["app: duplicate HTTP route https://app.example.test/"],
         ufwErrors: ["failed to add UFW rule tcp/2222: permission denied"],
+        backendErrors: ["failed to add LXD proxy device"],
         localRouteClientErrors: ["failed to find terrarium-routes app in ZITADEL"],
         routeAuthErrors: ["route auth listener failed readiness probe"]
       })
@@ -209,6 +226,7 @@ describe("terrarium proxy sync failure handling", () => {
         "proxy sync failed:",
         "- dynamic config: app: duplicate HTTP route https://app.example.test/",
         "- ufw: failed to add UFW rule tcp/2222: permission denied",
+        "- backend: failed to add LXD proxy device",
         "- local route client: failed to find terrarium-routes app in ZITADEL",
         "- route auth: route auth listener failed readiness probe"
       ].join("\n")

@@ -52,7 +52,8 @@ Terrarium provisions the host with:
 ## Supported Host
 
 - Ubuntu Server 24.04 LTS
-- Single-host install only
+- Single-host install by default
+- Experimental multi-node LXD clustering through `terrariumctl cluster ...`
 - LXC containers only
 
 ## Install Modes
@@ -185,6 +186,39 @@ What gets updated on change:
 - Self-hosted ZITADEL is enabled, disabled, restarted, and reconciled when its rendered config changes.
 - Terrarium then re-runs `terrariumctl proxy sync`, and when IDP mode is `local`, also re-runs `terrariumctl idp sync`.
 
+## Clustering
+
+Terrarium clustering uses LXD's native cluster membership and dqlite state. The
+Terrarium config is stored in LXD project metadata, so joined nodes can export
+the same config and reconfigure locally.
+
+Typical first member:
+
+```bash
+terrariumctl cluster init \
+  --member node1 \
+  --address 10.0.0.11:8443 \
+  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
+  --peer-cidr 10.0.0.0/24
+```
+
+Typical additional member:
+
+```bash
+terrariumctl cluster token node2
+terrariumctl cluster join --token '<token>' --address 10.0.0.12:8443 --peer-cidr 10.0.0.0/24 --yes
+```
+
+Terrarium creates an OVN workload network named `terrarium-ovn` and points the
+default LXD profiles at it. Use at least three cluster members for a real
+quorum-tolerant setup; clustering does not make local ZFS storage magically
+shared.
+
+`lxdbr0` stays as the managed parent/uplink network. Host-side Traefik reaches
+published OVN workloads through Terrarium-managed LXD `proxy` devices bound to
+loopback, so it does not depend on direct host routing to private OVN instance
+addresses.
+
 ## terrariumctl Reference
 
 Top-level commands:
@@ -199,6 +233,11 @@ Top-level commands:
 | `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the saved config. |
 | `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
 | `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
+| `terrariumctl cluster status` | none | n/a | Shows LXD cluster state and the Terrarium OVN network. |
+| `terrariumctl cluster init` | required: `--member`, `--address`; optional: `--central-addresses`, `--peer-cidr` | network `terrarium-ovn`, parent `lxdbr0` | Enables LXD clustering on the first member and reconciles Terrarium OVN networking. |
+| `terrariumctl cluster token` | required: member name | n/a | Mints a single-use LXD cluster join token. |
+| `terrariumctl cluster join` | required: `--token`, `--address`; optional: `--peer-cidr`, `--yes` | storage pool `terrarium` | Joins the local node to an existing LXD cluster, exports shared Terrarium config, and reconfigures. |
+| `terrariumctl cluster ovn configure` | optional: `--central-addresses`, `--peer-cidr` | network `terrarium-ovn`, parent `lxdbr0` | Updates Terrarium OVN central member and peer firewall settings. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
 | `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=0`, `gid=0`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
@@ -410,7 +449,8 @@ Rules:
 - `udp://hostport:containerport` exposes a raw UDP port through Traefik.
 - Dynamic TCP/UDP host ports are also opened and closed in UFW automatically by the sync job.
 - Auth-protected published routes are backed by host-side `oauth2-proxy` instances managed automatically by `terrariumctl proxy sync`.
-- If the container does not have a global IPv4 address yet, the route is skipped until it does.
+- `terrariumctl proxy sync` also reconciles host-loopback LXD `proxy` devices for published container backends and points Traefik at those localhost targets.
+- If a backend proxy device cannot be reconciled, the sync fails without publishing a partially broken Traefik config.
 
 ## Development
 

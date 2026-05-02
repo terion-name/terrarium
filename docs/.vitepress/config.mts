@@ -50,6 +50,7 @@ export default defineConfig({
         items: [
           { text: "Overview", link: "/operations/" },
           { text: "Reconfiguration", link: "/operations/reconfiguration" },
+          { text: "Clustering", link: "/operations/clustering" },
           { text: "Backups and Restore", link: "/operations/backups-and-restore" }
         ]
       },
@@ -70,6 +71,7 @@ export default defineConfig({
           { text: "VSCodium Web IDE", link: "/guides/vscode" },
           { text: "Isolated Docker Compose deployments", link: "/guides/compose" },
           { text: "Dokploy", link: "/guides/dokploy" },
+          { text: "Coolify", link: "/guides/coolify" },
           { text: "Protecting published services with OIDC", link: "/guides/auth-protection" }
         ]
       },

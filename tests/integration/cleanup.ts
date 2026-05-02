@@ -160,6 +160,43 @@ timeout 120s "$ctl" proxy sync
 `.trim();
 }
 
+function lxdOvnDiagnosticsCommand(): string {
+  return `
+set +e
+echo "== lxdbr0 =="
+timeout 15s lxc network show lxdbr0 2>&1 || true
+echo
+echo "== terrarium-ovn =="
+timeout 15s lxc network show terrarium-ovn 2>&1 || true
+echo
+echo "== terrarium proxy backend state =="
+if [ -f /var/lib/terrarium/proxy-backends.json ]; then
+  cat /var/lib/terrarium/proxy-backends.json
+else
+  echo "/var/lib/terrarium/proxy-backends.json is missing"
+fi
+echo
+echo "== LXD proxy devices =="
+timeout 30s lxc list -f csv -c n | while read -r name; do
+  [ -n "$name" ] || continue
+  echo "-- $name --"
+  timeout 15s lxc config device show "$name" 2>&1 | sed -n '/terrarium-proxy/,+6p'
+done
+echo
+echo "== proxy backend probes from generated Traefik config =="
+if [ -f /etc/traefik/dynamic/terrarium-lxc.yml ]; then
+  grep -Eo 'https?://[^ "]+' /etc/traefik/dynamic/terrarium-lxc.yml | sort -u | while read -r url; do
+    echo "-- $url --"
+    timeout 10s curl -fsS --noproxy "*" --connect-timeout 2 --max-time 5 "$url" 2>&1 | head -c 2000
+    echo
+    echo "curl_exit=$?"
+  done
+else
+  echo "/etc/traefik/dynamic/terrarium-lxc.yml is missing"
+fi
+`.trim();
+}
+
 function hostDiagnostics(host: ManagedHost): HostDiagnostic[] {
   return [
     {
@@ -185,6 +222,11 @@ function hostDiagnostics(host: ManagedHost): HostDiagnostic[] {
     {
       name: "tls-probes",
       command: tlsProbeCommand(host),
+      timeoutMs: 80000
+    },
+    {
+      name: "lxd-network-and-proxy",
+      command: lxdOvnDiagnosticsCommand(),
       timeoutMs: 80000
     },
     {
