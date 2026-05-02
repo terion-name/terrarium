@@ -1,6 +1,6 @@
 terrarium_oauth2_proxy_enabled: "{{ terrarium_idp_mode in ['local', 'oidc'] }}"
 terrarium_oauth2_proxy_dir: "{{ terrarium_state_dir }}/oauth2-proxy"
-terrarium_oauth2_proxy_image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
+terrarium_oauth2_proxy_image: "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e"
 terrarium_oauth2_proxy_uid: "65532"
 terrarium_oauth2_proxy_gid: "65532"
 terrarium_oauth2_proxy_port: 4180

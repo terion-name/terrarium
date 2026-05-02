@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 const repoRoot = join(import.meta.dir, "..");
+const POSTGRES_DHI_IMAGE =
+  "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
 
 describe("Traefik bootstrap certificate template", () => {
   test("marks the self-signed bootstrap certificate as a CA trusted for server auth", () => {
@@ -72,6 +74,13 @@ describe("Traefik bootstrap certificate template", () => {
     expect(tasks.match(/no_log: true/g)?.length).toBeGreaterThanOrEqual(4);
     expect(playbook).toContain("Refresh config bundle with resolved admin group");
     expect(playbook).toContain("no_log: true");
+  });
+
+  test("uses Docker Hardened Images for local ZITADEL Postgres by default", () => {
+    const defaults = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/defaults/main.yml"), "utf8");
+
+    expect(defaults).toContain(`terrarium_zitadel_postgres_image: "${POSTGRES_DHI_IMAGE}"`);
+    expect(defaults).not.toContain("postgres:17.2-alpine");
   });
 
   test("retries transient Traefik release download failures", () => {

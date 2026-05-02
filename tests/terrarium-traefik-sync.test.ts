@@ -23,6 +23,8 @@ const routeAuthConfig = {
   terrarium_auth_domain: "auth.example.test",
   terrarium_oidc_issuer: "https://auth.example.test"
 };
+const OAUTH2_PROXY_DHI_IMAGE =
+  "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
 
 function container(name: string, proxy: string, address = "10.10.0.10") {
   return {
@@ -115,6 +117,9 @@ describe("terrarium route auth generation", () => {
     const compose = parse(composeYaml) as { services: Record<string, unknown> };
 
     expect(Object.keys(compose.services).sort()).toEqual(profiles.map((profile) => profile.containerName).sort());
+    expect(Object.values(compose.services).map((service) => (service as { image?: string }).image)).toEqual(
+      profiles.map(() => OAUTH2_PROXY_DHI_IMAGE)
+    );
     expect(Object.values(compose.services).map((service) => (service as { user?: string }).user)).toEqual(profiles.map(() => "65532:65532"));
     expect(profileConfigs[adminProfile.containerName]).toContain(`proxy_prefix = "${adminProfile.proxyPrefix}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain(`redirect_url = "${adminProfile.callbackPath}"`);
@@ -127,6 +132,20 @@ describe("terrarium route auth generation", () => {
     expect(profileConfigs[signedInProfile.containerName]).toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
     expect(profileConfigs[signedInProfile.containerName]).not.toContain("allowed_groups");
     expect(profileConfigs[adminProfile.containerName]).not.toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
+  });
+
+  test("allows route-auth oauth2-proxy image overrides for mirrors", () => {
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth:admins")], routeAuthConfig);
+    const { composeYaml } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_oauth2_proxy_image: "registry.example.test/oauth2-proxy:test" },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+    const compose = parse(composeYaml) as { services: Record<string, { image?: string }> };
+
+    expect(Object.values(compose.services).map((service) => service.image)).toEqual(["registry.example.test/oauth2-proxy:test"]);
   });
 
   test("generates policy-specific forwardAuth middleware and oauth callback routes without query policy", () => {

@@ -13,6 +13,8 @@ const OAUTH2_PROXY_COOKIE_SECRET_PATH = "/etc/terrarium/secrets/oauth2_proxy_coo
 const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
+const DEFAULT_OAUTH2_PROXY_IMAGE =
+  "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
 const OAUTH2_PROXY_UID = 65532;
 const OAUTH2_PROXY_GID = 65532;
 const ROUTE_AUTH_READY_ATTEMPTS = 12;
@@ -1057,6 +1059,7 @@ export function buildRouteAuthComposeArtifacts(
 ): RouteAuthComposeArtifacts {
   const issuer = configString(config, "terrarium_oidc_issuer");
   const localIdp = configString(config, "terrarium_idp_mode") === "local";
+  const oauth2ProxyImage = configString(config, "terrarium_oauth2_proxy_image", DEFAULT_OAUTH2_PROXY_IMAGE);
   const profileConfigs: Record<string, string> = {};
 
   const services = Object.fromEntries(
@@ -1097,7 +1100,7 @@ export function buildRouteAuthComposeArtifacts(
       return [
         profile.containerName,
         {
-          image: "quay.io/oauth2-proxy/oauth2-proxy:v7.13.0",
+          image: oauth2ProxyImage,
           user: `${OAUTH2_PROXY_UID}:${OAUTH2_PROXY_GID}`,
           network_mode: "host",
           restart: "unless-stopped",

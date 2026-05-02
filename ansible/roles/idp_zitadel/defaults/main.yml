@@ -6,6 +6,6 @@ terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
 terrarium_zitadel_api_port: 8082
 terrarium_zitadel_login_port: 8083
 terrarium_zitadel_version: v4.13.0
-terrarium_zitadel_postgres_image: postgres:17.2-alpine
+terrarium_zitadel_postgres_image: "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"
 terrarium_zitadel_pat_expiration: "2099-01-01T00:00:00Z"
 terrarium_zitadel_project_name: Terrarium

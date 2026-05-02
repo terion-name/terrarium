@@ -7,6 +7,7 @@ Terrarium installs onto a single Ubuntu 24.04 VPS and turns it into a hardened h
 - Ubuntu Server 24.04 LTS
 - root access on the host
 - SSH key-based access
+- Docker registry access for the default Docker Hardened Images used by oauth2-proxy and local ZITADEL Postgres. If your environment cannot pull from `dhi.io`, override the image variables to use an approved mirror before installation.
 - either:
   - a dedicated extra disk for the LXD ZFS pool, which is the recommended setup
   - or enough root-disk space to use `--storage-mode file`

@@ -44,7 +44,7 @@ Terrarium provisions the host with:
 - [OpenZFS](https://github.com/openzfs/zfs)
 - [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
 - [Traefik](https://github.com/traefik/traefik) with the built-in dashboard for public management endpoints
-- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping
+- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping, defaulting to a Docker Hardened Image
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`
 - External OIDC issuer support when you do not want to self-host the IDP
 - [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
