@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { cac } from "cac";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateRootPassword, partitionEndForCandidate, readCliOption, registerInstallCommand } from "./terrarium-install";
+import { generateRootPassword, normalizeOidcIssuer, partitionEndForCandidate, readCliOption, registerInstallCommand } from "./terrarium-install";
 
 const repoRoot = join(import.meta.dir, "..");
 
@@ -48,6 +48,12 @@ describe("terrarium install CLI parsing", () => {
         "32G"
       )
     ).toBe("34816MiB");
+  });
+
+  test("preserves explicit OIDC issuer root trailing slash", () => {
+    expect(normalizeOidcIssuer("https://issuer.example.test", "--oidc")).toBe("https://issuer.example.test");
+    expect(normalizeOidcIssuer("https://issuer.example.test/", "--oidc")).toBe("https://issuer.example.test/");
+    expect(normalizeOidcIssuer("https://issuer.example.test/tenant/", "--oidc")).toBe("https://issuer.example.test/tenant/");
   });
 
   test("does not expose the Cockpit root password as an argv option", () => {

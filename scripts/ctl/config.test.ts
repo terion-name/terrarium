@@ -117,9 +117,9 @@ describe("terrariumctl config reconciliation", () => {
     });
 
     expect(config.terrarium_auth_domain).toBe("primary-auth.example.test");
-    expect(config.terrarium_oidc_issuer).toBe("https://issuer.example.test");
+    expect(config.terrarium_oidc_issuer).toBe("https://issuer.example.test/");
     expect(plan.verifyOidc).toEqual({
-      issuer: "https://issuer.example.test",
+      issuer: "https://issuer.example.test/",
       clientId: "client-1",
       clientSecret: "secret-1",
       lxdClientId: "client-1",
@@ -181,7 +181,7 @@ describe("terrariumctl config reconciliation", () => {
 
     expect(plan.verifyOidc).toBeUndefined();
     expect(config.terrarium_auth_domain).toBe("primary-auth.example.test");
-    expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test");
+    expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test/");
     expect(config.terrarium_oidc_client_id).toBe("");
     expect(config.terrarium_oidc_client_secret).toBe("");
     expect(config.terrarium_lxd_oidc_client_id).toBe("");

@@ -197,11 +197,14 @@ export function normalizeOidcIssuer(value: string, fieldName: string): string {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     fail(`${fieldName} must use http or https`);
   }
-  if (parsed.pathname === "/") {
-    parsed.pathname = "";
+  if (parsed.search || parsed.hash) {
+    fail(`${fieldName} must not include query parameters or a fragment`);
   }
   const normalized = parsed.toString();
-  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  if (parsed.pathname === "/" && !trimmed.endsWith("/")) {
+    return normalized.slice(0, -1);
+  }
+  return normalized;
 }
 
 function requireRoot(): void {
