@@ -92,14 +92,32 @@ describe("terrariumctl mount defaults", () => {
     expect(mount).toContain('"forcegid"');
   });
 
-  test("defaults CIFS ownership to the host-side idmap for unprivileged LXD root", () => {
+  test("keeps host CIFS mounts root-owned by default", () => {
     const ctl = readFileSync(join(repoRoot, "scripts/terrariumctl.ts"), "utf8");
     const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");
 
-    expect(mount).toContain('export const DEFAULT_CIFS_UID = "100000"');
-    expect(mount).toContain('export const DEFAULT_CIFS_GID = "100000"');
-    expect(ctl).toContain("default: DEFAULT_CIFS_UID");
-    expect(ctl).toContain("default: DEFAULT_CIFS_GID");
+    expect(mount).toContain('export const DEFAULT_CIFS_UID = "0"');
+    expect(mount).toContain('export const DEFAULT_CIFS_GID = "0"');
+    expect(ctl).toContain('.option("--uid <uid>", "UID to present for mounted files", STRING_OPTION)');
+    expect(ctl).toContain('.option("--gid <gid>", "GID to present for mounted files", STRING_OPTION)');
+  });
+
+  test("can attach managed mounts to unprivileged LXD containers without exposing idmaps", () => {
+    const ctl = readFileSync(join(repoRoot, "scripts/terrariumctl.ts"), "utf8");
+    const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");
+    const full = readFileSync(join(repoRoot, "tests/integration/scenarios/full.ts"), "utf8");
+    const ctlDocs = readFileSync(join(repoRoot, "docs/reference/terrariumctl.md"), "utf8");
+    const storageDocs = readFileSync(join(repoRoot, "docs/getting-started/external-shared-storage.md"), "utf8");
+
+    expect(ctl).toContain("--container <name>");
+    expect(ctl).toContain("mount attach /host/path CONTAINER");
+    expect(ctl).toContain("mountAttachCmd(hostPath, instance");
+    expect(mount).toContain("lookupInstanceRootIdmap");
+    expect(mount).toContain("volatile.idmap.current");
+    expect(mount).not.toContain('"shift=true"');
+    expect(full).toContain("--container ${shellArg(sharedContainer)} --container-path /mnt/shared");
+    expect(ctlDocs).not.toMatch(/idmap/i);
+    expect(storageDocs).not.toMatch(/idmap/i);
   });
 
   test("recovers dashed CIFS mode options from the CLI parser", () => {

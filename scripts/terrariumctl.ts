@@ -32,9 +32,8 @@ import {
 import {
   DEFAULT_CIFS_DIR_MODE,
   DEFAULT_CIFS_FILE_MODE,
-  DEFAULT_CIFS_GID,
-  DEFAULT_CIFS_UID,
   mountAddCmd,
+  mountAttachCmd,
   mountListCmd,
   mountRemoveCmd
 } from "./ctl/mount";
@@ -241,13 +240,17 @@ cli
   .command("mount <action> [...args]", "Manage host SMB/CIFS mounts")
   .option("-p, --password <password>", "SMB/CIFS password for non-interactive automation", STRING_OPTION)
   .option("--password-file <path>", "Read SMB/CIFS password from a root-readable file", STRING_OPTION)
-  .option("--uid <uid>", "UID to present for mounted files", { ...STRING_OPTION, default: DEFAULT_CIFS_UID })
-  .option("--gid <gid>", "GID to present for mounted files", { ...STRING_OPTION, default: DEFAULT_CIFS_GID })
+  .option("--uid <uid>", "UID to present for mounted files", STRING_OPTION)
+  .option("--gid <gid>", "GID to present for mounted files", STRING_OPTION)
   .option("--file-mode <mode>", "File mode for mounted files", { ...STRING_OPTION, default: DEFAULT_CIFS_FILE_MODE })
   .option("--dir-mode <mode>", "Directory mode for mounted directories", { ...STRING_OPTION, default: DEFAULT_CIFS_DIR_MODE })
   .option("--seal <value>", "Enable SMB encryption: true or false", { ...STRING_OPTION, default: "true" })
+  .option("--container <name>", "Attach the mount to an LXD container with container-aware ownership", STRING_OPTION)
+  .option("--instance <name>", "Alias for --container", STRING_OPTION)
+  .option("--container-path <path>", "Path inside the attached LXD container", STRING_OPTION)
+  .option("--device <name>", "LXD disk device name for --container or mount attach", STRING_OPTION)
   .usage(
-    "mount add smb|cifs /host/path //server/share username [-p PASSWORD|--password-file PATH] [--seal true|false]\n  terrariumctl mount remove /host/path\n  terrariumctl mount list"
+    "mount add smb|cifs /host/path //server/share username [-p PASSWORD|--password-file PATH] [--container NAME]\n  terrariumctl mount attach /host/path CONTAINER [/container/path]\n  terrariumctl mount remove /host/path\n  terrariumctl mount list"
   )
   .action(async (action, args, options) => {
     const normalizedAction = action.trim().toLowerCase();
@@ -265,7 +268,22 @@ cli
         gid: cliOption(rawOptions, "gid"),
         fileMode: cliOption(rawOptions, "fileMode", ["file-mode"]),
         dirMode: cliOption(rawOptions, "dirMode", ["dir-mode"]),
-        seal: parseBooleanOption(rawOptions.seal as string | undefined, "--seal", true)
+        seal: parseBooleanOption(rawOptions.seal as string | undefined, "--seal", true),
+        instance: cliOption(rawOptions, "container") || cliOption(rawOptions, "instance"),
+        instancePath: cliOption(rawOptions, "containerPath", ["container-path"]),
+        device: cliOption(rawOptions, "device")
+      });
+      return;
+    }
+
+    if (normalizedAction === "attach") {
+      const [hostPath, instance, instancePath] = commandArgs;
+      if (!hostPath || !instance) {
+        throw new Error("mount attach requires: <hostPath> <container> [/container/path]");
+      }
+      await mountAttachCmd(hostPath, instance, {
+        instancePath: instancePath || cliOption(rawOptions, "containerPath", ["container-path"]),
+        device: cliOption(rawOptions, "device")
       });
       return;
     }

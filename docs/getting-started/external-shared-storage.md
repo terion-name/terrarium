@@ -82,9 +82,15 @@ Terrarium will:
 - add a managed block to `/etc/fstab`
 - mount the share immediately
 
-By default, Terrarium presents SMB files as host UID/GID `100000`, which maps
-to root inside its default unprivileged LXD containers. Use `--uid` and `--gid`
-if you want the mounted share presented to a different host or container id map.
+To mount and attach the share to an LXD container in one step:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345 --container app --container-path /mnt/shared
+```
+
+Terrarium keeps the container unprivileged and configures the LXD disk device so
+the files are usable from inside the container. To attach an already-mounted
+Terrarium-managed share, use `terrariumctl mount attach /srv/shared/storage-box app /mnt/shared`.
 
 If you prefer automation, you can also pass the password explicitly:
 

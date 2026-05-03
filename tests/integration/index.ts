@@ -90,6 +90,9 @@ try {
         await runSmokeSuite(context);
       });
     } else {
+      await context.withScenario("smoke", async () => {
+        await runSmokeSuite(context);
+      });
       await context.withScenario("full", async () => {
         await runFullSuite(context);
       });

@@ -44,8 +44,9 @@ bun run tests/integration/index.ts --cleanup-only
 Flags:
 
 - `--suite smoke|full` selects the smoke or full suite.
-- `--only <scenario>` narrows execution to the named scenario. Current suites
-  use `smoke` and `full` as scenario names.
+- `--only <scenario>` narrows execution to the named scenario. The full suite
+  registers `smoke` first and `full` second, so `--suite full --only full`
+  runs only the slower after-smoke coverage.
 - `--keep-on-failure` leaves infrastructure in place after a failure so you can
   inspect the host directly.
 - `--reuse-infra` enables reuse hooks where a provider supports them.

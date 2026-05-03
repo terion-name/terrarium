@@ -1,5 +1,6 @@
 import { IntegrationContext } from "../context";
 import { expectRemoteContains } from "../assertions/host";
+import type { ManagedHost } from "../types";
 import {
   assertInstalledHost,
   captureFailureArtifacts,
@@ -10,7 +11,6 @@ import {
   provisionHost,
   uploadSecretFile
 } from "./common";
-import { runSmokeSuite } from "./smoke";
 
 function shellArg(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
@@ -312,16 +312,18 @@ async function verifySharedCifsStorage(context: IntegrationContext, fileSsh: Ret
   const sharedHostPath = `/srv/shared/${context.config.slug}`;
   const sharedRelativePath = context.cifs.runPath(context.config.slug);
   const sharedRunPath = sharedRelativePath ? joinRemotePath(sharedHostPath, sharedRelativePath) : sharedHostPath;
+  const sharedContainerPath = sharedRelativePath ? joinRemotePath("/mnt/shared", sharedRelativePath) : "/mnt/shared";
   const sharedNoteName = `terrarium-${context.config.slug}-note.txt`;
   const sharedContainer = `shared-${context.config.slug}`;
   const cifsSecretPath = "/root/terrarium-full-cifs-secret";
 
   await uploadSecretFile(fileSsh, cifsSecretPath, context.config.cifsPassword);
   try {
+    await fileSsh.exec(`lxc launch ubuntu:24.04 ${shellArg(sharedContainer)}`);
     await fileSsh.exec(
       `trap "rm -f ${shellArg(cifsSecretPath)}" EXIT && terrariumctl mount add cifs ${shellArg(sharedHostPath)} ${shellArg(context.config.cifsAddress)} ${shellArg(
         context.config.cifsUsername
-      )} --password-file ${shellArg(cifsSecretPath)}`
+      )} --password-file ${shellArg(cifsSecretPath)} --container ${shellArg(sharedContainer)} --container-path /mnt/shared`
     );
     await fileSsh.exec("terrariumctl mount list");
     if (sharedRelativePath) {
@@ -336,9 +338,7 @@ async function verifySharedCifsStorage(context: IntegrationContext, fileSsh: Ret
       );
     }
 
-    await fileSsh.exec(`lxc launch ubuntu:24.04 ${sharedContainer}`);
-    await fileSsh.exec(`lxc config device add ${sharedContainer} shared disk source=${shellArg(sharedRunPath)} path=/mnt/shared`);
-    await fileSsh.exec(`lxc exec ${sharedContainer} -- cat ${shellArg(`/mnt/shared/${sharedNoteName}`)}`);
+    await fileSsh.exec(`lxc exec ${sharedContainer} -- cat ${shellArg(`${sharedContainerPath}/${sharedNoteName}`)}`);
   } finally {
     await fileSsh.execAllowFailure(`lxc delete ${sharedContainer} --force`);
     await fileSsh.execAllowFailure(`printf 'y\\n' | terrariumctl mount remove ${shellArg(sharedHostPath)}`);
@@ -400,16 +400,13 @@ timeout 60s bash -lc ${shellArg(
   await host.exec(`bash -lc ${shellArg(script)}`);
 }
 
-/** Runs the exhaustive manual/release-preflight suite on top of the smoke baseline. */
+/** Runs the exhaustive manual/release-preflight coverage beyond the smoke baseline. */
 export async function runFullSuite(context: IntegrationContext): Promise<void> {
-  await runSmokeSuite(context);
-
   const sshKeyId = await context.registerHetznerKey(`terrarium-full-${context.config.slug}`);
   const fileHost = await provisionHost(context, { label: "full-file", withVolume: false }, sshKeyId);
-  const partitionHost = await provisionHost(context, { label: "full-partition", withVolume: true }, sshKeyId);
   const fileSsh = context.ssh(fileHost);
-  const partitionSsh = context.ssh(partitionHost);
   const rootDomain = context.publicDns.rootDomain(fileHost.server.ipv4);
+  let partitionHost: ManagedHost | undefined;
   let releasedFullHosts = false;
 
   try {
@@ -441,6 +438,8 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
 
     await verifySharedCifsStorage(context, fileSsh);
 
+    partitionHost = await provisionHost(context, { label: "full-partition", withVolume: true }, sshKeyId);
+    const partitionSsh = context.ssh(partitionHost);
     await context.publicDns.waitForHosts(
       [partitionHost.domains.manage, partitionHost.domains.proxy, partitionHost.domains.lxd, partitionHost.domains.auth],
       partitionHost.server.ipv4
@@ -500,13 +499,15 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
     }
 
     await context.releaseHetznerHost(fileHost);
-    await context.releaseHetznerHost(partitionHost);
+    if (partitionHost) {
+      await context.releaseHetznerHost(partitionHost);
+    }
     releasedFullHosts = true;
 
     await verifyTerrariumCluster(context, sshKeyId);
   } catch (error) {
     if (!releasedFullHosts) {
-      await captureFailureArtifacts(context, [fileHost, partitionHost]);
+      await captureFailureArtifacts(context, [fileHost, partitionHost].filter((host): host is ManagedHost => Boolean(host)));
     }
     throw error;
   }

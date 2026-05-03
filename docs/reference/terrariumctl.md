@@ -25,7 +25,7 @@
 | `terrariumctl cluster remove` | required: member name; optional: `--move`, `--target`, `--force`, `--yes` | prompts before workload moves and removal | Removes a member from the LXD cluster, optionally moving workloads first. |
 | `terrariumctl cluster ovn configure` | optional: `--central-addresses`, `--peer-cidr` | discovers LXD member addresses and keeps an odd OVN central set | Updates shared OVN and cluster firewall settings, then reconciles the host. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config, host-loopback LXD proxy backend devices, and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
-| `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=100000`, `gid=100000`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
+| `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--container`, `--seal` | password prompt, host `uid=0`, host `gid=0`, container-aware uid/gid when `--container` is set, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
 | `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
 | `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
@@ -348,8 +348,11 @@ Restore behavior:
 | positional `username` | username | yes | none | The SMB/CIFS username written to the managed credentials file. |
 | `-p`, `--password` | password | no | prompt if omitted | The SMB/CIFS password. Omit it to let Terrarium prompt securely instead of putting it in shell history. |
 | `--password-file` | path | no | none | Reads the SMB/CIFS password from a root-readable file for non-interactive runs without putting it in shell history or process args. |
-| `--uid` | uid | no | `100000` | UID presented for files on the mounted share. This maps to root inside Terrarium's default unprivileged LXD containers. |
-| `--gid` | gid | no | `100000` | GID presented for files on the mounted share. This maps to root inside Terrarium's default unprivileged LXD containers. |
+| `--container` | container name | no | none | Also attach the mounted share to this LXD container using Terrarium's unprivileged-container-safe disk device settings. |
+| `--container-path` | absolute path | no | `/mnt/<mount-name>` | Path where `--container` attaches the share inside the container. |
+| `--device` | device name | no | generated | LXD disk device name used by `--container` or `mount attach`. |
+| `--uid` | uid | no | `0` | Advanced: UID presented for files on the host-side mount. |
+| `--gid` | gid | no | `0` | Advanced: GID presented for files on the host-side mount. |
 | `--file-mode` | octal mode | no | `0660` | File permissions presented on the mounted share. |
 | `--dir-mode` | octal mode | no | `0770` | Directory permissions presented on the mounted share. |
 | `--seal` | `true` or `false` | no | `true` | Enables or disables the SMB encryption option explicitly. |
@@ -360,12 +363,30 @@ Example:
 terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
 ```
 
+Attach the share to a container in the same step:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345 --container app --container-path /mnt/shared
+```
+
 Behavior:
 
 - Terrarium creates the mount point if it does not exist.
 - Terrarium writes credentials under `/etc/terrarium/mounts/`.
 - Terrarium adds or updates a Terrarium-managed block in `/etc/fstab`.
+- If `--container` is set, Terrarium keeps the LXD container unprivileged, maps the host-side CIFS ownership for that container, and attaches the share as a disk device.
 - If the path is already mounted, Terrarium remounts it cleanly.
+
+## mount attach
+
+Attach an existing Terrarium-managed host mount to an LXD container:
+
+```bash
+terrariumctl mount attach /srv/shared/storage-box app /mnt/shared
+```
+
+For Terrarium-managed CIFS mounts, `mount attach` remaps the host-side mount for
+the target unprivileged container before attaching the disk device.
 
 ## mount remove
 
