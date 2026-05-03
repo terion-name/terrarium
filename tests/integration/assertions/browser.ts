@@ -164,7 +164,7 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
   let lastStartClick = 0;
 
   while (Date.now() < deadline) {
-    if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
+    if ((await inputVisible(page, USERNAME_INPUT_SELECTORS)) && isIdentityLoginInputPage(page.url(), targetHost)) {
       return;
     }
     const parsed = parseBrowserUrl(page.url());
@@ -232,7 +232,7 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
 async function waitForOidcStartHandoff(page: Page, targetHost: string): Promise<void> {
   const deadline = Date.now() + BROWSER_OIDC_HANDOFF_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
+    if ((await inputVisible(page, USERNAME_INPUT_SELECTORS)) && isIdentityLoginInputPage(page.url(), targetHost)) {
       return;
     }
 
@@ -258,7 +258,7 @@ async function waitForIdentityLoginDocument(page: Page, targetHost: string): Pro
     }
 
     await maybeWithTimeout(page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => undefined), 4000);
-    if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
+    if ((await inputVisible(page, USERNAME_INPUT_SELECTORS)) && isIdentityLoginInputPage(currentUrl, targetHost)) {
       return;
     }
 
@@ -1173,6 +1173,11 @@ export function isTargetApplicationPage(currentUrl: string, targetHost: string):
 export function isTargetLoginOrOauthPlumbingPage(currentUrl: string, targetHost: string): boolean {
   const parsed = parseBrowserUrl(currentUrl);
   return Boolean(parsed && parsed.host === targetHost && isLoginOrOauthCallbackPlumbingPath(parsed.pathname));
+}
+
+export function isIdentityLoginInputPage(currentUrl: string, targetHost: string): boolean {
+  const parsed = parseBrowserUrl(currentUrl);
+  return Boolean(parsed && !(parsed.host === targetHost && isLoginOrOauthCallbackPlumbingPath(parsed.pathname)));
 }
 
 export function formatDeniedTargetRouteFailure(finalUrl: string, body: string): string {
