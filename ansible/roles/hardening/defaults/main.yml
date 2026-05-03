@@ -5,9 +5,10 @@ terrarium_hardening_sysctl_overwrite:
 
 terrarium_hardening_os_firewall: false
 terrarium_hardening_manage_ufw: false
-terrarium_hardening_ssh_permit_root_login: "without-password"
+terrarium_hardening_ssh_permit_root_login: "prohibit-password"
 terrarium_hardening_ssh_server_password_login: false
 terrarium_hardening_ssh_use_pam: true
+terrarium_hardening_ssh_authorized_keys_file: ".ssh/authorized_keys .ssh/authorized_keys2 /etc/ssh/authorized_keys/%u"
 terrarium_hardening_ssh_client_alive_interval: 300
 terrarium_hardening_ssh_client_alive_count: 2
 terrarium_hardening_ssh_max_auth_retries: 6

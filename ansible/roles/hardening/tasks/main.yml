@@ -13,6 +13,7 @@
     ssh_permit_root_login: "{{ terrarium_hardening_ssh_permit_root_login }}"
     ssh_server_password_login: "{{ terrarium_hardening_ssh_server_password_login }}"
     ssh_use_pam: "{{ terrarium_hardening_ssh_use_pam }}"
+    ssh_authorized_keys_file: "{{ terrarium_hardening_ssh_authorized_keys_file }}"
     ssh_client_alive_interval: "{{ terrarium_hardening_ssh_client_alive_interval }}"
     ssh_client_alive_count: "{{ terrarium_hardening_ssh_client_alive_count }}"
     ssh_max_auth_retries: "{{ terrarium_hardening_ssh_max_auth_retries }}"
