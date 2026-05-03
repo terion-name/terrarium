@@ -12,6 +12,8 @@ export type SshExecResult = {
 const REMOTE_READ_ATTEMPTS = 5;
 const REMOTE_READ_TIMEOUT_MS = 20000;
 export const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_SCP_COMMAND_TIMEOUT_MS = 90 * 1000;
+export const DEFAULT_SCP_ATTEMPTS = 4;
 
 export function sshCommandTimeoutMs(options: { timeoutMs?: number } = {}): number {
   return options.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS;
@@ -125,14 +127,14 @@ export class SshHost {
 
   async copyTo(localPath: string, remotePath: string): Promise<void> {
     this.logger.info(`scp ${localPath} -> ${this.host}:${remotePath}`);
-    await run(
+    await this.scpWithRetries(
       [
         "scp",
         ...this.connectionArgs(),
         localPath,
         `${this.user}@${this.host}:${remotePath}`
       ],
-      { timeoutMs: DEFAULT_SSH_COMMAND_TIMEOUT_MS }
+      `scp ${localPath} to ${this.host}:${remotePath}`
     );
   }
 
@@ -197,16 +199,35 @@ export class SshHost {
     if (archiveResult.exitCode !== 0) {
       throw new Error(archiveResult.stderr.trim() || archiveResult.stdout.trim() || `failed to archive host paths on ${this.host}`);
     }
-    await run(
+    await this.scpWithRetries(
       [
         "scp",
         ...this.connectionArgs(),
         `${this.user}@${this.host}:${remoteTar}`,
         localPath
       ],
-      { timeoutMs: DEFAULT_SSH_COMMAND_TIMEOUT_MS }
+      `scp ${this.host}:${remoteTar} to ${localPath}`
     );
     await this.exec(`rm -f ${shellEscape(remoteTar)}`);
+  }
+
+  private async scpWithRetries(cmd: string[], description: string): Promise<void> {
+    let lastFailure = "";
+    for (let attempt = 1; attempt <= DEFAULT_SCP_ATTEMPTS; attempt += 1) {
+      const result = await runAllowFailure(cmd, { timeoutMs: DEFAULT_SCP_COMMAND_TIMEOUT_MS });
+      if (result.exitCode === 0) {
+        return;
+      }
+
+      lastFailure = formatCommandResult(result);
+      if (attempt < DEFAULT_SCP_ATTEMPTS) {
+        this.logger.warn(`${description} failed on attempt ${attempt}/${DEFAULT_SCP_ATTEMPTS}; retrying: ${compactCommandOutput(lastFailure)}`);
+        await this.waitForSsh(45000).catch(() => undefined);
+        await Bun.sleep(attempt * 2000);
+      }
+    }
+
+    throw new Error(`${description} failed after ${DEFAULT_SCP_ATTEMPTS} attempts\n${lastFailure}`);
   }
 
   /**
@@ -230,4 +251,21 @@ exit "$status"
     await this.write(remoteScriptPath, script, "700");
     await this.exec(`nohup ${shellEscape(remoteScriptPath)} >/dev/null 2>&1 &`);
   }
+}
+
+function formatCommandResult(result: SshExecResult): string {
+  const parts = [`exit ${result.exitCode}`];
+  const stdout = result.stdout.trim();
+  const stderr = result.stderr.trim();
+  if (stdout) {
+    parts.push(`stdout:\n${stdout}`);
+  }
+  if (stderr) {
+    parts.push(`stderr:\n${stderr}`);
+  }
+  return parts.join("\n\n");
+}
+
+function compactCommandOutput(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 500) || "<empty>";
 }
