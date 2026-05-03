@@ -8,7 +8,8 @@ import {
   formatDeniedTargetRouteFailure,
   isRetryableBlankNavigationError,
   isLoginOrOauthCallbackPlumbingPath,
-  isTargetApplicationPage
+  isTargetApplicationPage,
+  isTargetLoginOrOauthPlumbingPage
 } from "./browser";
 
 describe("browser assertion helpers", () => {
@@ -36,6 +37,10 @@ describe("browser assertion helpers", () => {
     expect(isTargetApplicationPage("https://app.example.test/oauth2/route/grouped/callback?code=123", "app.example.test")).toBe(false);
     expect(isTargetApplicationPage("https://app.example.test/protected", "app.example.test")).toBe(true);
     expect(isTargetApplicationPage("https://auth.example.test/ui/v2/login/password", "app.example.test")).toBe(false);
+    expect(isTargetLoginOrOauthPlumbingPage("https://app.example.test/ui/login", "app.example.test")).toBe(true);
+    expect(isTargetLoginOrOauthPlumbingPage("https://app.example.test/oidc/login", "app.example.test")).toBe(true);
+    expect(isTargetLoginOrOauthPlumbingPage("https://app.example.test/protected", "app.example.test")).toBe(false);
+    expect(isTargetLoginOrOauthPlumbingPage("https://auth.example.test/ui/v2/login/password", "app.example.test")).toBe(false);
   });
 
   test("makes browser artifact names distinct by URL, expectation, user, and outcome", () => {

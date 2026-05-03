@@ -25,6 +25,8 @@ const BROWSER_INPUT_ATTEMPT_TIMEOUT_MS = 10000;
 const BROWSER_INPUT_TOTAL_TIMEOUT_MS = 45000;
 const BROWSER_LOGIN_DOCUMENT_TIMEOUT_MS = 30000;
 const BROWSER_OIDC_START_TIMEOUT_MS = 30000;
+const BROWSER_OIDC_HANDOFF_TIMEOUT_MS = 5000;
+const BROWSER_OIDC_RECLICK_INTERVAL_MS = 2000;
 const BROWSER_METADATA_TIMEOUT_MS = 5000;
 const BODY_SNIPPET_LENGTH = 4000;
 const DENIAL_TEXT_MARKERS = ["403", "forbidden", "access denied", "not authorized", "permission denied"] as const;
@@ -159,6 +161,7 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
   const deadline = Date.now() + BROWSER_OIDC_START_TIMEOUT_MS;
   let reloadedBlankTargetLoginPage = false;
   let lastBody = "";
+  let lastStartClick = 0;
 
   while (Date.now() < deadline) {
     if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
@@ -166,6 +169,9 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
     }
     const parsed = parseBrowserUrl(page.url());
     if (parsed && parsed.host !== targetHost) {
+      return;
+    }
+    if (parsed && parsed.host === targetHost && !isLoginOrOauthCallbackPlumbingPath(parsed.pathname)) {
       return;
     }
 
@@ -179,6 +185,8 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
     }
 
     const startSelectors = [
+      'button:has-text("Login with SSO")',
+      'a:has-text("Login with SSO")',
       'a:has-text("Log in")',
       'button:has-text("Log in")',
       'a:has-text("Login")',
@@ -197,11 +205,14 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
     for (const selector of startSelectors) {
       const locator = page.locator(selector).first();
       if (
+        Date.now() - lastStartClick > BROWSER_OIDC_RECLICK_INTERVAL_MS &&
         (await locatorVisible(locator)) &&
         !(await locatorDisabled(locator))
       ) {
+        lastStartClick = Date.now();
         await locator.click({ noWaitAfter: true, timeout: BROWSER_CLICK_TIMEOUT_MS });
-        return;
+        await waitForOidcStartHandoff(page, targetHost);
+        break;
       }
     }
 
@@ -218,14 +229,31 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
   }
 }
 
+async function waitForOidcStartHandoff(page: Page, targetHost: string): Promise<void> {
+  const deadline = Date.now() + BROWSER_OIDC_HANDOFF_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await inputVisible(page, USERNAME_INPUT_SELECTORS)) {
+      return;
+    }
+
+    const parsed = parseBrowserUrl(page.url());
+    if (!parsed || parsed.host !== targetHost || !isLoginOrOauthCallbackPlumbingPath(parsed.pathname)) {
+      return;
+    }
+
+    await page.waitForTimeout(250);
+  }
+}
+
 async function waitForIdentityLoginDocument(page: Page, targetHost: string): Promise<void> {
   const deadline = Date.now() + BROWSER_LOGIN_DOCUMENT_TIMEOUT_MS;
   let reloadedBlankLoginPage = false;
+  let lastBody = "";
 
   while (Date.now() < deadline) {
     const currentUrl = page.url();
     const parsed = parseBrowserUrl(currentUrl);
-    if (parsed?.host === targetHost) {
+    if (parsed?.host === targetHost && !isLoginOrOauthCallbackPlumbingPath(parsed.pathname)) {
       return;
     }
 
@@ -234,8 +262,8 @@ async function waitForIdentityLoginDocument(page: Page, targetHost: string): Pro
       return;
     }
 
-    const body = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
-    if (body.trim()) {
+    lastBody = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
+    if (lastBody.trim() && !(parsed?.host === targetHost && isLoginOrOauthCallbackPlumbingPath(parsed.pathname))) {
       return;
     }
 
@@ -247,6 +275,15 @@ async function waitForIdentityLoginDocument(page: Page, targetHost: string): Pro
     }
 
     await page.waitForTimeout(500);
+  }
+
+  if (isTargetLoginOrOauthPlumbingPage(page.url(), targetHost)) {
+    throw new Error(
+      [
+        `OIDC login did not leave target login plumbing page: ${page.url()}`,
+        `body:\n${bodySnippetForError(lastBody) || "<empty>"}`
+      ].join("\n")
+    );
   }
 }
 
@@ -1131,6 +1168,11 @@ export function isLoginOrOauthCallbackPlumbingPath(pathname: string): boolean {
 export function isTargetApplicationPage(currentUrl: string, targetHost: string): boolean {
   const parsed = parseBrowserUrl(currentUrl);
   return Boolean(parsed && parsed.host === targetHost && !isLoginOrOauthCallbackPlumbingPath(parsed.pathname));
+}
+
+export function isTargetLoginOrOauthPlumbingPage(currentUrl: string, targetHost: string): boolean {
+  const parsed = parseBrowserUrl(currentUrl);
+  return Boolean(parsed && parsed.host === targetHost && isLoginOrOauthCallbackPlumbingPath(parsed.pathname));
 }
 
 export function formatDeniedTargetRouteFailure(finalUrl: string, body: string): string {
