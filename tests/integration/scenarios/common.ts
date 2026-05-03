@@ -467,21 +467,18 @@ export async function switchToExternalOidc(
   fixture: ExternalOidcFixture
 ): Promise<void> {
   const ssh = context.ssh(host);
-  const scriptPath = `/root/terrarium-switch-oidc-${randomUUID()}.sh`;
   const secretPath = `/root/terrarium-switch-oidc-${randomUUID()}-secret`;
   await uploadSecretFile(ssh, secretPath, fixture.clientSecret);
-  await ssh.execScript(
-    `#!/usr/bin/env bash
-set -euo pipefail
-trap "rm -f ${shellArg(secretPath)}" EXIT
+  await runDetachedRemoteCommand(
+    ssh,
+    "switch-oidc",
+    `trap "rm -f ${shellArg(secretPath)}" EXIT
 ${remoteCtl("set idp oidc")} \\
   --oidc ${shellArg(context.config.zitadelCloudIssuer)} \\
   --oidc-client ${shellArg(fixture.clientId)} \\
   --oidc-secret-file ${shellArg(secretPath)} \\
   --lxd-oidc-client ${shellArg(fixture.lxdClientId)} \\
-  --admin-group ${shellArg(fixture.adminGroup)}
-`,
-    scriptPath
+  --admin-group ${shellArg(fixture.adminGroup)}`
   );
   await verifyManagementSurfaces(context, host, fixture.adminUser);
   await verifyLxdApi(host);
@@ -490,14 +487,7 @@ ${remoteCtl("set idp oidc")} \\
 /** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
 export async function switchBackToLocalIdp(context: IntegrationContext, host: ManagedHost): Promise<void> {
   const ssh = context.ssh(host);
-  const scriptPath = `/root/terrarium-switch-local-idp-${randomUUID()}.sh`;
-  await ssh.execScript(
-    `#!/usr/bin/env bash
-set -euo pipefail
-${remoteCtl("set idp local")}
-`,
-    scriptPath
-  );
+  await runDetachedRemoteCommand(ssh, "switch-local-idp", remoteCtl("set idp local"));
   const admin = await readLocalZitadelAdmin(ssh);
   await verifyManagementSurfaces(context, host, admin);
   await verifyLxdApi(host);

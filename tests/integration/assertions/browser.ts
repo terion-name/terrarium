@@ -949,8 +949,11 @@ export async function expectManagementUi(
       : {})
   };
   await withBrowser(outputDir, async (browser) => {
-    const browserOptions = { outputDir };
-    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, browserOptions);
+    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, {
+      outputDir,
+      postLoginBodyMarkers: COCKPIT_TEXT_MARKERS,
+      postLoginLabel: "Cockpit"
+    });
     const cockpitFinal = new URL(cockpit.finalUrl);
     const cockpitTarget = new URL(manageUrl);
     if (cockpitFinal.host !== cockpitTarget.host) {
@@ -958,7 +961,11 @@ export async function expectManagementUi(
     }
     assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
-    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, browserOptions);
+    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, {
+      outputDir,
+      postLoginBodyMarkers: TRAEFIK_TEXT_MARKERS,
+      postLoginLabel: "Traefik dashboard"
+    });
     if (!proxy.finalUrl.includes("/dashboard")) {
       throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
     }
@@ -986,8 +993,11 @@ export async function expectManagementSurfaces(
       : {})
   };
   await withBrowser(outputDir, async (browser) => {
-    const browserOptions = { outputDir };
-    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, browserOptions);
+    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, {
+      outputDir,
+      postLoginBodyMarkers: COCKPIT_TEXT_MARKERS,
+      postLoginLabel: "Cockpit"
+    });
     const cockpitFinal = new URL(cockpit.finalUrl);
     const cockpitTarget = new URL(manageUrl);
     if (cockpitFinal.host !== cockpitTarget.host) {
@@ -995,7 +1005,11 @@ export async function expectManagementSurfaces(
     }
     assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
-    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, browserOptions);
+    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, {
+      outputDir,
+      postLoginBodyMarkers: TRAEFIK_TEXT_MARKERS,
+      postLoginLabel: "Traefik dashboard"
+    });
     if (!proxy.finalUrl.includes("/dashboard")) {
       throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
     }
