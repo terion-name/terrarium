@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 
 const repoRoot = join(import.meta.dir, "..");
 const POSTGRES_DHI_IMAGE =
-  "dhi.io/postgres:17.9-alpine3.22@sha256:e8327d2f17677e94b5337a8bde47092d841bb10b718a2f77d4cd8a913b31f0e6";
+  "dhi.io/postgres:17.9-alpine3.22@sha256:53e316c761bfcaae02cdc6015c3a11a747fe9d0cde9cd0c3d4c871326862e7ed";
 const POSTGRES_MIRROR_IMAGE =
   "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22";
 const POSTGRES_FALLBACK_IMAGE =

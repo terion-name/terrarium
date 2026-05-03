@@ -6,7 +6,7 @@ const repoRoot = join(import.meta.dir, "..");
 
 const OAUTH2_PROXY_DIGEST = "sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
 const OAUTH2_PROXY_MIRROR_DIGEST = "sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de";
-const POSTGRES_DIGEST = "sha256:e8327d2f17677e94b5337a8bde47092d841bb10b718a2f77d4cd8a913b31f0e6";
+const POSTGRES_DIGEST = "sha256:53e316c761bfcaae02cdc6015c3a11a747fe9d0cde9cd0c3d4c871326862e7ed";
 
 describe("Docker Hardened Image mirror workflow", () => {
   test("mirrors pinned multi-arch DHI indexes to GHCR with digest checks", () => {
