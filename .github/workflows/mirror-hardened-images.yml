@@ -1,0 +1,97 @@
+name: mirror-hardened-images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/scripts/mirror-dhi-image.sh"
+      - ".github/workflows/mirror-hardened-images.yml"
+      - "ansible/site.yml"
+      - "ansible/roles/idp_zitadel/defaults/main.yml"
+      - "ansible/roles/oauth2_proxy/defaults/main.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: oauth2-proxy
+            source: dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
+            target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13
+            package: terrarium-dhi-oauth2-proxy
+            digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
+            arches: amd64,arm64
+          - name: postgres
+            source: dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
+            target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips
+            package: terrarium-dhi-postgres
+            digest: sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
+            arches: amd64,arm64
+    env:
+      REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+      HAS_DOCKERHUB_CREDS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mirror tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq skopeo
+
+      - name: Report missing Docker Hardened Images credentials
+        if: env.HAS_DOCKERHUB_CREDS != 'true'
+        run: |
+          echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets are required to mirror Docker Hardened Images."
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            exit 1
+          fi
+
+      - name: Assert Docker Hardened Images credentials are configured
+        if: env.HAS_DOCKERHUB_CREDS == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          test -n "${DOCKERHUB_USERNAME}" || { echo "DOCKERHUB_USERNAME secret is required" >&2; exit 1; }
+          test -n "${DOCKERHUB_TOKEN}" || { echo "DOCKERHUB_TOKEN secret is required" >&2; exit 1; }
+
+      - name: Login to Docker Hardened Images
+        if: env.HAS_DOCKERHUB_CREDS == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: skopeo login dhi.io --username "${DOCKERHUB_USERNAME}" --password-stdin <<<"${DOCKERHUB_TOKEN}"
+
+      - name: Login to GHCR
+        if: env.HAS_DOCKERHUB_CREDS == 'true'
+        run: skopeo login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Mirror pinned image index
+        if: env.HAS_DOCKERHUB_CREDS == 'true'
+        run: >-
+          .github/scripts/mirror-dhi-image.sh
+          "${{ matrix.name }}"
+          "${{ matrix.source }}"
+          "${{ matrix.target }}"
+          "${{ matrix.digest }}"
+          "${{ matrix.arches }}"
+
+      - name: Make GHCR package public when permitted
+        if: env.HAS_DOCKERHUB_CREDS == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_NAME: ${{ matrix.package }}
+        run: |
+          gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}/visibility" -f visibility=public ||
+          gh api --method PATCH "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE_NAME}/visibility" -f visibility=public

@@ -7,7 +7,7 @@ Terrarium installs onto a single Ubuntu 24.04 VPS and turns it into a hardened h
 - Ubuntu Server 24.04 LTS
 - root access on the host
 - SSH key-based access
-- Optional Docker Hardened Images registry access. When `/root/.docker/config.json` is present, Terrarium prefers its hardened oauth2-proxy and local ZITADEL Postgres images; otherwise it uses pinned public fallbacks. Set `terrarium_docker_hardened_images: true` or explicit image variables when you want installation to fail closed unless hardened images are available.
+- Optional Docker Hardened Images registry access. Terrarium first uses the upstream DHI registry when `/root/.docker/config.json` is present, then uses Terrarium's public GHCR mirror of the same pinned DHI image indexes, and only uses pinned upstream public fallbacks when hardened image use or mirrors are disabled. Set `terrarium_docker_hardened_images: true` or explicit image variables when you want installation to fail closed unless the upstream DHI images are available.
 - either:
   - a dedicated extra disk for the LXD ZFS pool, which is the recommended setup
   - or enough root-disk space to use `--storage-mode file`
@@ -93,6 +93,16 @@ Terrarium also verifies the most failure-prone integrations while you configure 
 - password and secret prompts are masked in interactive mode
 - external OIDC settings are probed against the issuer, callback flow, and client credentials before install continues
 - S3 settings are tested with a real write/delete probe against the configured bucket
+
+## Container Image Sources
+
+Terrarium pins the oauth2-proxy and local ZITADEL Postgres images by digest. The default source order is:
+
+- upstream Docker Hardened Images from `dhi.io` when Docker registry credentials exist on the host
+- Terrarium's GHCR mirror of those same DHI multi-arch indexes when upstream DHI credentials are not present
+- the pinned public upstream images when `terrarium_docker_hardened_images` or `terrarium_docker_hardened_image_mirrors` is disabled
+
+The GHCR mirror is refreshed by CI with Docker Hub credentials, copies every platform in the pinned index, and verifies the copied index and required `linux/amd64` and `linux/arm64` manifests before publishing.
 
 In interactive mode, failed verification sends you back to the relevant prompts. In non-interactive mode, install exits with an error instead of persisting broken settings.
 

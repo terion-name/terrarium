@@ -51,11 +51,14 @@
     terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
     terrarium_docker_registry_config_path: /root/.docker/config.json
     terrarium_docker_hardened_images: auto
+    terrarium_docker_hardened_image_mirrors: true
     terrarium_oauth2_proxy_image: ""
     terrarium_oauth2_proxy_image_hardened: "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e"
+    terrarium_oauth2_proxy_image_mirror: "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e"
     terrarium_oauth2_proxy_image_fallback: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd"
     terrarium_zitadel_postgres_image: ""
     terrarium_zitadel_postgres_image_hardened: "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"
+    terrarium_zitadel_postgres_image_mirror: "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"
     terrarium_zitadel_postgres_image_fallback: "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308"
     terrarium_email: ""
     terrarium_acme_email: "{{ terrarium_email }}"
@@ -155,6 +158,14 @@
             )
           }}
       no_log: true
+    - name: Resolve hardened image mirror preference
+      ansible.builtin.set_fact:
+        terrarium_docker_hardened_image_mirrors_effective: >-
+          {{
+            (terrarium_docker_hardened_images | string | lower) not in ['false', 'no', '0']
+            and (terrarium_docker_hardened_image_mirrors | string | lower) in ['true', 'yes', '1', 'auto']
+          }}
+      no_log: true
     - name: Resolve container image defaults
       ansible.builtin.set_fact:
         terrarium_oidc_issuer_effective: >-
@@ -170,7 +181,11 @@
             else (
               terrarium_oauth2_proxy_image_hardened
               if terrarium_docker_hardened_images_effective
-              else terrarium_oauth2_proxy_image_fallback
+              else (
+                terrarium_oauth2_proxy_image_mirror
+                if terrarium_docker_hardened_image_mirrors_effective
+                else terrarium_oauth2_proxy_image_fallback
+              )
             )
           }}
         terrarium_zitadel_postgres_image_effective: >-
@@ -180,7 +195,11 @@
             else (
               terrarium_zitadel_postgres_image_hardened
               if terrarium_docker_hardened_images_effective
-              else terrarium_zitadel_postgres_image_fallback
+              else (
+                terrarium_zitadel_postgres_image_mirror
+                if terrarium_docker_hardened_image_mirrors_effective
+                else terrarium_zitadel_postgres_image_fallback
+              )
             )
           }}
       no_log: true

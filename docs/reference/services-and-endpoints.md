@@ -11,8 +11,8 @@ Terrarium provisions the host with:
 - [OpenZFS](https://github.com/openzfs/zfs)
 - [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
 - [Traefik](https://github.com/traefik/traefik) with the built-in dashboard
-- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy), preferring Docker Hardened Images when registry credentials are present
-- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel), running as the `terrarium-idp` LXD system instance with a Postgres sidecar that also prefers Docker Hardened Images when registry credentials are present
+- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy), preferring Docker Hardened Images directly when registry credentials are present and Terrarium's GHCR mirror otherwise
+- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel), running as the `terrarium-idp` LXD system instance with a Postgres sidecar that uses the same upstream-DHI, GHCR-mirror, public-fallback image order
 - Open vSwitch/OVN for the Terrarium LXD workload network
 - [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening)
 

@@ -185,7 +185,14 @@
                   and (terrarium_zitadel_docker_registry_config.stat.exists | default(false))
                 )
               )
-              else terrarium_zitadel_postgres_image_fallback
+              else (
+                terrarium_zitadel_postgres_image_mirror
+                if (
+                  (terrarium_docker_hardened_images | string | lower) not in ['false', 'no', '0']
+                  and (terrarium_docker_hardened_image_mirrors | string | lower) in ['true', 'yes', '1', 'auto']
+                )
+                else terrarium_zitadel_postgres_image_fallback
+              )
             )
           }}
       when: terrarium_zitadel_postgres_image_effective is not defined

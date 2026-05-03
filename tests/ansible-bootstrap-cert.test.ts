@@ -5,6 +5,8 @@ import { describe, expect, test } from "bun:test";
 const repoRoot = join(import.meta.dir, "..");
 const POSTGRES_DHI_IMAGE =
   "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
+const POSTGRES_MIRROR_IMAGE =
+  "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
 const POSTGRES_FALLBACK_IMAGE =
   "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308";
 
@@ -118,8 +120,16 @@ describe("Traefik bootstrap certificate template", () => {
 
     expect(defaults).toContain("terrarium_zitadel_postgres_image: \"\"");
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_hardened: "${POSTGRES_DHI_IMAGE}"`);
+    expect(defaults).toContain(`terrarium_zitadel_postgres_image_mirror: "${POSTGRES_MIRROR_IMAGE}"`);
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_fallback: "${POSTGRES_FALLBACK_IMAGE}"`);
     expect(tasks).toContain("Resolve ZITADEL Postgres image");
+    expect(tasks).toContain("terrarium_zitadel_postgres_image_mirror");
+    expect(tasks.indexOf("terrarium_zitadel_postgres_image_hardened")).toBeLessThan(
+      tasks.indexOf("terrarium_zitadel_postgres_image_mirror")
+    );
+    expect(tasks.indexOf("terrarium_zitadel_postgres_image_mirror")).toBeLessThan(
+      tasks.indexOf("terrarium_zitadel_postgres_image_fallback")
+    );
     expect(compose).toContain("image: {{ terrarium_zitadel_postgres_image_effective }}");
     expect(playbook).toContain("Check Docker registry credentials for hardened images");
     expect(playbook).toContain("'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective");

@@ -4,6 +4,8 @@ import { describe, expect, test } from "bun:test";
 
 const OAUTH2_PROXY_DHI_IMAGE =
   "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
+const OAUTH2_PROXY_MIRROR_IMAGE =
+  "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
 const OAUTH2_PROXY_FALLBACK_IMAGE =
   "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd";
 
@@ -28,9 +30,17 @@ describe("management oauth2-proxy template", () => {
     expect(defaults).toContain('terrarium_oauth2_proxy_uid: "65532"');
     expect(defaults).toContain("terrarium_oauth2_proxy_image: \"\"");
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_hardened: "${OAUTH2_PROXY_DHI_IMAGE}"`);
+    expect(defaults).toContain(`terrarium_oauth2_proxy_image_mirror: "${OAUTH2_PROXY_MIRROR_IMAGE}"`);
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_fallback: "${OAUTH2_PROXY_FALLBACK_IMAGE}"`);
     expect(compose).toContain("image: {{ terrarium_oauth2_proxy_image_effective }}");
     expect(tasks).toContain("Resolve oauth2-proxy image");
+    expect(tasks).toContain("terrarium_oauth2_proxy_image_mirror");
+    expect(tasks.indexOf("terrarium_oauth2_proxy_image_hardened")).toBeLessThan(
+      tasks.indexOf("terrarium_oauth2_proxy_image_mirror")
+    );
+    expect(tasks.indexOf("terrarium_oauth2_proxy_image_mirror")).toBeLessThan(
+      tasks.indexOf("terrarium_oauth2_proxy_image_fallback")
+    );
     expect(compose).toContain('user: "{{ terrarium_oauth2_proxy_uid }}:{{ terrarium_oauth2_proxy_gid }}"');
     expect(tasks).toContain('group: "{{ terrarium_oauth2_proxy_gid }}"');
     expect(tasks).toContain('mode: "0640"');
