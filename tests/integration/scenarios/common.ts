@@ -542,23 +542,35 @@ export async function exerciseReconfiguration(context: IntegrationContext, host:
   const altProxy = context.publicDns.serviceHost("proxy-alt", context.config.slug, host.server.ipv4);
   const altLxd = context.publicDns.serviceHost("lxd-alt", context.config.slug, host.server.ipv4);
   const altAuth = context.publicDns.serviceHost("auth-alt", context.config.slug, host.server.ipv4);
-  await ssh.exec(
+  await runDetachedRemoteCommand(
+    ssh,
+    "reconfigure-domains",
     `printf 'y\\n' | ${remoteCtl(`set domains ${shellArg(rootDomain)}`)} --manage-domain ${shellArg(altManage)} --proxy-domain ${shellArg(
       altProxy
     )} --lxd-domain ${shellArg(altLxd)} --auth-domain ${shellArg(altAuth)}`
   );
-  await ssh.exec(`${remoteCtl("set emails")} --email ${shellArg(baseEmail(context))} --acme-email ${shellArg(baseEmail(context))}`);
+  await runDetachedRemoteCommand(
+    ssh,
+    "reconfigure-emails",
+    `${remoteCtl("set emails")} --email ${shellArg(baseEmail(context))} --acme-email ${shellArg(baseEmail(context))}`
+  );
   const s3SecretPath = "/root/terrarium-reconfigure-s3-secret";
   await uploadSecretFile(ssh, s3SecretPath, context.config.s3SecretKey);
-  await ssh.exec(
+  await runDetachedRemoteCommand(
+    ssh,
+    "reconfigure-s3",
     `trap "rm -f ${shellArg(s3SecretPath)}" EXIT && ${remoteCtl("set s3")} --enable --s3-endpoint ${shellArg(context.config.s3Endpoint)} --s3-bucket ${shellArg(
       context.config.s3Bucket
     )} --s3-region ${shellArg(context.config.s3Region)} --s3-prefix ${shellArg(`terrarium/${context.config.slug}/reconfigured`)} --s3-access-key ${shellArg(
       context.config.s3AccessKey
     )} --s3-secret-key-file ${shellArg(s3SecretPath)}`
   );
-  await ssh.exec(remoteCtl("set syncoid --disable"));
-  await ssh.exec(`${remoteCtl("set syncoid --enable")} --syncoid-target root@127.0.0.1 --syncoid-target-dataset terrarium/containers --syncoid-ssh-key /root/.ssh/id_ed25519`).catch(() => {
+  await runDetachedRemoteCommand(ssh, "reconfigure-syncoid-disable", remoteCtl("set syncoid --disable"));
+  await runDetachedRemoteCommand(
+    ssh,
+    "reconfigure-syncoid-enable",
+    `${remoteCtl("set syncoid --enable")} --syncoid-target root@127.0.0.1 --syncoid-target-dataset terrarium/containers --syncoid-ssh-key /root/.ssh/id_ed25519`
+  ).catch(() => {
     // The loopback re-enable intentionally only exercises validation/wiring and is allowed to fail remotely.
   });
 }
@@ -637,6 +649,16 @@ async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath
 
   const tail = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`, { timeoutMs: 20000 });
   throw new Error(`timed out waiting for remote command to finish\n${tail.stdout || tail.stderr}`);
+}
+
+async function runDetachedRemoteCommand(host: SshHost, label: string, command: string, timeoutMs = 20 * 60 * 1000): Promise<void> {
+  const id = randomUUID();
+  const remoteBase = `/root/terrarium-${label}-${id}`;
+  const scriptPath = `${remoteBase}.sh`;
+  const statusPath = `${remoteBase}.exit`;
+  const logPath = `${remoteBase}.log`;
+  await host.execDetached(command, scriptPath, statusPath, logPath);
+  await waitForDetachedCommand(host, statusPath, logPath, timeoutMs);
 }
 
 async function withStepTimeout<T>(label: string, timeoutMs: number, task: () => Promise<T>): Promise<T> {

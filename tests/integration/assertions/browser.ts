@@ -668,6 +668,9 @@ export async function withBrowser<T>(
   );
   try {
     return await withTimeout(runFlow(browser), BROWSER_LIFECYCLE_TIMEOUT_MS, "browser lifecycle");
+  } catch (error) {
+    const diagnostics = await captureBrowserLifecycleDiagnostics(browser, outputDir);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostics}`);
   } finally {
     await withCloseTimeout(browser.close());
   }
@@ -675,6 +678,41 @@ export async function withBrowser<T>(
 
 async function withCloseTimeout(close: Promise<unknown>): Promise<void> {
   await maybeWithTimeout(close.then(() => undefined).catch(() => undefined), BROWSER_CLOSE_TIMEOUT_MS);
+}
+
+async function captureBrowserLifecycleDiagnostics(browser: Browser, outputDir: string): Promise<string> {
+  const details: string[] = [];
+  const contexts = browser.contexts();
+
+  for (let contextIndex = 0; contextIndex < contexts.length; contextIndex += 1) {
+    const context = contexts[contextIndex];
+    const pages = context?.pages() ?? [];
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+      const page = pages[pageIndex];
+      if (!page || page.isClosed()) {
+        continue;
+      }
+
+      const screenshotPath = join(outputDir, `browser-lifecycle-timeout-${contextIndex + 1}-${pageIndex + 1}.png`);
+      const screenshot = await maybeWithTimeout(
+        page.screenshot({ path: screenshotPath, fullPage: true }).then(() => screenshotPath),
+        BROWSER_CLOSE_TIMEOUT_MS
+      ).catch(() => undefined);
+      const body = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).then(bodySnippetForError), 3000).catch(() => "")) || "";
+
+      details.push(
+        [
+          `lifecycle page ${contextIndex + 1}.${pageIndex + 1}: ${page.url()}`,
+          screenshot ? `screenshot: ${screenshot}` : undefined,
+          body ? `body:\n${body}` : undefined
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+    }
+  }
+
+  return details.length > 0 ? `\n\n${details.join("\n\n")}` : "";
 }
 
 async function loginThroughZitadelWithBrowser(
