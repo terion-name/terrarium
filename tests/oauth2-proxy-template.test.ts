@@ -32,11 +32,9 @@ describe("management oauth2-proxy template", () => {
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_hardened: "${OAUTH2_PROXY_DHI_IMAGE}"`);
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_mirror: "${OAUTH2_PROXY_MIRROR_IMAGE}"`);
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_fallback: "${OAUTH2_PROXY_FALLBACK_IMAGE}"`);
-    expect(defaults).toContain("terrarium_docker_hardened_image_arch_supported");
     expect(compose).toContain("image: {{ terrarium_oauth2_proxy_image_effective }}");
     expect(tasks).toContain("Resolve oauth2-proxy image");
     expect(tasks).toContain("terrarium_oauth2_proxy_image_mirror");
-    expect(tasks).toContain("terrarium_docker_hardened_image_arch_supported");
     expect(tasks.indexOf("terrarium_oauth2_proxy_image_hardened")).toBeLessThan(
       tasks.indexOf("terrarium_oauth2_proxy_image_mirror")
     );

@@ -26,17 +26,17 @@ jobs:
       matrix:
         include:
           - name: oauth2-proxy
-            source: dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
+            source: dhi.io/oauth2-proxy@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
             target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13
             package: terrarium-dhi-oauth2-proxy
             digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
-            arches: amd64
+            arches: amd64,arm64
           - name: postgres
-            source: dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
+            source: dhi.io/postgres@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
             target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips
             package: terrarium-dhi-postgres
             digest: sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
-            arches: amd64
+            arches: amd64,arm64
     env:
       REGISTRY_AUTH_FILE: /tmp/terrarium-containers-auth.json
       HAS_DOCKERHUB_CREDS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}

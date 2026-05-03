@@ -122,10 +122,8 @@ describe("Traefik bootstrap certificate template", () => {
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_hardened: "${POSTGRES_DHI_IMAGE}"`);
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_mirror: "${POSTGRES_MIRROR_IMAGE}"`);
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_fallback: "${POSTGRES_FALLBACK_IMAGE}"`);
-    expect(defaults).toContain("terrarium_docker_hardened_image_arch_supported");
     expect(tasks).toContain("Resolve ZITADEL Postgres image");
     expect(tasks).toContain("terrarium_zitadel_postgres_image_mirror");
-    expect(tasks).toContain("terrarium_docker_hardened_image_arch_supported");
     expect(tasks.indexOf("terrarium_zitadel_postgres_image_hardened")).toBeLessThan(
       tasks.indexOf("terrarium_zitadel_postgres_image_mirror")
     );
@@ -134,7 +132,6 @@ describe("Traefik bootstrap certificate template", () => {
     );
     expect(compose).toContain("image: {{ terrarium_zitadel_postgres_image_effective }}");
     expect(playbook).toContain("Check Docker registry credentials for hardened images");
-    expect(playbook).toContain("Assert hardened images support this host architecture");
     expect(playbook).toContain("'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective");
     expect(defaults).not.toContain("postgres:17.2-alpine");
   });

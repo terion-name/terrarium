@@ -99,10 +99,10 @@ Terrarium also verifies the most failure-prone integrations while you configure 
 Terrarium pins the oauth2-proxy and local ZITADEL Postgres images by digest. The default source order is:
 
 - upstream Docker Hardened Images from `dhi.io` when Docker registry credentials exist on the host
-- Terrarium's GHCR mirror of those same DHI image indexes when upstream DHI credentials are not present
+- Terrarium's GHCR mirror of those same DHI multi-arch indexes when upstream DHI credentials are not present
 - the pinned public upstream images when `terrarium_docker_hardened_images` or `terrarium_docker_hardened_image_mirrors` is disabled
 
-The GHCR mirror is refreshed by CI with Docker Hub credentials, copies every platform in the pinned index, and verifies the copied index and required platform manifests before publishing. The current pinned DHI variants are linux/amd64 catalog images; non-amd64 hosts use the pinned public fallbacks unless you provide explicit image overrides.
+The GHCR mirror is refreshed by CI with Docker Hub credentials, copies every platform in the pinned index, and verifies the copied index and required `linux/amd64` and `linux/arm64` manifests before publishing.
 
 In interactive mode, failed verification sends you back to the relevant prompts. In non-interactive mode, install exits with an error instead of persisting broken settings.
 

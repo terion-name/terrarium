@@ -52,7 +52,6 @@
     terrarium_docker_registry_config_path: /root/.docker/config.json
     terrarium_docker_hardened_images: auto
     terrarium_docker_hardened_image_mirrors: true
-    terrarium_docker_hardened_image_arch_supported: "{{ ansible_architecture in ['x86_64', 'amd64'] }}"
     terrarium_oauth2_proxy_image: ""
     terrarium_oauth2_proxy_image_hardened: "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e"
     terrarium_oauth2_proxy_image_mirror: "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e"
@@ -148,24 +147,14 @@
         path: "{{ terrarium_docker_registry_config_path }}"
       register: terrarium_docker_registry_config
       no_log: true
-    - name: Assert hardened images support this host architecture
-      ansible.builtin.assert:
-        that:
-          - terrarium_docker_hardened_image_arch_supported | bool
-        fail_msg: "Pinned Docker Hardened Images currently support Terrarium's selected oauth2-proxy and Postgres variants on linux/amd64 only. Use terrarium_docker_hardened_images: auto or false, or set explicit image overrides, on this host architecture."
-      when:
-        - (terrarium_docker_hardened_images | string | lower) in ['true', 'yes', '1']
     - name: Resolve hardened image preference
       ansible.builtin.set_fact:
         terrarium_docker_hardened_images_effective: >-
           {{
-            (terrarium_docker_hardened_image_arch_supported | bool)
-            and (
-              (terrarium_docker_hardened_images | string | lower) in ['true', 'yes', '1']
-              or (
-                (terrarium_docker_hardened_images | string | lower) == 'auto'
-                and terrarium_docker_registry_config.stat.exists
-              )
+            (terrarium_docker_hardened_images | string | lower) in ['true', 'yes', '1']
+            or (
+              (terrarium_docker_hardened_images | string | lower) == 'auto'
+              and terrarium_docker_registry_config.stat.exists
             )
           }}
       no_log: true
@@ -173,8 +162,7 @@
       ansible.builtin.set_fact:
         terrarium_docker_hardened_image_mirrors_effective: >-
           {{
-            (terrarium_docker_hardened_image_arch_supported | bool)
-            and (terrarium_docker_hardened_images | string | lower) not in ['false', 'no', '0']
+            (terrarium_docker_hardened_images | string | lower) not in ['false', 'no', '0']
             and (terrarium_docker_hardened_image_mirrors | string | lower) in ['true', 'yes', '1', 'auto']
           }}
       no_log: true
