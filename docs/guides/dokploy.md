@@ -11,6 +11,11 @@ On Terrarium, the clean model is:
 
 That means Dokploy gets the server model it expects, while Terrarium still gives you LXD isolation and ZFS snapshots around each Docker host.
 
+Those Docker hosts are unprivileged LXC containers by default. Root inside the
+deployment-server container, including root inside Docker workloads launched by
+Dokploy, is mapped away from host root, which adds a useful host-side safety
+layer for Docker deployments with imperfect defaults.
+
 ## When to use this instead of plain Compose
 
 Use [Isolated Docker Compose deployments](./compose) when you want one app stack in one container and you are comfortable managing Compose files yourself.

@@ -5,6 +5,7 @@ Terrarium is designed to make the safe path feel natural, especially for people 
 The short version:
 
 - containers are private by default
+- workload containers are unprivileged LXC by default
 - the host is hardened
 - public exposure is explicit
 - a built-in time machine is part of the default storage model
@@ -85,8 +86,17 @@ lxc launch images:ubuntu/24.04 devbox
 The compatibility alias `terrarium` has the same settings, so older commands
 that pass `--profile terrarium` still work.
 
+Terrarium workload containers are unprivileged LXC containers by default. The
+profiles use isolated ID maps, so root inside the container is not host root.
+When you run Docker inside one of these containers, Docker still needs
+Docker-friendly LXC features, but the nested Docker daemon and its containers
+sit behind the extra LXC user-namespace boundary instead of running directly on
+the host. That is a useful additional layer against badly configured Docker
+deployments.
+
 The baseline `default` and `terrarium` profiles include:
 
+- `security.idmap.isolated=true`
 - `security.nesting=true`
 - `security.syscalls.intercept.mknod=true`
 - `security.syscalls.intercept.setxattr=true`
@@ -101,6 +111,8 @@ Tradeoff:
 
 - this is more permissive than a minimal non-nested container profile
 - it is a convenience and compatibility choice, not the narrowest possible baseline
+- it does not make broad Docker privileges, unsafe host bind mounts, or exposed
+  app admin panels safe
 
 Terrarium also creates a `strict` profile for workloads that should not need
 nested container runtimes:

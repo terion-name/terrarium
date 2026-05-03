@@ -8,6 +8,7 @@ This is especially useful for complex projects that want their own dependencies,
 
 Terrarium's LXD `default` profile enables the settings that Docker-in-LXC usually needs:
 
+- `security.idmap.isolated=true`
 - `security.nesting=true`
 - `security.syscalls.intercept.mknod=true`
 - `security.syscalls.intercept.setxattr=true`
@@ -37,6 +38,16 @@ Terrarium gives each Compose deployment its own boundary:
 ### Security
 
 The stack lives in an LXC container instead of directly on the host. If the workload is compromised or misconfigured, the host is still a separate layer with a smaller blast radius.
+
+Terrarium's normal workload containers are unprivileged and use isolated ID
+maps. That means root inside the LXC, and root inside Docker containers created
+by the nested Docker daemon, does not become host root. This is especially
+useful for Compose stacks copied from the internet or built by app installers
+that assume broad Docker access.
+
+This is still a boundary, not a permission to be careless. Avoid `privileged:
+true`, broad host bind mounts, host networking, and public admin panels unless
+the app genuinely needs them and you understand the risk.
 
 ### Isolation
 

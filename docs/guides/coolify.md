@@ -15,6 +15,11 @@ That gives Coolify the SSH-managed server model it expects, while Terrarium
 keeps Docker off the host and gives you LXD isolation, OVN networking, and ZFS
 snapshots around each Docker host.
 
+The Coolify servers are unprivileged LXC containers by default. Root inside
+those containers, including root inside Docker workloads launched by Coolify, is
+not host root, so Docker misconfiguration has one more containment layer before
+it reaches the Terrarium host.
+
 ## When to use this instead of plain Compose
 
 Use [Isolated Docker Compose deployments](./compose) when you want one stack in

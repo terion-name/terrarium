@@ -188,6 +188,12 @@ Baseline `default` and `terrarium` profile behavior:
 - root disk on the Terrarium pool
 - NIC attached to `terrarium-ovn`
 
+Terrarium does not make ordinary workload containers privileged. The isolated
+ID map means container root, including root inside a Docker daemon nested in the
+container, is still separated from host root by LXC's user-namespace boundary.
+That gives Docker-heavy deployments a host protection layer they would not get
+from running all Docker workloads directly on the VPS.
+
 This is an intentional product choice: Terrarium optimizes for isolated environments that can still run realistic developer and agent workloads, including Docker Compose stacks, instead of optimizing for the narrowest possible LXC feature surface.
 
 The `strict` profile keeps the Terrarium root disk and OVN NIC but omits
