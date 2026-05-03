@@ -30,8 +30,6 @@ jobs:
       HCLOUD_SERVER_TYPE: ${{ secrets.HCLOUD_SERVER_TYPE }}
       HCLOUD_SSH_PRIVATE_KEY: ${{ secrets.HCLOUD_SSH_PRIVATE_KEY }}
       HCLOUD_SSH_PUBLIC_KEY: ${{ secrets.HCLOUD_SSH_PUBLIC_KEY }}
-      DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
-      DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
       ZITADEL_CLOUD_ISSUER: ${{ secrets.ZITADEL_CLOUD_ISSUER }}
       ZITADEL_CLOUD_PAT: ${{ secrets.ZITADEL_CLOUD_PAT }}
       ZITADEL_CLOUD_ORG_ID: ${{ secrets.ZITADEL_CLOUD_ORG_ID }}
@@ -63,4 +61,3 @@ jobs:
           else
             bun run tests/integration/index.ts --suite smoke
           fi
-      

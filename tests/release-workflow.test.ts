@@ -24,6 +24,18 @@ describe("release workflow", () => {
     expect(source).toContain("tag_name: ${{ needs.release_tag.outputs.value }}");
   });
 
+  test("release preflight does not require removed DuckDNS secrets", () => {
+    const release = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
+    const fullIntegration = readFileSync(join(repoRoot, ".github/workflows/integration-full.yml"), "utf8");
+    const smokeIntegration = readFileSync(join(repoRoot, ".github/workflows/integration-smoke.yml"), "utf8");
+
+    expect(release).toContain("uses: ./.github/workflows/integration-full.yml");
+    expect(fullIntegration).not.toContain("DUCKDNS_DOMAIN");
+    expect(fullIntegration).not.toContain("DUCKDNS_TOKEN");
+    expect(smokeIntegration).not.toContain("DUCKDNS_DOMAIN");
+    expect(smokeIntegration).not.toContain("DUCKDNS_TOKEN");
+  });
+
   test("shell-quotes the embedded bootstrap ref instead of interpolating it through sed", () => {
     const source = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
 
