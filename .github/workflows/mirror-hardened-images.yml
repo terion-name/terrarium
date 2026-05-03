@@ -30,13 +30,13 @@ jobs:
             target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13
             package: terrarium-dhi-oauth2-proxy
             source_digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
-            target_digest: auto
+            target_digest: sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de
             arches: amd64,arm64
           - name: postgres
-            source: dhi.io/postgres@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
-            target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips
+            source: dhi.io/postgres@sha256:e8327d2f17677e94b5337a8bde47092d841bb10b718a2f77d4cd8a913b31f0e6
+            target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22
             package: terrarium-dhi-postgres
-            source_digest: sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
+            source_digest: sha256:e8327d2f17677e94b5337a8bde47092d841bb10b718a2f77d4cd8a913b31f0e6
             target_digest: auto
             arches: amd64,arm64
     env:
@@ -97,4 +97,5 @@ jobs:
           PACKAGE_NAME: ${{ matrix.package }}
         run: |
           gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}/visibility" -f visibility=public ||
-          gh api --method PATCH "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE_NAME}/visibility" -f visibility=public
+          gh api --method PATCH "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE_NAME}/visibility" -f visibility=public ||
+          echo "::warning::Unable to make ${PACKAGE_NAME} public automatically; set package visibility in GHCR if this is the first publish."

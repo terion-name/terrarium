@@ -14,8 +14,8 @@ terrarium_docker_registry_config_path: /root/.docker/config.json
 terrarium_docker_hardened_images: auto
 terrarium_docker_hardened_image_mirrors: true
 terrarium_zitadel_postgres_image: ""
-terrarium_zitadel_postgres_image_hardened: "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"
-terrarium_zitadel_postgres_image_mirror: "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips"
+terrarium_zitadel_postgres_image_hardened: "dhi.io/postgres:17.9-alpine3.22@sha256:e8327d2f17677e94b5337a8bde47092d841bb10b718a2f77d4cd8a913b31f0e6"
+terrarium_zitadel_postgres_image_mirror: "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22"
 terrarium_zitadel_postgres_image_fallback: "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308"
 terrarium_zitadel_pat_expiration: "2099-01-01T00:00:00Z"
 terrarium_zitadel_project_name: Terrarium

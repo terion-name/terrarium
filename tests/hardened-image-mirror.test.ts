@@ -5,7 +5,8 @@ import { describe, expect, test } from "bun:test";
 const repoRoot = join(import.meta.dir, "..");
 
 const OAUTH2_PROXY_DIGEST = "sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
-const POSTGRES_DIGEST = "sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
+const OAUTH2_PROXY_MIRROR_DIGEST = "sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de";
+const POSTGRES_DIGEST = "sha256:e8327d2f17677e94b5337a8bde47092d841bb10b718a2f77d4cd8a913b31f0e6";
 
 describe("Docker Hardened Image mirror workflow", () => {
   test("mirrors pinned multi-arch DHI indexes to GHCR with digest checks", () => {
@@ -25,11 +26,12 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(workflow).not.toContain(`dhi.io/oauth2-proxy:7.15.2-debian13@${OAUTH2_PROXY_DIGEST}`);
     expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13`);
     expect(workflow).toContain(`source_digest: ${OAUTH2_PROXY_DIGEST}`);
+    expect(workflow).toContain(`target_digest: ${OAUTH2_PROXY_MIRROR_DIGEST}`);
     expect(workflow).toContain(`dhi.io/postgres@${POSTGRES_DIGEST}`);
-    expect(workflow).not.toContain(`dhi.io/postgres:17.9-alpine3.22-fips@${POSTGRES_DIGEST}`);
-    expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips`);
+    expect(workflow).not.toContain("17.9-alpine3.22-fips");
+    expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22`);
     expect(workflow).toContain(`source_digest: ${POSTGRES_DIGEST}`);
-    expect(workflow.match(/target_digest: auto/g)).toHaveLength(2);
+    expect(workflow.match(/target_digest: auto/g)).toHaveLength(1);
     expect(workflow.match(/arches: amd64,arm64/g)).toHaveLength(2);
 
     expect(script).toContain("skopeo inspect --raw");
@@ -39,6 +41,7 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(script).toContain("target digest mismatch");
     expect(script).toContain("source_arch_digest");
     expect(script).toContain("target_arch_digest");
+    expect(script).toContain("platform manifests match source");
     expect(script).toContain('(.platform.os // "") == "linux"');
     expect(script).toContain('(.platform.architecture // "") == $arch');
   });

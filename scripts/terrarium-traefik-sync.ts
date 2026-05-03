@@ -14,7 +14,7 @@ const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
 const DEFAULT_OAUTH2_PROXY_IMAGE =
-  "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13";
+  "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de";
 const OAUTH2_PROXY_UID = 65532;
 const OAUTH2_PROXY_GID = 65532;
 const ROUTE_AUTH_READY_ATTEMPTS = 12;

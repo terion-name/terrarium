@@ -71,5 +71,5 @@ for arch in "${required_arches[@]}"; do
     exit 1
   fi
 done
-echo "target ${name} digest ${target_digest} matches source"
+echo "target ${name} platform manifests match source"
 echo "::endgroup::"
