@@ -14,9 +14,12 @@ describe("Traefik bootstrap certificate template", () => {
   test("marks the self-signed bootstrap certificate as a CA trusted for server auth", () => {
     const template = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/bootstrap-cert-openssl.cnf.j2"), "utf8");
 
+    expect(template).toContain("CN = terrarium-bootstrap");
+    expect(template).not.toContain("CN = {{ terrarium_bootstrap_tls_domains[0] }}");
     expect(template).toContain("basicConstraints = critical, CA:true");
     expect(template).toContain("keyCertSign");
     expect(template).toContain("extendedKeyUsage = serverAuth");
+    expect(template).toContain("subjectAltName = @alt_names");
   });
 
   test("limits bootstrap TLS to local-IDP auth and removes it when unused", () => {
