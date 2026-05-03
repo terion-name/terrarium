@@ -1297,7 +1297,7 @@ function expiredPendingInvitePeerCidrs(
   nowMs = Date.now()
 ): string[] {
   const requested = new Set(requestedPeerCidrs);
-  const cleanupExpiryMs = cleanupExpiresAt ? Date.parse(cleanupExpiresAt) : null;
+  const cleanupExpiryMs = cleanupExpiresAt ? Date.parse(cleanupExpiresAt) : Number.NaN;
 
   return pendingClusterInvites(config)
     .filter((invite) => requested.has(invite.peer_cidr))
@@ -1313,7 +1313,7 @@ function expiredPendingInvitePeerCidrs(
 
 function expiredPendingWireGuardTunnelIps(config: MutableConfig, requestedPeerCidrs: string[], cleanupExpiresAt: string | undefined, nowMs = Date.now()): string[] {
   const requestedHosts = new Set(requestedPeerCidrs.map(exactHostFromPeerCidr).filter((host): host is string => host !== null));
-  const cleanupExpiryMs = cleanupExpiresAt ? Date.parse(cleanupExpiresAt) : null;
+  const cleanupExpiryMs = cleanupExpiresAt ? Date.parse(cleanupExpiresAt) : Number.NaN;
 
   return pendingWireGuardInvites(config)
     .filter((invite) => requestedHosts.has(invite.tunnel_ip))
