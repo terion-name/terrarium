@@ -13,6 +13,8 @@ export type CommandResult = {
   stderr: string;
 };
 
+export const DEFAULT_LOCAL_PROCESS_ATTEMPTS = 3;
+
 function renderCommandFailure(cmd: string[], result: CommandResult): string {
   const parts = [`command failed (${result.exitCode}): ${cmd.join(" ")}`];
   const stdout = result.stdout.trim();
@@ -26,6 +28,11 @@ function renderCommandFailure(cmd: string[], result: CommandResult): string {
   return parts.join("\n\n");
 }
 
+export function isRetryableLocalProcessFailure(result: CommandResult): boolean {
+  const output = `${result.stderr}\n${result.stdout}`;
+  return result.exitCode === 127 && /\bEBADF\b/.test(output) && /epoll_ctl/.test(output);
+}
+
 /**
  * Runs a command as argv, captures stdout/stderr, and never throws on non-zero exit.
  *
@@ -33,6 +40,18 @@ function renderCommandFailure(cmd: string[], result: CommandResult): string {
  * remote helper, and assertion can decide whether a failure is expected or fatal.
  */
 export async function runAllowFailure(cmd: string[], options: CommandOptions = {}): Promise<CommandResult> {
+  let result: CommandResult = { exitCode: 127, stdout: "", stderr: "command was not attempted" };
+  for (let attempt = 1; attempt <= DEFAULT_LOCAL_PROCESS_ATTEMPTS; attempt += 1) {
+    result = await runOnceAllowFailure(cmd, options);
+    if (!isRetryableLocalProcessFailure(result) || attempt >= DEFAULT_LOCAL_PROCESS_ATTEMPTS) {
+      return result;
+    }
+    await Bun.sleep(attempt * 500);
+  }
+  return result;
+}
+
+async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}): Promise<CommandResult> {
   return await new Promise<CommandResult>((resolve) => {
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
