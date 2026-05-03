@@ -38,7 +38,7 @@ jobs:
             digest: sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
             arches: amd64,arm64
     env:
-      REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+      REGISTRY_AUTH_FILE: /tmp/terrarium-containers-auth.json
       HAS_DOCKERHUB_CREDS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
