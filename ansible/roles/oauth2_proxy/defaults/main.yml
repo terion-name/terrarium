@@ -8,6 +8,7 @@ terrarium_oauth2_proxy_image_hardened: "dhi.io/oauth2-proxy:7.15.2-debian13@sha2
 terrarium_oauth2_proxy_image_mirror: "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de"
 terrarium_oauth2_proxy_image_fallback: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd"
 terrarium_oauth2_proxy_uid: "65532"
-terrarium_oauth2_proxy_gid: "65532"
+terrarium_oauth2_proxy_group: terrarium-oauth2-proxy
+terrarium_oauth2_proxy_gid: ""
 terrarium_oauth2_proxy_port: 4180
 terrarium_oauth2_proxy_cookie_secret_path: /etc/terrarium/secrets/oauth2_proxy_cookie_secret

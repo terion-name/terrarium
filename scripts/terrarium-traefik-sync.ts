@@ -15,8 +15,8 @@ const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
 const DEFAULT_OAUTH2_PROXY_IMAGE =
   "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de";
-const OAUTH2_PROXY_UID = 65532;
-const OAUTH2_PROXY_GID = 65532;
+const DEFAULT_OAUTH2_PROXY_UID = "65532";
+const DEFAULT_OAUTH2_PROXY_GROUP = "terrarium-oauth2-proxy";
 const ROUTE_AUTH_READY_ATTEMPTS = 12;
 const ROUTE_AUTH_READY_INTERVAL_MS = 1000;
 const DEFAULT_ZITADEL_INSTANCE_NAME = "terrarium-idp";
@@ -1087,6 +1087,8 @@ export function buildRouteAuthComposeArtifacts(
   const localAuthDomain = configString(config, "terrarium_auth_domain");
   const issuer = localIdp && localAuthDomain ? `https://${localAuthDomain}` : configString(config, "terrarium_oidc_issuer");
   const oauth2ProxyImage = configString(config, "terrarium_oauth2_proxy_image", DEFAULT_OAUTH2_PROXY_IMAGE);
+  const oauth2ProxyUid = configString(config, "terrarium_oauth2_proxy_uid", DEFAULT_OAUTH2_PROXY_UID);
+  const oauth2ProxyGid = requireRouteAuthOauth2ProxyGid(config);
   const profileConfigs: Record<string, string> = {};
 
   const services = Object.fromEntries(
@@ -1129,7 +1131,7 @@ export function buildRouteAuthComposeArtifacts(
         profile.containerName,
         {
           image: oauth2ProxyImage,
-          user: `${OAUTH2_PROXY_UID}:${OAUTH2_PROXY_GID}`,
+          user: `${oauth2ProxyUid}:${oauth2ProxyGid}`,
           network_mode: "host",
           restart: "unless-stopped",
           command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"],
@@ -1154,13 +1156,54 @@ function buildRouteAuthCompose(
   cookieSecret: string
 ): RouteAuthComposeRender {
   const { composeYaml, profileConfigs } = buildRouteAuthComposeArtifacts(config, profiles, clientId, clientSecret, cookieSecret);
+  const oauth2ProxyGid = parseNumericId(requireRouteAuthOauth2ProxyGid(config), "terrarium_oauth2_proxy_gid");
   let changed = false;
   for (const [containerName, content] of Object.entries(profileConfigs)) {
     const configPath = `${ROUTE_AUTH_DIR}/${containerName}.cfg`;
     changed = writeIfChanged(configPath, content, { mode: 0o640, directoryMode: 0o700 }) || changed;
-    chownSync(configPath, 0, OAUTH2_PROXY_GID);
+    chownSync(configPath, 0, oauth2ProxyGid);
   }
   return { composeYaml, changed };
+}
+
+function requireRouteAuthOauth2ProxyGid(config: Record<string, unknown>): string {
+  const gid = configString(config, "terrarium_oauth2_proxy_gid");
+  if (!gid) {
+    throw new Error("route auth requires terrarium_oauth2_proxy_gid; rerun Terrarium provisioning to create the oauth2-proxy host group");
+  }
+  return gid;
+}
+
+function parseNumericId(value: string, label: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${label} must be a numeric id`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${label} is outside the safe numeric id range`);
+  }
+  return parsed;
+}
+
+async function resolveRouteAuthOauth2ProxyGid(config: Record<string, unknown>): Promise<string | null> {
+  const configured = configString(config, "terrarium_oauth2_proxy_gid");
+  if (configured) {
+    parseNumericId(configured, "terrarium_oauth2_proxy_gid");
+    return configured;
+  }
+
+  const groupName = configString(config, "terrarium_oauth2_proxy_group", DEFAULT_OAUTH2_PROXY_GROUP);
+  const result = await runAllowFailure(["getent", "group", groupName]);
+  if (result.exitCode !== 0) {
+    return null;
+  }
+
+  const gid = result.stdout.trim().split(":")[2] ?? "";
+  if (!gid) {
+    return null;
+  }
+  parseNumericId(gid, `GID for group ${groupName}`);
+  return gid;
 }
 
 async function probeRouteAuthListener(profile: RouteAuthProfile): Promise<string | null> {
@@ -1235,7 +1278,21 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
     return errors;
   }
 
-  const rendered = buildRouteAuthCompose(config, profiles, clientId, clientSecret, cookieSecret);
+  let oauth2ProxyGid: string | null;
+  try {
+    oauth2ProxyGid = await resolveRouteAuthOauth2ProxyGid(config);
+  } catch (error) {
+    errors.push(String(error));
+    return errors;
+  }
+  if (!oauth2ProxyGid) {
+    errors.push(
+      `route auth requires the ${configString(config, "terrarium_oauth2_proxy_group", DEFAULT_OAUTH2_PROXY_GROUP)} host group; rerun Terrarium provisioning`
+    );
+    return errors;
+  }
+
+  const rendered = buildRouteAuthCompose({ ...config, terrarium_oauth2_proxy_gid: oauth2ProxyGid }, profiles, clientId, clientSecret, cookieSecret);
   const changed = writeIfChanged(ROUTE_AUTH_COMPOSE_PATH, rendered.composeYaml, { mode: 0o600, directoryMode: 0o700 }) || rendered.changed;
   const upArgs = ["docker", "compose", "-f", ROUTE_AUTH_COMPOSE_PATH, "up", "-d", "--remove-orphans"];
   if (changed) {

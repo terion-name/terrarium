@@ -1,7 +1,7 @@
 services:
   oauth2-proxy:
     image: {{ terrarium_oauth2_proxy_image_effective }}
-    user: "{{ terrarium_oauth2_proxy_uid }}:{{ terrarium_oauth2_proxy_gid }}"
+    user: "{{ terrarium_oauth2_proxy_uid }}:{{ terrarium_oauth2_proxy_gid_effective }}"
     network_mode: host
     restart: unless-stopped
 {% if terrarium_idp_mode == 'local' %}

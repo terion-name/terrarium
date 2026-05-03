@@ -21,7 +21,8 @@ const routeAuthConfig = {
   terrarium_manage_domain: "manage.example.test",
   terrarium_proxy_domain: "proxy.example.test",
   terrarium_auth_domain: "auth.example.test",
-  terrarium_oidc_issuer: "https://auth.example.test"
+  terrarium_oidc_issuer: "https://auth.example.test",
+  terrarium_oauth2_proxy_gid: "47201"
 };
 const OAUTH2_PROXY_DHI_IMAGE =
   "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
@@ -130,7 +131,7 @@ describe("terrarium route auth generation", () => {
     expect(Object.values(compose.services).map((service) => (service as { image?: string }).image)).toEqual(
       profiles.map(() => OAUTH2_PROXY_MIRROR_IMAGE)
     );
-    expect(Object.values(compose.services).map((service) => (service as { user?: string }).user)).toEqual(profiles.map(() => "65532:65532"));
+    expect(Object.values(compose.services).map((service) => (service as { user?: string }).user)).toEqual(profiles.map(() => "65532:47201"));
     expect(profileConfigs[adminProfile.containerName]).toContain(`proxy_prefix = "${adminProfile.proxyPrefix}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain(`redirect_url = "${adminProfile.callbackPath}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain('allowed_groups = [ "admins" ]');
@@ -143,6 +144,25 @@ describe("terrarium route auth generation", () => {
     expect(profileConfigs[signedInProfile.containerName]).toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
     expect(profileConfigs[signedInProfile.containerName]).not.toContain("allowed_groups");
     expect(profileConfigs[adminProfile.containerName]).not.toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
+  });
+
+  test("uses a provisioned host group gid for route-auth oauth2-proxy config access", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth:admins")], routeAuthConfig);
+    const { composeYaml } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_oauth2_proxy_uid: "61000", terrarium_oauth2_proxy_gid: "61001" },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+    const compose = parse(composeYaml) as { services: Record<string, { user?: string }> };
+
+    expect(Object.values(compose.services).map((service) => service.user)).toEqual(["61000:61001"]);
+    expect(source).toContain('const DEFAULT_OAUTH2_PROXY_GROUP = "terrarium-oauth2-proxy"');
+    expect(source).toContain('runAllowFailure(["getent", "group", groupName])');
+    expect(source).not.toContain("const OAUTH2_PROXY_GID = 65532");
+    expect(source).not.toContain("chownSync(configPath, 0, OAUTH2_PROXY_GID)");
   });
 
   test("allows route-auth oauth2-proxy image overrides for mirrors", () => {

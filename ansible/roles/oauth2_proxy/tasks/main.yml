@@ -61,11 +61,31 @@
       when: terrarium_oauth2_proxy_image_effective is not defined
       no_log: true
 
+    - name: Ensure oauth2-proxy host group
+      ansible.builtin.group:
+        name: "{{ terrarium_oauth2_proxy_group }}"
+        gid: "{{ (terrarium_oauth2_proxy_gid | default('', true) | string | length > 0) | ternary(terrarium_oauth2_proxy_gid, omit) }}"
+        system: true
+        state: present
+
+    - name: Resolve oauth2-proxy host group
+      ansible.builtin.getent:
+        database: group
+        key: "{{ terrarium_oauth2_proxy_group }}"
+      when: terrarium_oauth2_proxy_gid_effective is not defined
+
+    - name: Set oauth2-proxy host GID
+      ansible.builtin.set_fact:
+        terrarium_oauth2_proxy_gid_effective: "{{ ansible_facts.getent_group[terrarium_oauth2_proxy_group][1] }}"
+      when: terrarium_oauth2_proxy_gid_effective is not defined
+
     - name: Create oauth2-proxy directories
       ansible.builtin.file:
         path: "{{ terrarium_oauth2_proxy_dir }}"
         state: directory
-        mode: "0755"
+        owner: root
+        group: root
+        mode: "0700"
 
     - name: Generate oauth2-proxy cookie secret
       ansible.builtin.shell: |
@@ -160,7 +180,7 @@
         src: oauth2-proxy.cfg.j2
         dest: "{{ terrarium_oauth2_proxy_dir }}/oauth2-proxy.cfg"
         owner: root
-        group: "{{ terrarium_oauth2_proxy_gid }}"
+        group: "{{ terrarium_oauth2_proxy_group }}"
         mode: "0640"
       vars:
         terrarium_oauth2_proxy_client_id: "{{ terrarium_oauth2_proxy_client_id_effective }}"

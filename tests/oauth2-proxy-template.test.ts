@@ -28,6 +28,8 @@ describe("management oauth2-proxy template", () => {
     const tasks = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/tasks/main.yml"), "utf8");
 
     expect(defaults).toContain('terrarium_oauth2_proxy_uid: "65532"');
+    expect(defaults).toContain("terrarium_oauth2_proxy_group: terrarium-oauth2-proxy");
+    expect(defaults).toContain('terrarium_oauth2_proxy_gid: ""');
     expect(defaults).toContain("terrarium_oauth2_proxy_image: \"\"");
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_hardened: "${OAUTH2_PROXY_DHI_IMAGE}"`);
     expect(defaults).toContain(`terrarium_oauth2_proxy_image_mirror: "${OAUTH2_PROXY_MIRROR_IMAGE}"`);
@@ -41,9 +43,13 @@ describe("management oauth2-proxy template", () => {
     expect(tasks.indexOf("terrarium_oauth2_proxy_image_mirror")).toBeLessThan(
       tasks.indexOf("terrarium_oauth2_proxy_image_fallback")
     );
-    expect(compose).toContain('user: "{{ terrarium_oauth2_proxy_uid }}:{{ terrarium_oauth2_proxy_gid }}"');
-    expect(tasks).toContain('group: "{{ terrarium_oauth2_proxy_gid }}"');
+    expect(compose).toContain('user: "{{ terrarium_oauth2_proxy_uid }}:{{ terrarium_oauth2_proxy_gid_effective }}"');
+    expect(tasks).toContain("Ensure oauth2-proxy host group");
+    expect(tasks).toContain("terrarium_oauth2_proxy_gid_effective");
+    expect(tasks).toContain('group: "{{ terrarium_oauth2_proxy_group }}"');
+    expect(tasks).toContain('mode: "0700"');
     expect(tasks).toContain('mode: "0640"');
+    expect(defaults).not.toContain('terrarium_oauth2_proxy_gid: "65532"');
     expect(compose).not.toContain('user: "0:0"');
   });
 });
