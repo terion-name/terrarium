@@ -6,7 +6,7 @@ const repoRoot = join(import.meta.dir, "..");
 const POSTGRES_DHI_IMAGE =
   "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
 const POSTGRES_MIRROR_IMAGE =
-  "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
+  "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips";
 const POSTGRES_FALLBACK_IMAGE =
   "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308";
 

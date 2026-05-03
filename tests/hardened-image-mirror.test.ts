@@ -24,17 +24,21 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(workflow).toContain(`dhi.io/oauth2-proxy@${OAUTH2_PROXY_DIGEST}`);
     expect(workflow).not.toContain(`dhi.io/oauth2-proxy:7.15.2-debian13@${OAUTH2_PROXY_DIGEST}`);
     expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13`);
-    expect(workflow).toContain(`digest: ${OAUTH2_PROXY_DIGEST}`);
+    expect(workflow).toContain(`source_digest: ${OAUTH2_PROXY_DIGEST}`);
     expect(workflow).toContain(`dhi.io/postgres@${POSTGRES_DIGEST}`);
     expect(workflow).not.toContain(`dhi.io/postgres:17.9-alpine3.22-fips@${POSTGRES_DIGEST}`);
     expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips`);
-    expect(workflow).toContain(`digest: ${POSTGRES_DIGEST}`);
+    expect(workflow).toContain(`source_digest: ${POSTGRES_DIGEST}`);
+    expect(workflow.match(/target_digest: auto/g)).toHaveLength(2);
     expect(workflow.match(/arches: amd64,arm64/g)).toHaveLength(2);
 
     expect(script).toContain("skopeo inspect --raw");
-    expect(script).toContain("skopeo copy --retry-times 3 --all --preserve-digests");
+    expect(script).toContain("skopeo copy --retry-times 3 --all");
+    expect(script).not.toContain("--preserve-digests");
     expect(script).toContain("sha256sum");
     expect(script).toContain("target digest mismatch");
+    expect(script).toContain("source_arch_digest");
+    expect(script).toContain("target_arch_digest");
     expect(script).toContain('(.platform.os // "") == "linux"');
     expect(script).toContain('(.platform.architecture // "") == $arch');
   });

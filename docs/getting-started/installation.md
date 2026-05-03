@@ -96,7 +96,7 @@ Terrarium also verifies the most failure-prone integrations while you configure 
 
 ## Container Image Sources
 
-Terrarium pins the oauth2-proxy and local ZITADEL Postgres images by digest. The default source order is:
+Terrarium pins the upstream oauth2-proxy and local ZITADEL Postgres image sources by digest. The default source order is:
 
 - upstream Docker Hardened Images from `dhi.io` when Docker registry credentials exist on the host
 - Terrarium's GHCR mirror of those same DHI multi-arch indexes when upstream DHI credentials are not present

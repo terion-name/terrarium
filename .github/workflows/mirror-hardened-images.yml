@@ -29,13 +29,15 @@ jobs:
             source: dhi.io/oauth2-proxy@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
             target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13
             package: terrarium-dhi-oauth2-proxy
-            digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
+            source_digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
+            target_digest: auto
             arches: amd64,arm64
           - name: postgres
             source: dhi.io/postgres@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
             target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips
             package: terrarium-dhi-postgres
-            digest: sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
+            source_digest: sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714
+            target_digest: auto
             arches: amd64,arm64
     env:
       REGISTRY_AUTH_FILE: /tmp/terrarium-containers-auth.json
@@ -83,7 +85,8 @@ jobs:
           "${{ matrix.name }}"
           "${{ matrix.source }}"
           "${{ matrix.target }}"
-          "${{ matrix.digest }}"
+          "${{ matrix.source_digest }}"
+          "${{ matrix.target_digest }}"
           "${{ matrix.arches }}"
 
       - name: Make GHCR package public when permitted

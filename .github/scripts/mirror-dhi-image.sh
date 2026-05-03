@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 5 ]; then
-  echo "usage: $0 <name> <source-ref> <target-ref> <expected-index-digest> <required-arches>" >&2
+if [ "$#" -ne 6 ]; then
+  echo "usage: $0 <name> <source-ref> <target-ref> <expected-source-index-digest> <expected-target-index-digest|auto> <required-arches>" >&2
   exit 2
 fi
 
 name="$1"
 source_ref="$2"
 target_ref="$3"
-expected_digest="$4"
-required_arches_csv="$5"
+expected_source_digest="$4"
+expected_target_digest="$5"
+required_arches_csv="$6"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -25,8 +26,8 @@ target_raw="$tmpdir/target.json"
 echo "::group::inspect source ${name}"
 skopeo inspect --raw "docker://${source_ref}" >"$source_raw"
 source_digest="$(digest_file "$source_raw")"
-if [ "$source_digest" != "$expected_digest" ]; then
-  echo "source digest mismatch for ${name}: expected ${expected_digest}, got ${source_digest}" >&2
+if [ "$source_digest" != "$expected_source_digest" ]; then
+  echo "source digest mismatch for ${name}: expected ${expected_source_digest}, got ${source_digest}" >&2
   exit 1
 fi
 
@@ -46,14 +47,15 @@ echo "source ${name} digest ${source_digest} contains ${required_arches_csv}"
 echo "::endgroup::"
 
 echo "::group::copy ${name}"
-skopeo copy --retry-times 3 --all --preserve-digests "docker://${source_ref}" "docker://${target_ref}"
+skopeo copy --retry-times 3 --all "docker://${source_ref}" "docker://${target_ref}"
 echo "::endgroup::"
 
 echo "::group::verify target ${name}"
 skopeo inspect --raw "docker://${target_ref}" >"$target_raw"
 target_digest="$(digest_file "$target_raw")"
-if [ "$target_digest" != "$expected_digest" ]; then
-  echo "target digest mismatch for ${name}: expected ${expected_digest}, got ${target_digest}" >&2
+echo "target ${name} index digest ${target_digest}"
+if [ "$expected_target_digest" != "auto" ] && [ "$target_digest" != "$expected_target_digest" ]; then
+  echo "target digest mismatch for ${name}: expected ${expected_target_digest}, got ${target_digest}" >&2
   exit 1
 fi
 
