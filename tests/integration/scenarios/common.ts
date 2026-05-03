@@ -378,10 +378,11 @@ export async function createHttpFixtureContainer(
   labels: string[],
   bodyText: string
 ): Promise<void> {
-  const setupLogPath = `/root/${containerName}-setup.log`;
-  const setupScriptPath = `/root/${containerName}-setup.sh`;
-  const setupRunnerPath = `/root/${containerName}-setup-runner.sh`;
-  const setupStatusPath = `/root/${containerName}-setup.exit`;
+  const setupId = randomUUID();
+  const setupLogPath = `/root/${containerName}-setup-${setupId}.log`;
+  const setupScriptPath = `/root/${containerName}-setup-${setupId}.sh`;
+  const setupRunnerPath = `/root/${containerName}-setup-runner-${setupId}.sh`;
+  const setupStatusPath = `/root/${containerName}-setup-${setupId}.exit`;
   const setupCommand = [
     `echo '[fixture] launch ${containerName}'`,
     `timeout 300s lxc launch ubuntu:24.04 ${shellArg(containerName)}`,
@@ -420,7 +421,6 @@ systemctl daemon-reload && systemctl enable --now terrarium-fixture-http.service
   ].join(" && ");
 
   await deleteContainerIfPresent(host, containerName);
-  await host.exec(`rm -f ${shellArg(setupLogPath)} ${shellArg(setupScriptPath)} ${shellArg(setupRunnerPath)} ${shellArg(setupStatusPath)}`);
   await host.write(
     setupScriptPath,
     `#!/usr/bin/env bash
