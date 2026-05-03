@@ -10,7 +10,8 @@ import {
   isRetryableBlankNavigationError,
   isLoginOrOauthCallbackPlumbingPath,
   isTargetApplicationPage,
-  isTargetLoginOrOauthPlumbingPage
+  isTargetLoginOrOauthPlumbingPage,
+  lxdOidcLoginUrlForSsoPage
 } from "./browser";
 
 describe("browser assertion helpers", () => {
@@ -47,6 +48,24 @@ describe("browser assertion helpers", () => {
     expect(isIdentityLoginInputPage("https://app.example.test/oidc/login", "app.example.test")).toBe(false);
     expect(isIdentityLoginInputPage("https://auth.example.test/ui/v2/login/loginname?requestId=oidc_123", "app.example.test")).toBe(true);
     expect(isIdentityLoginInputPage("https://app.example.test/protected", "app.example.test")).toBe(true);
+  });
+
+  test("derives the direct LXD OIDC login endpoint from the SSO page", () => {
+    expect(
+      lxdOidcLoginUrlForSsoPage(
+        "https://lxd.example.test/ui/login",
+        "Canonical LXD\nLogin with SSO\nSet up TLS login",
+        "lxd.example.test"
+      )
+    ).toBe("https://lxd.example.test/oidc/login");
+    expect(lxdOidcLoginUrlForSsoPage("https://lxd.example.test/ui/login", "Canonical LXD", "lxd.example.test")).toBeUndefined();
+    expect(
+      lxdOidcLoginUrlForSsoPage(
+        "https://auth.example.test/ui/v2/login/loginname",
+        "Canonical LXD\nLogin with SSO",
+        "lxd.example.test"
+      )
+    ).toBeUndefined();
   });
 
   test("makes browser artifact names distinct by URL, expectation, user, and outcome", () => {

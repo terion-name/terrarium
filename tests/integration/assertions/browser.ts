@@ -157,6 +157,43 @@ async function inputVisible(page: Page, selectors: readonly string[]): Promise<b
   return false;
 }
 
+async function firstIdentityInput(page: Page, selectors: readonly string[], targetHost: string): Promise<string> {
+  const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
+  let lastBody = "";
+
+  while (Date.now() < deadline) {
+    const currentUrl = page.url();
+    if (isTargetLoginOrOauthPlumbingPage(currentUrl, targetHost)) {
+      await clickOidcStartIfNeeded(page, targetHost);
+    }
+
+    if (isIdentityLoginInputPage(page.url(), targetHost)) {
+      for (const selector of selectors) {
+        const locator = page.locator(selector).first();
+        if (await locatorVisible(locator)) {
+          return selector;
+        }
+      }
+    }
+
+    if (await reloadBlankLoginDocumentIfNeeded(page)) {
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    lastBody = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
+    await page.waitForTimeout(500);
+  }
+
+  throw new Error(
+    [
+      `none of the identity selectors were visible: ${selectors.join(", ")}`,
+      `current URL: ${page.url()}`,
+      `body:\n${bodySnippetForError(lastBody) || "<empty>"}`
+    ].join("\n")
+  );
+}
+
 async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<void> {
   const deadline = Date.now() + BROWSER_OIDC_START_TIMEOUT_MS;
   let reloadedBlankTargetLoginPage = false;
@@ -181,6 +218,14 @@ async function clickOidcStartIfNeeded(page: Page, targetHost: string): Promise<v
       reloadedBlankTargetLoginPage = true;
       await maybeWithTimeout(page.reload({ waitUntil: "commit", timeout: 10000 }).catch(() => undefined), 12000);
       await page.waitForTimeout(1000);
+      continue;
+    }
+
+    const lxdOidcLoginUrl = lxdOidcLoginUrlForSsoPage(page.url(), lastBody, targetHost);
+    if (lxdOidcLoginUrl && Date.now() - lastStartClick > BROWSER_OIDC_RECLICK_INTERVAL_MS) {
+      lastStartClick = Date.now();
+      await maybeWithTimeout(page.goto(lxdOidcLoginUrl, { waitUntil: "commit", timeout: BROWSER_CLICK_TIMEOUT_MS }).catch(() => undefined), 12000);
+      await waitForOidcStartHandoff(page, targetHost);
       continue;
     }
 
@@ -801,7 +846,7 @@ async function loginThroughZitadelWithBrowser(
         stage = "waiting for identity login document";
         await waitForIdentityLoginDocument(page, targetHost);
         stage = "waiting for username input";
-        const emailSelector = await firstVisible(page, [...USERNAME_INPUT_SELECTORS]);
+        const emailSelector = await firstIdentityInput(page, USERNAME_INPUT_SELECTORS, targetHost);
         stage = "entering username";
         await typeInto(page, emailSelector, user.email);
         stage = "waiting for username submit";
@@ -1178,6 +1223,20 @@ export function isTargetLoginOrOauthPlumbingPage(currentUrl: string, targetHost:
 export function isIdentityLoginInputPage(currentUrl: string, targetHost: string): boolean {
   const parsed = parseBrowserUrl(currentUrl);
   return Boolean(parsed && !(parsed.host === targetHost && isLoginOrOauthCallbackPlumbingPath(parsed.pathname)));
+}
+
+export function lxdOidcLoginUrlForSsoPage(currentUrl: string, body: string, targetHost: string): string | undefined {
+  const parsed = parseBrowserUrl(currentUrl);
+  if (!parsed || parsed.host !== targetHost || !parsed.pathname.toLowerCase().startsWith("/ui/login")) {
+    return undefined;
+  }
+
+  const normalizedBody = body.toLowerCase();
+  if (!normalizedBody.includes("login with sso") || !normalizedBody.includes("canonical lxd")) {
+    return undefined;
+  }
+
+  return `${parsed.origin}/oidc/login`;
 }
 
 export function formatDeniedTargetRouteFailure(finalUrl: string, body: string): string {
