@@ -132,6 +132,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "{{ terrarium_zitadel_postgres_password }}"
       POSTGRES_DB: zitadel
+      PGDATA: /var/lib/postgresql/data
     healthcheck:
       test:
         - CMD-SHELL

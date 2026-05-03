@@ -87,13 +87,21 @@
       delay: 10
       changed_when: false
 
-    - name: Create ZITADEL directories inside system instance
+    - name: Create ZITADEL root directories inside system instance
       ansible.builtin.command: >-
         /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- install -d -m 0700
         /etc/terrarium/secrets
         {{ terrarium_zitadel_dir }}
-        {{ terrarium_zitadel_postgres_dir }}
         {{ terrarium_zitadel_bootstrap_dir }}
+      changed_when: false
+
+    - name: Create ZITADEL Postgres data directory inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- install -d
+        -o {{ terrarium_zitadel_postgres_uid }}
+        -g {{ terrarium_zitadel_postgres_gid }}
+        -m 0700
+        {{ terrarium_zitadel_postgres_dir }}
       changed_when: false
 
     - name: Migrate legacy host ZITADEL data into system instance when present
@@ -259,12 +267,14 @@
     - name: Enable ZITADEL compose service inside system instance
       ansible.builtin.command: >-
         /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- bash -lc
-        'systemctl daemon-reload && systemctl enable --now terrarium-zitadel.service'
+        'systemctl daemon-reload && systemctl enable terrarium-zitadel.service'
       changed_when: false
 
-    - name: Restart ZITADEL compose service after managed file changes
-      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- systemctl restart terrarium-zitadel.service"
-      when: terrarium_zitadel_compose_render.changed or terrarium_zitadel_unit_render.changed
+    - name: Start or restart ZITADEL compose service inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_zitadel_instance_name }} -- systemctl
+        {{ 'restart' if (terrarium_zitadel_compose_render.changed or terrarium_zitadel_unit_render.changed) else 'start' }}
+        terrarium-zitadel.service
 
     - name: Ensure host loopback proxies reach the ZITADEL system instance
       ansible.builtin.shell: |

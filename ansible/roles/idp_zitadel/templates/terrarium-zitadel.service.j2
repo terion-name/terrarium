@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory={{ terrarium_zitadel_dir }}
-ExecStart=/usr/bin/docker compose --project-name terrarium-zitadel -f {{ terrarium_zitadel_dir }}/docker-compose.yml up -d --wait --remove-orphans
+ExecStart=/usr/bin/docker compose --project-name terrarium-zitadel -f {{ terrarium_zitadel_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 --remove-orphans
 ExecStop=/usr/bin/docker compose --project-name terrarium-zitadel -f {{ terrarium_zitadel_dir }}/docker-compose.yml down
 TimeoutStartSec=900
 

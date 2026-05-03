@@ -98,6 +98,9 @@ describe("Traefik bootstrap certificate template", () => {
     expect(tasks).toContain("lxc exec {{ terrarium_zitadel_instance_name }} -- bash -lc");
     expect(tasks).toContain("Migrate legacy host ZITADEL data into system instance when present");
     expect(tasks).toContain("Ensure host loopback proxies reach the ZITADEL system instance");
+    expect(tasks).toContain("systemctl enable terrarium-zitadel.service");
+    expect(tasks).toContain("Start or restart ZITADEL compose service inside system instance");
+    expect(tasks).not.toContain("systemctl enable --now terrarium-zitadel.service");
     expect(tasks).not.toContain("- name: Install ZITADEL runtime packages");
   });
 
@@ -119,10 +122,15 @@ describe("Traefik bootstrap certificate template", () => {
     const playbook = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
 
     expect(defaults).toContain("terrarium_zitadel_postgres_image: \"\"");
+    expect(defaults).toContain("terrarium_zitadel_postgres_uid: 70");
+    expect(defaults).toContain("terrarium_zitadel_postgres_gid: 70");
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_hardened: "${POSTGRES_DHI_IMAGE}"`);
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_mirror: "${POSTGRES_MIRROR_IMAGE}"`);
     expect(defaults).toContain(`terrarium_zitadel_postgres_image_fallback: "${POSTGRES_FALLBACK_IMAGE}"`);
     expect(tasks).toContain("Resolve ZITADEL Postgres image");
+    expect(tasks).toContain("Create ZITADEL Postgres data directory inside system instance");
+    expect(tasks).toContain("-o {{ terrarium_zitadel_postgres_uid }}");
+    expect(tasks).toContain("-g {{ terrarium_zitadel_postgres_gid }}");
     expect(tasks).toContain("terrarium_zitadel_postgres_image_mirror");
     expect(tasks.indexOf("terrarium_zitadel_postgres_image_hardened")).toBeLessThan(
       tasks.indexOf("terrarium_zitadel_postgres_image_mirror")
@@ -131,6 +139,7 @@ describe("Traefik bootstrap certificate template", () => {
       tasks.indexOf("terrarium_zitadel_postgres_image_fallback")
     );
     expect(compose).toContain("image: {{ terrarium_zitadel_postgres_image_effective }}");
+    expect(compose).toContain("PGDATA: /var/lib/postgresql/data");
     expect(playbook).toContain("Check Docker registry credentials for hardened images");
     expect(playbook).toContain("'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective");
     expect(defaults).not.toContain("postgres:17.2-alpine");

@@ -1,6 +1,8 @@
 terrarium_zitadel_enabled: "{{ terrarium_idp_mode == 'local' }}"
 terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
 terrarium_zitadel_postgres_dir: "{{ terrarium_zitadel_dir }}/postgres"
+terrarium_zitadel_postgres_uid: 70
+terrarium_zitadel_postgres_gid: 70
 terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"
 terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
 terrarium_zitadel_stage_dir: "{{ terrarium_state_dir }}/zitadel-container"
