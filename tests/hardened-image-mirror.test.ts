@@ -29,9 +29,9 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(workflow).toContain(`target_digest: ${OAUTH2_PROXY_MIRROR_DIGEST}`);
     expect(workflow).toContain(`dhi.io/postgres@${POSTGRES_DIGEST}`);
     expect(workflow).not.toContain("17.9-alpine3.22-fips");
-    expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22`);
+    expect(workflow).toContain("target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22");
     expect(workflow).toContain(`source_digest: ${POSTGRES_DIGEST}`);
-    expect(workflow.match(/target_digest: auto/g)).toHaveLength(1);
+    expect(workflow.match(/target_digest: sha256:de305976d6a81c4c1ad260861ec5028faafbb1be0bca68ab379eb2fb621abe34/g)).toHaveLength(1);
     expect(workflow.match(/arches: amd64,arm64/g)).toHaveLength(2);
 
     expect(script).toContain("skopeo inspect --raw");

@@ -37,7 +37,7 @@ jobs:
             target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22
             package: terrarium-dhi-postgres
             source_digest: sha256:53e316c761bfcaae02cdc6015c3a11a747fe9d0cde9cd0c3d4c871326862e7ed
-            target_digest: auto
+            target_digest: sha256:de305976d6a81c4c1ad260861ec5028faafbb1be0bca68ab379eb2fb621abe34
             arches: amd64,arm64
     env:
       REGISTRY_AUTH_FILE: /tmp/terrarium-containers-auth.json
