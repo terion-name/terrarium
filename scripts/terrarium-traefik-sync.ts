@@ -13,8 +13,11 @@ const OAUTH2_PROXY_COOKIE_SECRET_PATH = "/etc/terrarium/secrets/oauth2_proxy_coo
 const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
-const DEFAULT_OAUTH2_PROXY_IMAGE =
+const OAUTH2_PROXY_MIRROR_IMAGE =
   "ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
+const OAUTH2_PROXY_FALLBACK_IMAGE =
+  "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd";
+const DEFAULT_OAUTH2_PROXY_IMAGE = process.arch === "x64" ? OAUTH2_PROXY_MIRROR_IMAGE : OAUTH2_PROXY_FALLBACK_IMAGE;
 const OAUTH2_PROXY_UID = 65532;
 const OAUTH2_PROXY_GID = 65532;
 const ROUTE_AUTH_READY_ATTEMPTS = 12;

@@ -13,6 +13,7 @@ terrarium_zitadel_version: v4.13.0
 terrarium_docker_registry_config_path: /root/.docker/config.json
 terrarium_docker_hardened_images: auto
 terrarium_docker_hardened_image_mirrors: true
+terrarium_docker_hardened_image_arch_supported: "{{ (ansible_architecture | default('x86_64')) in ['x86_64', 'amd64'] }}"
 terrarium_zitadel_postgres_image: ""
 terrarium_zitadel_postgres_image_hardened: "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"
 terrarium_zitadel_postgres_image_mirror: "ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"

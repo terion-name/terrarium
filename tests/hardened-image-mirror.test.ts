@@ -8,7 +8,7 @@ const OAUTH2_PROXY_DIGEST = "sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c327
 const POSTGRES_DIGEST = "sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
 
 describe("Docker Hardened Image mirror workflow", () => {
-  test("mirrors pinned multi-arch DHI indexes to GHCR with digest checks", () => {
+  test("mirrors pinned DHI indexes to GHCR with digest checks", () => {
     const workflow = readFileSync(join(repoRoot, ".github/workflows/mirror-hardened-images.yml"), "utf8");
     const script = readFileSync(join(repoRoot, ".github/scripts/mirror-dhi-image.sh"), "utf8");
 
@@ -27,7 +27,7 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(workflow).toContain(`dhi.io/postgres:17.9-alpine3.22-fips@${POSTGRES_DIGEST}`);
     expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22-fips`);
     expect(workflow).toContain(`digest: ${POSTGRES_DIGEST}`);
-    expect(workflow.match(/arches: amd64,arm64/g)).toHaveLength(2);
+    expect(workflow.match(/arches: amd64/g)).toHaveLength(2);
 
     expect(script).toContain("skopeo inspect --raw");
     expect(script).toContain("skopeo copy --retry-times 3 --all --preserve-digests");
