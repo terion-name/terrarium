@@ -25,6 +25,9 @@ describe("hardening role", () => {
 
     expect(defaults).toContain('terrarium_hardening_ssh_permit_root_login: "prohibit-password"');
     expect(defaults).toContain('terrarium_hardening_ssh_authorized_keys_file: ".ssh/authorized_keys .ssh/authorized_keys2 /etc/ssh/authorized_keys/%u"');
+    expect(tasks).toContain("path: /etc/ssh/authorized_keys/root");
+    expect(tasks).toContain("Preserve provider-managed root SSH keys in OpenSSH default location");
+    expect(tasks).toContain("path: /root/.ssh/authorized_keys");
     expect(tasks).toContain("ssh_authorized_keys_file: \"{{ terrarium_hardening_ssh_authorized_keys_file }}\"");
   });
 });
