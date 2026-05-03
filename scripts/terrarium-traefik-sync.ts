@@ -14,7 +14,7 @@ const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 const ROUTE_AUTH_BASE_PORT = 4181;
 const DEFAULT_OAUTH2_PROXY_IMAGE =
-  "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
+  "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd";
 const OAUTH2_PROXY_UID = 65532;
 const OAUTH2_PROXY_GID = 65532;
 const ROUTE_AUTH_READY_ATTEMPTS = 12;
@@ -1083,8 +1083,9 @@ export function buildRouteAuthComposeArtifacts(
   clientSecret: string,
   cookieSecret: string
 ): RouteAuthComposeArtifacts {
-  const issuer = configString(config, "terrarium_oidc_issuer");
   const localIdp = configString(config, "terrarium_idp_mode") === "local";
+  const localAuthDomain = configString(config, "terrarium_auth_domain");
+  const issuer = localIdp && localAuthDomain ? `https://${localAuthDomain}` : configString(config, "terrarium_oidc_issuer");
   const oauth2ProxyImage = configString(config, "terrarium_oauth2_proxy_image", DEFAULT_OAUTH2_PROXY_IMAGE);
   const profileConfigs: Record<string, string> = {};
 
@@ -1109,6 +1110,7 @@ export function buildRouteAuthComposeArtifacts(
         'upstreams = [ "static://202" ]',
         'scope = "openid profile email"',
         "reverse_proxy = true",
+        'trusted_proxy_ips = [ "127.0.0.1/32", "::1/128" ]',
         'code_challenge_method = "S256"',
         "skip_provider_button = true",
         "set_xauthrequest = true",

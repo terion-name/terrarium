@@ -16,6 +16,7 @@ allowed_groups = [ "{{ terrarium_admin_group }}" ]
 upstreams = [ "static://202" ]
 scope = "openid profile email"
 reverse_proxy = true
+trusted_proxy_ips = [ "127.0.0.1/32", "::1/128" ]
 code_challenge_method = "S256"
 skip_provider_button = true
 set_xauthrequest = true

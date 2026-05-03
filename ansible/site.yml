@@ -49,6 +49,14 @@
     terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
     terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"
     terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
+    terrarium_docker_registry_config_path: /root/.docker/config.json
+    terrarium_docker_hardened_images: auto
+    terrarium_oauth2_proxy_image: ""
+    terrarium_oauth2_proxy_image_hardened: "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e"
+    terrarium_oauth2_proxy_image_fallback: "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd"
+    terrarium_zitadel_postgres_image: ""
+    terrarium_zitadel_postgres_image_hardened: "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714"
+    terrarium_zitadel_postgres_image_fallback: "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308"
     terrarium_email: ""
     terrarium_acme_email: "{{ terrarium_email }}"
     terrarium_enable_s3: false
@@ -76,7 +84,7 @@
       terrarium_lxd_domain: "{{ terrarium_lxd_domain }}"
       terrarium_idp_mode: "{{ terrarium_idp_mode }}"
       terrarium_auth_domain: "{{ terrarium_auth_domain }}"
-      terrarium_oidc_issuer: "{{ terrarium_oidc_issuer }}"
+      terrarium_oidc_issuer: "{{ terrarium_oidc_issuer_effective | default(terrarium_oidc_issuer) }}"
       terrarium_oidc_client_id: "{{ terrarium_oidc_client_id }}"
       terrarium_oidc_client_secret: "{{ terrarium_oidc_client_secret }}"
       terrarium_lxd_oidc_client_id: "{{ terrarium_lxd_oidc_client_id }}"
@@ -87,6 +95,8 @@
       terrarium_zitadel_dir: "{{ terrarium_zitadel_dir }}"
       terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_bootstrap_dir }}"
       terrarium_zitadel_outputs_path: "{{ terrarium_zitadel_outputs_path }}"
+      terrarium_oauth2_proxy_image: "{{ terrarium_oauth2_proxy_image_effective | default(terrarium_oauth2_proxy_image_fallback) }}"
+      terrarium_zitadel_postgres_image: "{{ terrarium_zitadel_postgres_image_effective | default(terrarium_zitadel_postgres_image_fallback) }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
       terrarium_cluster_enabled: "{{ terrarium_cluster_enabled }}"
       terrarium_cluster_peer_cidrs: "{{ terrarium_cluster_peer_cidrs }}"
@@ -129,6 +139,51 @@
           - ansible_distribution == "Ubuntu"
           - ansible_distribution_version == '24.04'
         fail_msg: Terrarium v1 supports Ubuntu 24.04 only.
+    - name: Check Docker registry credentials for hardened images
+      ansible.builtin.stat:
+        path: "{{ terrarium_docker_registry_config_path }}"
+      register: terrarium_docker_registry_config
+      no_log: true
+    - name: Resolve hardened image preference
+      ansible.builtin.set_fact:
+        terrarium_docker_hardened_images_effective: >-
+          {{
+            (terrarium_docker_hardened_images | string | lower) in ['true', 'yes', '1']
+            or (
+              (terrarium_docker_hardened_images | string | lower) == 'auto'
+              and terrarium_docker_registry_config.stat.exists
+            )
+          }}
+      no_log: true
+    - name: Resolve container image defaults
+      ansible.builtin.set_fact:
+        terrarium_oidc_issuer_effective: >-
+          {{
+            ('https://' ~ terrarium_auth_domain)
+            if terrarium_idp_mode == 'local'
+            else terrarium_oidc_issuer
+          }}
+        terrarium_oauth2_proxy_image_effective: >-
+          {{
+            terrarium_oauth2_proxy_image
+            if (terrarium_oauth2_proxy_image | default('', true) | length > 0)
+            else (
+              terrarium_oauth2_proxy_image_hardened
+              if terrarium_docker_hardened_images_effective
+              else terrarium_oauth2_proxy_image_fallback
+            )
+          }}
+        terrarium_zitadel_postgres_image_effective: >-
+          {{
+            terrarium_zitadel_postgres_image
+            if (terrarium_zitadel_postgres_image | default('', true) | length > 0)
+            else (
+              terrarium_zitadel_postgres_image_hardened
+              if terrarium_docker_hardened_images_effective
+              else terrarium_zitadel_postgres_image_fallback
+            )
+          }}
+      no_log: true
     - name: Default local management admin group
       ansible.builtin.set_fact:
         terrarium_admin_group: terrarium-admins
@@ -137,7 +192,15 @@
         - terrarium_admin_group | default('') | length == 0
     - name: Refresh config bundle with resolved admin group
       ansible.builtin.set_fact:
-        terrarium_config_bundle: "{{ terrarium_config_bundle | combine({'terrarium_admin_group': terrarium_admin_group}) }}"
+        terrarium_config_bundle: >-
+          {{
+            terrarium_config_bundle | combine({
+              'terrarium_admin_group': terrarium_admin_group,
+              'terrarium_oidc_issuer': terrarium_oidc_issuer_effective,
+              'terrarium_oauth2_proxy_image': terrarium_oauth2_proxy_image_effective,
+              'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective
+            })
+          }}
       no_log: true
   roles:
     - role: base

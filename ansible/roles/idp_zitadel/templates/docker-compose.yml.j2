@@ -126,7 +126,7 @@ services:
       - zitadel
 
   postgres:
-    image: {{ terrarium_zitadel_postgres_image }}
+    image: {{ terrarium_zitadel_postgres_image_effective }}
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres

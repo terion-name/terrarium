@@ -5,6 +5,8 @@ import { describe, expect, test } from "bun:test";
 const repoRoot = join(import.meta.dir, "..");
 const POSTGRES_DHI_IMAGE =
   "dhi.io/postgres:17.9-alpine3.22-fips@sha256:ae0f0ac1f942ff7898bb217e599cc488b5c7a2611a0957daae44c00584a59714";
+const POSTGRES_FALLBACK_IMAGE =
+  "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308";
 
 describe("Traefik bootstrap certificate template", () => {
   test("marks the self-signed bootstrap certificate as a CA trusted for server auth", () => {
@@ -54,7 +56,18 @@ describe("Traefik bootstrap certificate template", () => {
     expect(dynamicConfig).not.toContain("HostSNI(`{{ terrarium_lxd_domain }}`)");
     expect(dynamicConfig).not.toContain("passthrough: true");
     expect(lxdTasks).toContain("Disable LXD ACME certificate management");
+    expect(lxdTasks).toContain("terrarium_lxd_oidc_issuer_effective");
     expect(lxdTasks).not.toContain("lxc config set acme.domain");
+  });
+
+  test("defers local LXD OIDC wiring until ZITADEL sync has a live issuer", () => {
+    const lxdTasks = readFileSync(join(repoRoot, "ansible/roles/lxd/tasks/main.yml"), "utf8");
+    const zitadelSync = readFileSync(join(repoRoot, "scripts/terrarium-zitadel-sync.ts"), "utf8");
+
+    expect(lxdTasks).toContain("terrarium_idp_mode == 'oidc'");
+    expect(lxdTasks).toContain("terrarium_lxd_oidc_issuer_config");
+    expect(zitadelSync).toContain('["/snap/bin/lxc", "config", "set", "oidc.issuer", discoveredIssuer]');
+    expect(zitadelSync).toContain('["/snap/bin/lxc", "config", "set", "oidc.client.id", lxdClientId]');
   });
 
   test("retries local ZITADEL reconciliation after service restarts", () => {
@@ -75,6 +88,7 @@ describe("Traefik bootstrap certificate template", () => {
     expect(site).toContain("terrarium_zitadel_instance_name: terrarium-idp");
     expect(site).toContain('terrarium_zitadel_instance_name: "{{ terrarium_zitadel_instance_name }}"');
     expect(defaults).toContain("terrarium_zitadel_instance_name: terrarium-idp");
+    expect(defaults).toContain("terrarium_zitadel_instance_image: ubuntu:24.04");
     expect(tasks).toContain("Launch ZITADEL system instance");
     expect(tasks).toContain("Resolve local LXD member for first ZITADEL placement");
     expect(tasks).toContain("--target {{ terrarium_zitadel_instance_target | default(ansible_hostname) }}");
@@ -96,10 +110,19 @@ describe("Traefik bootstrap certificate template", () => {
     expect(playbook).toContain("no_log: true");
   });
 
-  test("uses Docker Hardened Images for local ZITADEL Postgres by default", () => {
+  test("prefers Docker Hardened Images for local ZITADEL Postgres when credentials are available", () => {
     const defaults = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/defaults/main.yml"), "utf8");
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/tasks/main.yml"), "utf8");
+    const compose = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/templates/docker-compose.yml.j2"), "utf8");
+    const playbook = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
 
-    expect(defaults).toContain(`terrarium_zitadel_postgres_image: "${POSTGRES_DHI_IMAGE}"`);
+    expect(defaults).toContain("terrarium_zitadel_postgres_image: \"\"");
+    expect(defaults).toContain(`terrarium_zitadel_postgres_image_hardened: "${POSTGRES_DHI_IMAGE}"`);
+    expect(defaults).toContain(`terrarium_zitadel_postgres_image_fallback: "${POSTGRES_FALLBACK_IMAGE}"`);
+    expect(tasks).toContain("Resolve ZITADEL Postgres image");
+    expect(compose).toContain("image: {{ terrarium_zitadel_postgres_image_effective }}");
+    expect(playbook).toContain("Check Docker registry credentials for hardened images");
+    expect(playbook).toContain("'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective");
     expect(defaults).not.toContain("postgres:17.2-alpine");
   });
 

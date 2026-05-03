@@ -44,7 +44,7 @@ Terrarium provisions the host with:
 - [OpenZFS](https://github.com/openzfs/zfs)
 - [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
 - [Traefik](https://github.com/traefik/traefik) with the built-in dashboard for public management endpoints
-- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping, defaulting to a Docker Hardened Image
+- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping, preferring Docker Hardened Images when registry credentials are present
 - Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`, running as a Terrarium-managed LXD system instance
 - External OIDC issuer support when you do not want to self-host the IDP
 - [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
@@ -237,7 +237,7 @@ Top-level commands:
 | `terrariumctl cluster join` | required: `--token`, `--address`; optional: `--peer-cidr`, `--yes` | storage pool `terrarium` | Joins the local node to an existing LXD cluster, exports shared Terrarium config, and reconfigures. |
 | `terrariumctl cluster ovn configure` | optional: `--central-addresses`, `--peer-cidr` | network `terrarium-ovn`, parent `lxdbr0` | Updates Terrarium OVN central member and peer firewall settings. |
 | `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
-| `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=0`, `gid=0`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
+| `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=100000`, `gid=100000`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
 | `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
 | `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
@@ -330,8 +330,8 @@ Restore behavior:
 | positional `username` | username | yes | none | The SMB/CIFS username written to the managed credentials file. |
 | `-p`, `--password` | password | no | prompt if omitted | The SMB/CIFS password. Omit it to let Terrarium prompt securely instead of putting it in shell history. |
 | `--password-file` | path | no | none | Reads the SMB/CIFS password from a root-readable file for non-interactive runs without putting it in shell history or process args. |
-| `--uid` | uid | no | `0` | UID presented for files on the mounted share. |
-| `--gid` | gid | no | `0` | GID presented for files on the mounted share. |
+| `--uid` | uid | no | `100000` | UID presented for files on the mounted share. This maps to root inside Terrarium's default unprivileged LXD containers. |
+| `--gid` | gid | no | `100000` | GID presented for files on the mounted share. This maps to root inside Terrarium's default unprivileged LXD containers. |
 | `--file-mode` | octal mode | no | `0660` | File permissions presented on the mounted share. |
 | `--dir-mode` | octal mode | no | `0770` | Directory permissions presented on the mounted share. |
 | `--seal` | `true` or `false` | no | `true` | Enables or disables the SMB encryption option explicitly. |

@@ -25,6 +25,8 @@ const routeAuthConfig = {
 };
 const OAUTH2_PROXY_DHI_IMAGE =
   "dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
+const OAUTH2_PROXY_FALLBACK_IMAGE =
+  "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd";
 
 function container(name: string, proxy: string, address = "10.10.0.10") {
   return {
@@ -126,7 +128,7 @@ describe("terrarium route auth generation", () => {
 
     expect(Object.keys(compose.services).sort()).toEqual(profiles.map((profile) => profile.containerName).sort());
     expect(Object.values(compose.services).map((service) => (service as { image?: string }).image)).toEqual(
-      profiles.map(() => OAUTH2_PROXY_DHI_IMAGE)
+      profiles.map(() => OAUTH2_PROXY_FALLBACK_IMAGE)
     );
     expect(Object.values(compose.services).map((service) => (service as { user?: string }).user)).toEqual(profiles.map(() => "65532:65532"));
     expect(profileConfigs[adminProfile.containerName]).toContain(`proxy_prefix = "${adminProfile.proxyPrefix}"`);
@@ -135,6 +137,7 @@ describe("terrarium route auth generation", () => {
     expect(profileConfigs[adminProfile.containerName]).toContain(`cookie_name = "__Host-terrarium_route_${adminProfile.containerName.replace(/^route-/, "")}"`);
     expect(profileConfigs[adminProfile.containerName]).toContain('cookie_path = "/"');
     expect(profileConfigs[adminProfile.containerName]).toContain('whitelist_domains = [ "app.example.test" ]');
+    expect(profileConfigs[adminProfile.containerName]).toContain('trusted_proxy_ips = [ "127.0.0.1/32", "::1/128" ]');
     expect(profileConfigs[adminProfile.containerName]).not.toContain("cookie_domains");
     expect(profileConfigs[signedInProfile.containerName]).toContain(`proxy_prefix = "${signedInProfile.proxyPrefix}"`);
     expect(profileConfigs[signedInProfile.containerName]).toContain(`cookie_name = "__Host-terrarium_route_${signedInProfile.containerName.replace(/^route-/, "")}"`);
@@ -154,6 +157,38 @@ describe("terrarium route auth generation", () => {
     const compose = parse(composeYaml) as { services: Record<string, { image?: string }> };
 
     expect(Object.values(compose.services).map((service) => service.image)).toEqual(["registry.example.test/oauth2-proxy:test"]);
+  });
+
+  test("allows route-auth oauth2-proxy image overrides for Docker Hardened Images", () => {
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth:admins")], routeAuthConfig);
+    const { composeYaml } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_oauth2_proxy_image: OAUTH2_PROXY_DHI_IMAGE },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+    const compose = parse(composeYaml) as { services: Record<string, { image?: string }> };
+
+    expect(Object.values(compose.services).map((service) => service.image)).toEqual([OAUTH2_PROXY_DHI_IMAGE]);
+  });
+
+  test("uses the exact local ZITADEL discovery issuer for route auth", () => {
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth")], {
+      ...routeAuthConfig,
+      terrarium_idp_mode: "local",
+      terrarium_oidc_issuer: "https://auth.example.test/"
+    });
+    const { profileConfigs } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_idp_mode: "local", terrarium_oidc_issuer: "https://auth.example.test/" },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+
+    expect(Object.values(profileConfigs)[0]).toContain('oidc_issuer_url = "https://auth.example.test"');
+    expect(Object.values(profileConfigs)[0]).not.toContain('oidc_issuer_url = "https://auth.example.test/"');
   });
 
   test("generates policy-specific forwardAuth middleware and oauth callback routes without query policy", () => {
