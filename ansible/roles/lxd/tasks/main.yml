@@ -529,15 +529,27 @@
   failed_when: false
   changed_when: false
 
-- name: Configure OIDC issuer when provided
-  ansible.builtin.command: "/snap/bin/lxc config set oidc.issuer {{ terrarium_oidc_issuer }}"
+- name: Resolve LXD OIDC issuer
+  ansible.builtin.set_fact:
+    terrarium_lxd_oidc_issuer_effective: "{{ terrarium_oidc_issuer | regex_replace('^([A-Za-z][A-Za-z0-9+.-]*://[^/]+)/$', '\\1') }}"
   when: terrarium_oidc_issuer | length > 0
+
+- name: Configure OIDC issuer when provided
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.issuer {{ terrarium_lxd_oidc_issuer_effective }}"
+  register: terrarium_lxd_oidc_issuer_config
+  until: terrarium_lxd_oidc_issuer_config.rc == 0
+  retries: 12
+  delay: 10
+  when:
+    - terrarium_idp_mode == 'oidc'
+    - terrarium_lxd_oidc_issuer_effective | default('', true) | length > 0
   changed_when: false
 
 - name: Configure LXD OIDC groups claim when provided
   ansible.builtin.command: "/snap/bin/lxc config set oidc.groups.claim {{ terrarium_lxd_oidc_groups_claim }}"
   when:
-    - terrarium_oidc_issuer | length > 0
+    - terrarium_idp_mode == 'oidc'
+    - terrarium_lxd_oidc_issuer_effective | default('', true) | length > 0
     - terrarium_lxd_oidc_groups_claim | length > 0
   changed_when: false
 
@@ -591,6 +603,7 @@
 - name: Configure OIDC client ID when provided
   ansible.builtin.command: "/snap/bin/lxc config set oidc.client.id {{ terrarium_lxd_oidc_client_id_effective }}"
   when:
+    - terrarium_idp_mode == 'oidc'
     - terrarium_lxd_oidc_client_id_effective | length > 0
   changed_when: false
 

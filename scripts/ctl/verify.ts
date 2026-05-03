@@ -26,6 +26,10 @@ export type OidcVerificationOptions = {
   lxdDomain: string;
 };
 
+export type OidcVerificationResult = {
+  issuer: string;
+};
+
 const AWS_CLI_VERSION = "2.34.41";
 const AWS_CLI_DOWNLOAD_DIR = "/var/lib/terrarium/downloads/awscli";
 const AWS_CLI_STAGE_DIR = "/var/lib/terrarium/staging/awscli";
@@ -223,6 +227,24 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   }
 }
 
+function issuerComparisonKey(value: string): string {
+  const parsed = new URL(value);
+  const rendered = parsed.toString();
+  return parsed.pathname === "/" ? rendered.replace(/\/$/, "") : rendered;
+}
+
+function verifiedDiscoveryIssuer(configuredIssuer: string, discoveryIssuer: unknown): string {
+  if (typeof discoveryIssuer !== "string" || !discoveryIssuer.trim()) {
+    throw new Error("OIDC discovery document is missing issuer");
+  }
+
+  const discovered = discoveryIssuer.trim();
+  if (issuerComparisonKey(configuredIssuer) !== issuerComparisonKey(discovered)) {
+    throw new Error(`OIDC discovery issuer mismatch: configured ${configuredIssuer}, discovery returned ${discovered}`);
+  }
+  return discovered;
+}
+
 async function verifyAuthorizationProbe(authorizationEndpoint: string, clientId: string, redirectUri: string): Promise<void> {
   const deadline = Date.now() + 120000;
   let lastStatus = 0;
@@ -331,7 +353,7 @@ async function verifyConfidentialClientProbe(
  * recognized the client and secret before rejecting the fake code. `invalid_client`
  * still means the configured client credentials are not proven.
  */
-export async function verifyOidcConfig(options: OidcVerificationOptions): Promise<void> {
+export async function verifyOidcConfig(options: OidcVerificationOptions): Promise<OidcVerificationResult> {
   const discoveryUrl = `${options.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
   const discoveryResponse = await fetchWithTimeout(discoveryUrl);
   if (!discoveryResponse.ok) {
@@ -339,6 +361,7 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
   }
 
   const discovery = (await discoveryResponse.json()) as Record<string, unknown>;
+  const verifiedIssuer = verifiedDiscoveryIssuer(options.issuer, discovery.issuer);
   const authorizationEndpoint = String(discovery.authorization_endpoint || "");
   const tokenEndpoint = String(discovery.token_endpoint || "");
   if (!authorizationEndpoint || !tokenEndpoint) {
@@ -358,4 +381,5 @@ export async function verifyOidcConfig(options: OidcVerificationOptions): Promis
   if (lxdClientSecret && (lxdClientId !== options.clientId || lxdClientSecret !== options.clientSecret)) {
     await verifyConfidentialClientProbe(tokenEndpoint, lxdClientId, lxdClientSecret, lxdRedirectUri);
   }
+  return { issuer: verifiedIssuer };
 }

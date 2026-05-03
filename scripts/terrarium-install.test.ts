@@ -56,6 +56,13 @@ describe("terrarium install CLI parsing", () => {
     expect(normalizeOidcIssuer("https://issuer.example.test/tenant/", "--oidc")).toBe("https://issuer.example.test/tenant/");
   });
 
+  test("uses ZITADEL discovery issuer shape for local installs", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
+
+    expect(source).toContain('normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc")');
+    expect(source).not.toContain('normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc")');
+  });
+
   test("does not expose the Cockpit root password as an argv option", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
 

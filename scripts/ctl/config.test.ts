@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySetIdpConfig, parseSetCommandOptions, runReconcileActions, type ReconcileActions } from "./config";
@@ -130,6 +130,13 @@ describe("terrariumctl config reconciliation", () => {
     });
   });
 
+  test("verifies external domain changes with the configured LXD OIDC client", () => {
+    const source = readFileSync(join(import.meta.dir, "config.ts"), "utf8");
+
+    expect(source).toContain('lxdClientId: configString(config, "terrarium_lxd_oidc_client_id") || configString(config, "terrarium_oidc_client_id")');
+    expect(source).toContain('setConfigValue(config, "terrarium_oidc_issuer", verification.issuer)');
+  });
+
   test("persists a separate external LXD OIDC client without requiring a secret", () => {
     const config: Record<string, unknown> = {
       terrarium_public_ip: "203.0.113.10",
@@ -181,11 +188,18 @@ describe("terrariumctl config reconciliation", () => {
 
     expect(plan.verifyOidc).toBeUndefined();
     expect(config.terrarium_auth_domain).toBe("primary-auth.example.test");
-    expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test/");
+    expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test");
     expect(config.terrarium_oidc_client_id).toBe("");
     expect(config.terrarium_oidc_client_secret).toBe("");
     expect(config.terrarium_lxd_oidc_client_id).toBe("");
     expect(config.terrarium_lxd_oidc_client_secret).toBe("");
+  });
+
+  test("uses ZITADEL discovery issuer shape for local IDP config changes", () => {
+    const source = readFileSync(join(import.meta.dir, "config.ts"), "utf8");
+
+    expect(source).toContain('normalizeOidcIssuer(`https://${authDomain}`, "--oidc")');
+    expect(source).not.toContain('normalizeOidcIssuer(`https://${authDomain}/`, "--oidc")');
   });
 
   test("reads set command secrets from files without requiring inline values", () => {

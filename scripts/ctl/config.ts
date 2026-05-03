@@ -187,18 +187,21 @@ export async function setDomainsCmd(
   if (localIdpEnabled(config)) {
     const authDomain = options.authDomain || defaultServiceDomain(rootDomain, publicIp, "auth");
     setConfigValue(config, "terrarium_auth_domain", authDomain);
-    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}`, "--oidc"));
   }
 
   if (!localIdpEnabled(config)) {
-    await verifyOidcConfig({
+    const verification = await verifyOidcConfig({
       issuer: configString(config, "terrarium_oidc_issuer"),
       clientId: configString(config, "terrarium_oidc_client_id"),
       clientSecret: configString(config, "terrarium_oidc_client_secret"),
+      lxdClientId: configString(config, "terrarium_lxd_oidc_client_id") || configString(config, "terrarium_oidc_client_id"),
+      lxdClientSecret: configString(config, "terrarium_lxd_oidc_client_secret"),
       manageDomain: configString(config, "terrarium_manage_domain"),
       proxyDomain: configString(config, "terrarium_proxy_domain"),
       lxdDomain: configString(config, "terrarium_lxd_domain")
     });
+    setConfigValue(config, "terrarium_oidc_issuer", verification.issuer);
   }
 
   await confirmDestructive(
@@ -246,7 +249,7 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     const authDomain = options.authDomain || configString(config, "terrarium_auth_domain") || defaultServiceDomain(rootDomain, publicIp, "auth");
     setConfigValue(config, "terrarium_admin_group", nextAdminGroup);
     setConfigValue(config, "terrarium_auth_domain", authDomain);
-    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}/`, "--oidc"));
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}`, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", "");
     setConfigValue(config, "terrarium_oidc_client_secret", "");
     setConfigValue(config, "terrarium_lxd_oidc_client_id", "");
@@ -305,7 +308,8 @@ export async function setIdpCmd(options: SetIdpOptions, actions: ReconcileAction
   const config = loadMutableConfig();
   const plan = applySetIdpConfig(config, options);
   if (plan.verifyOidc) {
-    await verifyOidcConfig(plan.verifyOidc);
+    const verification = await verifyOidcConfig(plan.verifyOidc);
+    setConfigValue(config, "terrarium_oidc_issuer", verification.issuer);
   }
   await persistAndReconcile(config, plan.summary, actions);
 }

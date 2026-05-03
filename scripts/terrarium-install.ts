@@ -515,7 +515,7 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
     }
 
     try {
-      await verifyOidcConfig({
+      const verification = await verifyOidcConfig({
         issuer: options.oidcIssuer,
         clientId: options.oidcClientId,
         clientSecret: options.oidcClientSecret,
@@ -525,6 +525,7 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
         proxyDomain: options.proxyDomain,
         lxdDomain: options.lxdDomain
       });
+      options.oidcIssuer = verification.issuer;
       info("OIDC verification passed.");
       return;
     } catch (error) {
@@ -579,7 +580,7 @@ async function promptAndVerifyS3(options: InstallOptions): Promise<void> {
 /** Runs non-interactive preflight checks for integrations that commonly fail from configuration drift. */
 async function verifyConfiguredIntegrations(options: InstallOptions): Promise<void> {
   if (options.idpMode === "oidc") {
-    await verifyOidcConfig({
+    const verification = await verifyOidcConfig({
       issuer: options.oidcIssuer,
       clientId: options.oidcClientId,
       clientSecret: options.oidcClientSecret,
@@ -589,6 +590,7 @@ async function verifyConfiguredIntegrations(options: InstallOptions): Promise<vo
       proxyDomain: options.proxyDomain,
       lxdDomain: options.lxdDomain
     });
+    options.oidcIssuer = verification.issuer;
   }
 
   if (options.enableS3) {
@@ -728,7 +730,7 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
       options.authDomain ||
       (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
     options.authDomain = await promptText("ZITADEL auth domain", options.authDomain);
-    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc");
+    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc");
     options.zitadelAdminEmail = await promptEmail(
       "ZITADEL bootstrap admin email",
       options.zitadelAdminEmail || options.email,
@@ -853,7 +855,7 @@ function validateNonInteractive(options: InstallOptions): void {
   if (options.idpMode === "local") {
     options.adminGroup = options.adminGroup || "terrarium-admins";
     options.authDomain = options.authDomain || (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
-    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc");
+    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc");
     options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
     options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
     options.oidcClientId = "";

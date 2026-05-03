@@ -125,7 +125,7 @@ async function waitForContainerApiReady(instanceName: string, stackDir: string):
   throw new Error(`timed out waiting for ZITADEL API readiness in ${instanceName}: ${lastError}`);
 }
 
-async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
+async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<string> {
   let lastError = "";
   for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
     const cmd = [
@@ -144,9 +144,19 @@ async function waitForTrustedHttpsDiscovery(authDomain: string): Promise<void> {
     ];
     const result = await runAllowFailure(cmd);
     if (result.exitCode === 0) {
-      return;
+      try {
+        const discovery = JSON.parse(result.stdout) as Record<string, unknown>;
+        const issuer = String(discovery.issuer || "").trim();
+        if (issuer) {
+          return issuer;
+        }
+        lastError = "OIDC discovery is missing issuer";
+      } catch (error) {
+        lastError = `failed to parse OIDC discovery: ${String(error).replace(/^Error: /, "")}`;
+      }
+    } else {
+      lastError = result.stderr.trim() || result.stdout.trim() || "OIDC discovery is not reachable yet";
     }
-    lastError = result.stderr.trim() || result.stdout.trim() || "OIDC discovery is not reachable yet";
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
   throw new Error(`timed out waiting for HTTPS OIDC discovery on ${authDomain}: ${lastError}`);
@@ -684,7 +694,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
     await waitForFile(`${bootstrapDir}/login-client.pat`, "login client PAT");
     await waitForApiReady(zitadelDir);
   }
-  await waitForTrustedHttpsDiscovery(authDomain);
+  const discoveredIssuer = await waitForTrustedHttpsDiscovery(authDomain);
 
   const adminPat = (
     useLxdInstance ? await readContainerFile(instanceName, `${bootstrapDir}/admin-sa.pat`) : readFileSync(join(bootstrapDir, "admin-sa.pat"), "utf8")
@@ -704,8 +714,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH): Promise<void
   const lxdClientId = localApps.lxd.clientId;
   await ensureManagementGroupProvisioning(authDomain, adminPat, adminLoginName, adminGroup);
   if (lxdClientId && existsSync("/snap/bin/lxc")) {
-    const issuer = configString(config, "terrarium_oidc_issuer") || `https://${authDomain}`;
-    await runText(["/snap/bin/lxc", "config", "set", "oidc.issuer", issuer], PREFIX);
+    await runText(["/snap/bin/lxc", "config", "set", "oidc.issuer", discoveredIssuer], PREFIX);
     await runText(["/snap/bin/lxc", "config", "set", "oidc.client.id", lxdClientId], PREFIX);
     await runText(["/snap/bin/lxc", "config", "set", "oidc.groups.claim", "groups"], PREFIX);
   }

@@ -7,6 +7,7 @@ const originalFetch = globalThis.fetch;
 
 function discoveryResponse(): Response {
   return Response.json({
+    issuer: "https://issuer.example.test",
     authorization_endpoint: "https://issuer.example.test/oauth/v2/authorize",
     token_endpoint: "https://issuer.example.test/oauth/v2/token"
   });
@@ -81,7 +82,7 @@ describe("OIDC verification", () => {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }) as typeof fetch;
 
-    await expect(verifyOidcConfig(oidcOptions())).resolves.toBeUndefined();
+    await expect(verifyOidcConfig(oidcOptions())).resolves.toEqual({ issuer: "https://issuer.example.test" });
     expect(probedRedirectUris).toEqual([
       "https://manage.example.test/oauth2/callback",
       "https://proxy.example.test/oauth2/callback",
@@ -101,7 +102,40 @@ describe("OIDC verification", () => {
       return Response.json({ error: "Errors.User.Code.Invalid" }, { status: 400 });
     }) as typeof fetch;
 
-    await expect(verifyOidcConfig(oidcOptions())).resolves.toBeUndefined();
+    await expect(verifyOidcConfig(oidcOptions())).resolves.toEqual({ issuer: "https://issuer.example.test" });
+  });
+
+  test("returns the discovery issuer so LXD uses the exact provider value", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return discoveryResponse();
+      }
+      if (url.includes("/oauth/v2/authorize")) {
+        return authResponse();
+      }
+      return Response.json({ error: "invalid_grant" }, { status: 400 });
+    }) as typeof fetch;
+
+    await expect(verifyOidcConfig({ ...oidcOptions(), issuer: "https://issuer.example.test/" })).resolves.toEqual({
+      issuer: "https://issuer.example.test"
+    });
+  });
+
+  test("rejects discovery documents for a different issuer", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({
+          issuer: "https://other-issuer.example.test",
+          authorization_endpoint: "https://issuer.example.test/oauth/v2/authorize",
+          token_endpoint: "https://issuer.example.test/oauth/v2/token"
+        });
+      }
+      return authResponse();
+    }) as typeof fetch;
+
+    await expect(verifyOidcConfig(oidcOptions())).rejects.toThrow("OIDC discovery issuer mismatch");
   });
 });
 

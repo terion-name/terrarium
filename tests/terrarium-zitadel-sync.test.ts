@@ -71,6 +71,8 @@ describe("terrarium local ZITADEL sync", () => {
     expect(source).toContain('const DEFAULT_ZITADEL_INSTANCE_NAME = "terrarium-idp"');
     expect(source).toContain("waitForContainerApiReady(instanceName, zitadelDir)");
     expect(source).toContain("readContainerFile(instanceName, `${bootstrapDir}/admin-sa.pat`)");
+    expect(source).toContain("const discoveredIssuer = await waitForTrustedHttpsDiscovery(authDomain)");
+    expect(source).toContain('["/snap/bin/lxc", "config", "set", "oidc.issuer", discoveredIssuer]');
   });
 
   test("treats ZITADEL no-op updates as idempotent success responses", () => {
