@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { verifyOidcConfig } from "./verify";
+import { isRetriableS3VerificationError, verifyOidcConfig } from "./verify";
 
 const originalFetch = globalThis.fetch;
 
@@ -152,5 +152,12 @@ describe("AWS CLI fallback installer", () => {
     expect(source).toContain("unsafe AWS CLI archive member type");
     expect(source).toContain("awscli-exe-linux-${fallbackArch}-${AWS_CLI_VERSION}.zip");
     expect(source).not.toContain("terrarium-awscli-install-");
+  });
+});
+
+describe("S3 verification", () => {
+  test("retries transient provider and AWS CLI internal errors", () => {
+    expect(isRetriableS3VerificationError("aws: [ERROR]: argument of type 'NoneType' is not a container or iterable")).toBe(true);
+    expect(isRetriableS3VerificationError("An error occurred (Forbidden) when calling the HeadBucket operation")).toBe(false);
   });
 });

@@ -37,6 +37,8 @@ const AWS_CLI_SHA256: Record<string, string> = {
   x86_64: "634b14ec79f0437d5f82562365532bb79f106478fa472fc199aa24fde10023d4",
   aarch64: "b531b7def2b11646bd494f0e79dd1867d7c6b22c1ed0b59ff56f16dee6ca118b"
 };
+const S3_VERIFICATION_ATTEMPTS = 3;
+const S3_VERIFICATION_RETRY_MS = 3000;
 
 function ensurePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
@@ -172,6 +174,51 @@ function s3BaseArgs(options: S3VerificationOptions): string[] {
   return args;
 }
 
+export function isRetriableS3VerificationError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return [
+    "argument of type 'nonetype'",
+    "gatewaytimeout",
+    "gateway timeout",
+    "requesttimeout",
+    "request timeout",
+    "slowdown",
+    "service unavailable",
+    "connection reset",
+    "connection broken",
+    "connection aborted",
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "503",
+    "504"
+  ].some((needle) => lowered.includes(needle));
+}
+
+function awsFailureMessage(result: Awaited<ReturnType<typeof runAllowFailure>>, fallback: string): string {
+  return result.stderr.trim() || result.stdout.trim() || fallback;
+}
+
+async function runS3VerificationCommand(args: string[], env: Record<string, string>, label: string): Promise<void> {
+  let lastError = "";
+  for (let attempt = 1; attempt <= S3_VERIFICATION_ATTEMPTS; attempt += 1) {
+    const result = await runAllowFailure(args, { env });
+    if (result.exitCode === 0) {
+      return;
+    }
+
+    lastError = awsFailureMessage(result, `${label} failed`);
+    if (attempt >= S3_VERIFICATION_ATTEMPTS || !isRetriableS3VerificationError(lastError)) {
+      throw new Error(lastError);
+    }
+
+    console.warn(`S3 verification ${label} failed on attempt ${attempt}; retrying: ${lastError}`);
+    await Bun.sleep(S3_VERIFICATION_RETRY_MS);
+  }
+
+  throw new Error(lastError || `${label} failed`);
+}
+
 /**
  * Verifies that the configured S3 target exists and accepts write/delete operations.
  *
@@ -194,23 +241,13 @@ export async function verifyS3Config(options: S3VerificationOptions): Promise<vo
   writeFileSync(tempFile, `terrarium verification ${new Date().toISOString()}\n`, "utf8");
 
   try {
-    const head = await runAllowFailure([...baseArgs, "s3api", "head-bucket", "--bucket", options.bucket], { env });
-    if (head.exitCode !== 0) {
-      throw new Error(head.stderr.trim() || head.stdout.trim() || `unable to access bucket ${options.bucket}`);
-    }
-
-    const put = await runAllowFailure(
+    await runS3VerificationCommand([...baseArgs, "s3api", "head-bucket", "--bucket", options.bucket], env, `bucket access probe for ${options.bucket}`);
+    await runS3VerificationCommand(
       [...baseArgs, "s3api", "put-object", "--bucket", options.bucket, "--key", objectKey, "--body", tempFile],
-      { env }
+      env,
+      "write probe"
     );
-    if (put.exitCode !== 0) {
-      throw new Error(put.stderr.trim() || put.stdout.trim() || "write probe failed");
-    }
-
-    const remove = await runAllowFailure([...baseArgs, "s3api", "delete-object", "--bucket", options.bucket, "--key", objectKey], { env });
-    if (remove.exitCode !== 0) {
-      throw new Error(remove.stderr.trim() || remove.stdout.trim() || "delete probe failed after successful write");
-    }
+    await runS3VerificationCommand([...baseArgs, "s3api", "delete-object", "--bucket", options.bucket, "--key", objectKey], env, "delete probe");
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
