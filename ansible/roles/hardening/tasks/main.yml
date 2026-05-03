@@ -3,41 +3,46 @@
     path: /etc/ssh/authorized_keys/root
   register: terrarium_hardening_provider_root_authorized_keys
 
-- name: Ensure root SSH directory has strict permissions
+- name: Enforce provider-managed root SSH key permissions
   ansible.builtin.file:
-    path: /root/.ssh
-    state: directory
+    path: /etc/ssh/authorized_keys/root
     owner: root
     group: root
-    mode: "0700"
+    mode: "0600"
   when: terrarium_hardening_provider_root_authorized_keys.stat.exists | default(false)
 
-- name: Preserve provider-managed root SSH keys in OpenSSH default location
-  ansible.builtin.shell: |
-    set -euo pipefail
-    source=/etc/ssh/authorized_keys/root
-    target=/root/.ssh/authorized_keys
-    touch "$target"
-    before="$(sha256sum "$target" | awk '{ print $1 }')"
-    while IFS= read -r key; do
-      [ -n "$key" ] || continue
-      grep -qxF -- "$key" "$target" || printf '%s\n' "$key" >> "$target"
-    done < "$source"
-    chown root:root /root/.ssh "$target"
-    chmod 0700 /root/.ssh
-    chmod 0600 "$target"
-    after="$(sha256sum "$target" | awk '{ print $1 }')"
-    [ "$before" = "$after" ] || echo changed
-  args:
-    executable: /bin/bash
-  register: terrarium_hardening_provider_root_key_merge
-  changed_when: "'changed' in terrarium_hardening_provider_root_key_merge.stdout"
+- name: Read provider-managed root SSH authorized keys
+  ansible.builtin.slurp:
+    path: /etc/ssh/authorized_keys/root
+  register: terrarium_hardening_provider_root_authorized_keys_content
+  when: terrarium_hardening_provider_root_authorized_keys.stat.exists | default(false)
+
+- name: Build provider-managed root SSH authorized key list
+  ansible.builtin.set_fact:
+    terrarium_hardening_provider_root_authorized_key_lines: >-
+      {{
+        (terrarium_hardening_provider_root_authorized_keys_content.content | b64decode).splitlines()
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
   when: terrarium_hardening_provider_root_authorized_keys.stat.exists | default(false)
 
 - name: Check root SSH authorized keys
   ansible.builtin.stat:
     path: /root/.ssh/authorized_keys
   register: terrarium_hardening_root_authorized_keys
+
+- name: Remove provider-managed root SSH keys from OpenSSH default location
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    line: "{{ item }}"
+    state: absent
+  loop: "{{ terrarium_hardening_provider_root_authorized_key_lines | default([]) }}"
+  when:
+    - terrarium_hardening_provider_root_authorized_keys.stat.exists | default(false)
+    - terrarium_hardening_root_authorized_keys.stat.exists | default(false)
 
 - name: Enforce strict root SSH directory permissions
   ansible.builtin.file:
