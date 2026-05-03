@@ -92,6 +92,16 @@ describe("terrariumctl mount defaults", () => {
     expect(mount).toContain('"forcegid"');
   });
 
+  test("defaults CIFS ownership to the host-side idmap for unprivileged LXD root", () => {
+    const ctl = readFileSync(join(repoRoot, "scripts/terrariumctl.ts"), "utf8");
+    const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");
+
+    expect(mount).toContain('export const DEFAULT_CIFS_UID = "100000"');
+    expect(mount).toContain('export const DEFAULT_CIFS_GID = "100000"');
+    expect(ctl).toContain("default: DEFAULT_CIFS_UID");
+    expect(ctl).toContain("default: DEFAULT_CIFS_GID");
+  });
+
   test("recovers dashed CIFS mode options from the CLI parser", () => {
     const ctl = readFileSync(join(repoRoot, "scripts/terrariumctl.ts"), "utf8");
 

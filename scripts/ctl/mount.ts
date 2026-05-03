@@ -14,6 +14,11 @@ export type MountAddOptions = {
   seal?: boolean;
 };
 
+export const DEFAULT_CIFS_UID = "100000";
+export const DEFAULT_CIFS_GID = "100000";
+export const DEFAULT_CIFS_FILE_MODE = "0660";
+export const DEFAULT_CIFS_DIR_MODE = "0770";
+
 /** Normalizes supported mount protocol aliases down to the real Linux fstype. */
 function normalizeMountProtocol(protocol: string): "cifs" {
   const normalized = protocol.trim().toLowerCase();
@@ -176,10 +181,10 @@ export async function mountAddCmd(
     "forcegid",
     ...(options.seal === false ? [] : ["seal"]),
     `credentials=${credentialsPath}`,
-    `uid=${normalizeNumericMountOption(options.uid, "0", "--uid")}`,
-    `gid=${normalizeNumericMountOption(options.gid, "0", "--gid")}`,
-    `file_mode=${normalizeModeOption(options.fileMode, "0660", "--file-mode")}`,
-    `dir_mode=${normalizeModeOption(options.dirMode, "0770", "--dir-mode")}`
+    `uid=${normalizeNumericMountOption(options.uid, DEFAULT_CIFS_UID, "--uid")}`,
+    `gid=${normalizeNumericMountOption(options.gid, DEFAULT_CIFS_GID, "--gid")}`,
+    `file_mode=${normalizeModeOption(options.fileMode, DEFAULT_CIFS_FILE_MODE, "--file-mode")}`,
+    `dir_mode=${normalizeModeOption(options.dirMode, DEFAULT_CIFS_DIR_MODE, "--dir-mode")}`
   ];
   const entry = `${address} ${hostPath} ${protocol} ${optionsList.join(",")} 0 0`;
   const block = `# BEGIN ${marker}\n${entry}\n# END ${marker}`;

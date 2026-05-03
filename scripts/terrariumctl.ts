@@ -29,7 +29,15 @@ import {
   setS3Cmd,
   setSyncoidCmd
 } from "./ctl/config";
-import { mountAddCmd, mountListCmd, mountRemoveCmd } from "./ctl/mount";
+import {
+  DEFAULT_CIFS_DIR_MODE,
+  DEFAULT_CIFS_FILE_MODE,
+  DEFAULT_CIFS_GID,
+  DEFAULT_CIFS_UID,
+  mountAddCmd,
+  mountListCmd,
+  mountRemoveCmd
+} from "./ctl/mount";
 import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
@@ -233,10 +241,10 @@ cli
   .command("mount <action> [...args]", "Manage host SMB/CIFS mounts")
   .option("-p, --password <password>", "SMB/CIFS password for non-interactive automation", STRING_OPTION)
   .option("--password-file <path>", "Read SMB/CIFS password from a root-readable file", STRING_OPTION)
-  .option("--uid <uid>", "UID to present for mounted files", { ...STRING_OPTION, default: "0" })
-  .option("--gid <gid>", "GID to present for mounted files", { ...STRING_OPTION, default: "0" })
-  .option("--file-mode <mode>", "File mode for mounted files", { ...STRING_OPTION, default: "0660" })
-  .option("--dir-mode <mode>", "Directory mode for mounted directories", { ...STRING_OPTION, default: "0770" })
+  .option("--uid <uid>", "UID to present for mounted files", { ...STRING_OPTION, default: DEFAULT_CIFS_UID })
+  .option("--gid <gid>", "GID to present for mounted files", { ...STRING_OPTION, default: DEFAULT_CIFS_GID })
+  .option("--file-mode <mode>", "File mode for mounted files", { ...STRING_OPTION, default: DEFAULT_CIFS_FILE_MODE })
+  .option("--dir-mode <mode>", "Directory mode for mounted directories", { ...STRING_OPTION, default: DEFAULT_CIFS_DIR_MODE })
   .option("--seal <value>", "Enable SMB encryption: true or false", { ...STRING_OPTION, default: "true" })
   .usage(
     "mount add smb|cifs /host/path //server/share username [-p PASSWORD|--password-file PATH] [--seal true|false]\n  terrariumctl mount remove /host/path\n  terrariumctl mount list"
