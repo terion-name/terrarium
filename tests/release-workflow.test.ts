@@ -8,6 +8,15 @@ import YAML from "yaml";
 const repoRoot = join(import.meta.dir, "..");
 
 describe("release workflow", () => {
+  test("tag releases do not also trigger the generic validate workflow", () => {
+    const validate = YAML.parse(readFileSync(join(repoRoot, ".github/workflows/validate.yml"), "utf8"));
+    const release = YAML.parse(readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8"));
+
+    expect(validate.on.push.branches).toEqual(["**"]);
+    expect(validate.on.push.tags).toBeUndefined();
+    expect(release.on.push.tags).toEqual(["*"]);
+  });
+
   test("validates release tags before preflight and publishing", () => {
     const source = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
     const workflow = YAML.parse(source);
