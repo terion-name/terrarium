@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_SCP_ATTEMPTS,
   DEFAULT_SCP_COMMAND_TIMEOUT_MS,
+  DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS,
+  DEFAULT_SSH_HOUSEKEEPING_TIMEOUT_MS,
   DEFAULT_SSH_COMMAND_TIMEOUT_MS,
   remoteTarRootPattern,
   sshCommandTimeoutMs
@@ -24,5 +26,11 @@ describe("SSH archive helpers", () => {
   test("bounds stalled SCP attempts below the full remote command timeout", () => {
     expect(DEFAULT_SCP_ATTEMPTS).toBeGreaterThan(1);
     expect(DEFAULT_SCP_COMMAND_TIMEOUT_MS).toBeLessThan(DEFAULT_SSH_COMMAND_TIMEOUT_MS);
+  });
+
+  test("bounds SSH housekeeping commands so chmod stalls fail fast", () => {
+    expect(DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS).toBeGreaterThan(1);
+    expect(DEFAULT_SSH_HOUSEKEEPING_TIMEOUT_MS).toBeLessThan(DEFAULT_SSH_COMMAND_TIMEOUT_MS);
+    expect(DEFAULT_SSH_HOUSEKEEPING_TIMEOUT_MS * DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS).toBeLessThan(DEFAULT_SSH_COMMAND_TIMEOUT_MS);
   });
 });

@@ -12,6 +12,8 @@ export type SshExecResult = {
 const REMOTE_READ_ATTEMPTS = 5;
 const REMOTE_READ_TIMEOUT_MS = 20000;
 export const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_SSH_HOUSEKEEPING_TIMEOUT_MS = 30 * 1000;
+export const DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS = 4;
 export const DEFAULT_SCP_COMMAND_TIMEOUT_MS = 90 * 1000;
 export const DEFAULT_SCP_ATTEMPTS = 4;
 
@@ -122,7 +124,8 @@ export class SshHost {
     mkdirSync(dirname(localTemp), { recursive: true });
     writeFileSync(localTemp, script, { encoding: "utf8", mode: 0o700 });
     await this.copyTo(localTemp, remotePath);
-    await this.exec(`chmod 700 ${shellEscape(remotePath)} && ${shellEscape(remotePath)}`);
+    await this.execHousekeeping(`chmod 700 ${shellEscape(remotePath)}`, `chmod ${remotePath}`);
+    await this.exec(shellEscape(remotePath));
   }
 
   async copyTo(localPath: string, remotePath: string): Promise<void> {
@@ -158,14 +161,14 @@ export class SshHost {
     const localTemp = join(dirname(this.logger.path), basename(remotePath));
     writeFileSync(localTemp, content, "utf8");
     await this.copyTo(localTemp, remotePath);
-    await this.exec(`chmod ${mode} ${shellEscape(remotePath)}`);
+    await this.execHousekeeping(`chmod ${mode} ${shellEscape(remotePath)}`, `chmod ${remotePath}`);
   }
 
   async uploadKeypair(privateKeyPath: string, publicKeyPath: string, remotePrivateKeyPath: string): Promise<void> {
     await this.copyTo(privateKeyPath, remotePrivateKeyPath);
-    await this.exec(`chmod 600 ${shellEscape(remotePrivateKeyPath)}`);
+    await this.execHousekeeping(`chmod 600 ${shellEscape(remotePrivateKeyPath)}`, `chmod ${remotePrivateKeyPath}`);
     await this.copyTo(publicKeyPath, `${remotePrivateKeyPath}.pub`);
-    await this.exec(`chmod 644 ${shellEscape(`${remotePrivateKeyPath}.pub`)}`);
+    await this.execHousekeeping(`chmod 644 ${shellEscape(`${remotePrivateKeyPath}.pub`)}`, `chmod ${remotePrivateKeyPath}.pub`);
   }
 
   async archive(remotePaths: string[], localPath: string): Promise<void> {
@@ -208,7 +211,32 @@ export class SshHost {
       ],
       `scp ${this.host}:${remoteTar} to ${localPath}`
     );
-    await this.exec(`rm -f ${shellEscape(remoteTar)}`);
+    await this.execHousekeeping(`rm -f ${shellEscape(remoteTar)}`, `remove ${remoteTar}`);
+  }
+
+  private async execHousekeeping(command: string, description: string): Promise<string> {
+    let lastFailure = "";
+    this.logger.info(`ssh ${this.host}: ${command}`);
+    for (let attempt = 1; attempt <= DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS; attempt += 1) {
+      const result = await runAllowFailure(["ssh", ...this.baseArgs(), `bash -lc ${shellEscape(command)}`], {
+        timeoutMs: DEFAULT_SSH_HOUSEKEEPING_TIMEOUT_MS
+      });
+      if (result.exitCode === 0) {
+        return result.stdout;
+      }
+
+      lastFailure = formatCommandResult(result);
+      if (attempt < DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS && isRetryableHousekeepingFailure(result)) {
+        this.logger.warn(
+          `${description} failed on attempt ${attempt}/${DEFAULT_SSH_HOUSEKEEPING_ATTEMPTS}; retrying: ${compactCommandOutput(lastFailure)}`
+        );
+        await Bun.sleep(attempt * 1000);
+        continue;
+      }
+      break;
+    }
+
+    throw new Error(`${description} failed after SSH housekeeping retries\n${lastFailure}`);
   }
 
   private async scpWithRetries(cmd: string[], description: string): Promise<void> {
@@ -251,6 +279,10 @@ exit "$status"
     await this.write(remoteScriptPath, script, "700");
     await this.exec(`nohup ${shellEscape(remoteScriptPath)} >/dev/null 2>&1 &`);
   }
+}
+
+function isRetryableHousekeepingFailure(result: SshExecResult): boolean {
+  return result.exitCode === 124 || result.exitCode === 255;
 }
 
 function formatCommandResult(result: SshExecResult): string {
