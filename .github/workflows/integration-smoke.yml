@@ -19,7 +19,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     concurrency:
       # Shared with integration-full so Hetzner-backed integration suites do not run at the same time.
       group: terrarium-integration

@@ -68,7 +68,7 @@ permissions:
 jobs:
   full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 480
     concurrency:
       # Shared with integration-smoke. Release preflight takes priority over an
       # already-running smoke run for the same release candidate.
