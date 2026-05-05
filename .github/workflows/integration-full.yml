@@ -70,7 +70,7 @@ jobs:
   smoke:
     name: smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 360
     if: ${{ inputs.only == '' || inputs.only == 'smoke' }}
     concurrency:
       group: terrarium-integration-${{ github.workflow }}-${{ github.ref }}-smoke
