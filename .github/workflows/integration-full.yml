@@ -9,8 +9,9 @@ on:
         default: false
         type: boolean
       only:
-        description: Optional scenario filter
+        description: Optional scenario filter (smoke or full)
         required: false
+        default: ""
         type: string
   workflow_call:
     inputs:
@@ -66,13 +67,13 @@ permissions:
   contents: read
 
 jobs:
-  full:
+  smoke:
+    name: smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 480
+    timeout-minutes: 240
+    if: ${{ inputs.only == '' || inputs.only == 'smoke' }}
     concurrency:
-      # Shared with integration-smoke. Release preflight takes priority over an
-      # already-running smoke run for the same release candidate.
-      group: terrarium-integration
+      group: terrarium-integration-${{ github.workflow }}-${{ github.ref }}-smoke
       cancel-in-progress: ${{ inputs.release_preflight == true }}
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
@@ -92,10 +93,10 @@ jobs:
       CIFS_USERNAME: ${{ secrets.CIFS_USERNAME }}
       CIFS_PASSWORD: ${{ secrets.CIFS_PASSWORD }}
       CIFS_HOST_PATH_BASE: ${{ secrets.CIFS_HOST_PATH_BASE }}
-      TERRARIUM_INTEGRATION_OUTPUT_DIR: ${{ github.workspace }}/tests/integration/output
+      TERRARIUM_INTEGRATION_SLUG: gha-${{ github.run_id }}-${{ github.run_attempt }}-smoke
+      TERRARIUM_INTEGRATION_OUTPUT_DIR: ${{ github.workspace }}/tests/integration/output/smoke
       KEEP_ON_FAILURE: ${{ inputs.keep_on_failure && 'true' || 'false' }}
       RELEASE_PREFLIGHT: ${{ inputs.release_preflight && 'true' || 'false' }}
-      ONLY_SCENARIO: ${{ inputs.only }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -105,12 +106,73 @@ jobs:
           sudo apt-get install -y openssh-client tar
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
-      - name: Run full suite
+      - name: Generate integration SSH key
         run: |
-          if [ -n "${ONLY_SCENARIO}" ]; then
-            bun run tests/integration/index.ts --suite full --release-preflight --only "${ONLY_SCENARIO}"
-          elif [ "${RELEASE_PREFLIGHT}" = "true" ]; then
-            bun run tests/integration/index.ts --suite full --release-preflight
+          ssh-keygen -t ed25519 -N "" -C "terrarium-${TERRARIUM_INTEGRATION_SLUG}" -f "${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+          chmod 600 "${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+          {
+            echo "HCLOUD_SSH_PRIVATE_KEY_FILE=${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+            echo "HCLOUD_SSH_PUBLIC_KEY_FILE=${RUNNER_TEMP}/terrarium-integration-id_ed25519.pub"
+          } >> "${GITHUB_ENV}"
+      - name: Run smoke suite
+        run: |
+          if [ "${RELEASE_PREFLIGHT}" = "true" ]; then
+            bun run tests/integration/index.ts --suite smoke --release-preflight
           else
-            bun run tests/integration/index.ts --suite full
+            bun run tests/integration/index.ts --suite smoke
+          fi
+
+  post_smoke:
+    name: post-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    if: ${{ inputs.only == '' || inputs.only == 'full' }}
+    concurrency:
+      group: terrarium-integration-${{ github.workflow }}-${{ github.ref }}-post-smoke
+      cancel-in-progress: ${{ inputs.release_preflight == true }}
+    env:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      HCLOUD_LOCATION: ${{ secrets.HCLOUD_LOCATION }}
+      HCLOUD_SERVER_TYPE: ${{ secrets.HCLOUD_SERVER_TYPE }}
+      HCLOUD_SSH_PRIVATE_KEY: ${{ secrets.HCLOUD_SSH_PRIVATE_KEY }}
+      HCLOUD_SSH_PUBLIC_KEY: ${{ secrets.HCLOUD_SSH_PUBLIC_KEY }}
+      ZITADEL_CLOUD_ISSUER: ${{ secrets.ZITADEL_CLOUD_ISSUER }}
+      ZITADEL_CLOUD_PAT: ${{ secrets.ZITADEL_CLOUD_PAT }}
+      ZITADEL_CLOUD_ORG_ID: ${{ secrets.ZITADEL_CLOUD_ORG_ID }}
+      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_REGION: ${{ secrets.S3_REGION }}
+      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      CIFS_ADDRESS: ${{ secrets.CIFS_ADDRESS }}
+      CIFS_USERNAME: ${{ secrets.CIFS_USERNAME }}
+      CIFS_PASSWORD: ${{ secrets.CIFS_PASSWORD }}
+      CIFS_HOST_PATH_BASE: ${{ secrets.CIFS_HOST_PATH_BASE }}
+      TERRARIUM_INTEGRATION_SLUG: gha-${{ github.run_id }}-${{ github.run_attempt }}-post-smoke
+      TERRARIUM_INTEGRATION_OUTPUT_DIR: ${{ github.workspace }}/tests/integration/output/post-smoke
+      KEEP_ON_FAILURE: ${{ inputs.keep_on_failure && 'true' || 'false' }}
+      RELEASE_PREFLIGHT: ${{ inputs.release_preflight && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install integration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client tar
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+      - name: Generate integration SSH key
+        run: |
+          ssh-keygen -t ed25519 -N "" -C "terrarium-${TERRARIUM_INTEGRATION_SLUG}" -f "${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+          chmod 600 "${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+          {
+            echo "HCLOUD_SSH_PRIVATE_KEY_FILE=${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+            echo "HCLOUD_SSH_PUBLIC_KEY_FILE=${RUNNER_TEMP}/terrarium-integration-id_ed25519.pub"
+          } >> "${GITHUB_ENV}"
+      - name: Run post-smoke suite
+        run: |
+          if [ "${RELEASE_PREFLIGHT}" = "true" ]; then
+            bun run tests/integration/index.ts --suite full --release-preflight --only full
+          else
+            bun run tests/integration/index.ts --suite full --only full
           fi

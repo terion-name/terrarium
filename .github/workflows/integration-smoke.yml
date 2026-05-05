@@ -21,8 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     concurrency:
-      # Shared with integration-full so Hetzner-backed integration suites do not run at the same time.
-      group: terrarium-integration
+      group: terrarium-integration-${{ github.workflow }}-${{ github.ref }}-smoke
       cancel-in-progress: false
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
@@ -42,7 +41,8 @@ jobs:
       CIFS_USERNAME: ${{ secrets.CIFS_USERNAME }}
       CIFS_PASSWORD: ${{ secrets.CIFS_PASSWORD }}
       CIFS_HOST_PATH_BASE: ${{ secrets.CIFS_HOST_PATH_BASE }}
-      TERRARIUM_INTEGRATION_OUTPUT_DIR: ${{ github.workspace }}/tests/integration/output
+      TERRARIUM_INTEGRATION_SLUG: gha-${{ github.run_id }}-${{ github.run_attempt }}-smoke
+      TERRARIUM_INTEGRATION_OUTPUT_DIR: ${{ github.workspace }}/tests/integration/output/smoke
       KEEP_ON_FAILURE: ${{ inputs.keep_on_failure && 'true' || 'false' }}
       ONLY_SCENARIO: ${{ inputs.only }}
     steps:
@@ -54,6 +54,14 @@ jobs:
           sudo apt-get install -y openssh-client tar
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
+      - name: Generate integration SSH key
+        run: |
+          ssh-keygen -t ed25519 -N "" -C "terrarium-${TERRARIUM_INTEGRATION_SLUG}" -f "${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+          chmod 600 "${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+          {
+            echo "HCLOUD_SSH_PRIVATE_KEY_FILE=${RUNNER_TEMP}/terrarium-integration-id_ed25519"
+            echo "HCLOUD_SSH_PUBLIC_KEY_FILE=${RUNNER_TEMP}/terrarium-integration-id_ed25519.pub"
+          } >> "${GITHUB_ENV}"
       - name: Run smoke suite
         run: |
           if [ -n "${ONLY_SCENARIO}" ]; then
