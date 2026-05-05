@@ -1,3 +1,14 @@
+{% set terrarium_management_tls_hosts = ([terrarium_manage_domain, terrarium_proxy_domain, terrarium_lxd_domain] + ([terrarium_auth_domain] if terrarium_idp_mode == 'local' else [])) | unique | list %}
+{% macro terrarium_management_tls() %}
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "{{ terrarium_manage_domain }}"
+            sans:
+{% for domain in terrarium_management_tls_hosts if domain != terrarium_manage_domain %}
+              - "{{ domain }}"
+{% endfor %}
+{% endmacro %}
 http:
   middlewares:
     admin-forward-auth:
@@ -29,16 +40,14 @@ http:
       rule: Host(`{{ terrarium_manage_domain }}`) && PathPrefix(`/oauth2/`)
       service: oauth2-proxy
       priority: 500
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     proxy-oauth2:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_proxy_domain }}`) && PathPrefix(`/oauth2/`)
       service: oauth2-proxy
       priority: 500
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     cockpit:
       entryPoints:
         - websecure
@@ -46,8 +55,7 @@ http:
       middlewares:
         - admin-forward-auth
       service: cockpit
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     traefik-dashboard-root:
       entryPoints:
         - websecure
@@ -56,8 +64,7 @@ http:
         - admin-forward-auth
         - traefik-dashboard-root-redirect
       service: api@internal
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     traefik-dashboard:
       entryPoints:
         - websecure
@@ -65,15 +72,13 @@ http:
       middlewares:
         - admin-forward-auth
       service: api@internal
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     lxd:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_lxd_domain }}`)
       service: lxd
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
 {% if terrarium_idp_mode == 'local' %}
     zitadel-root:
       entryPoints:
@@ -83,16 +88,14 @@ http:
         - zitadel-root-rewrite
       service: zitadel-login
       priority: 400
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     zitadel-login:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_auth_domain }}`) && PathPrefix(`/ui/v2/login`)
       service: zitadel-login
       priority: 250
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     zitadel-api-alias:
       entryPoints:
         - websecure
@@ -101,16 +104,14 @@ http:
         - zitadel-strip-api
       service: zitadel-api
       priority: 200
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
     zitadel-canonical:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_auth_domain }}`) && !PathPrefix(`/ui/v2/login`) && !PathPrefix(`/api`) && !Path(`/`)
       service: zitadel-api
       priority: 100
-      tls:
-        certResolver: letsencrypt
+{{ terrarium_management_tls() }}
 {% endif %}
   services:
     oauth2-proxy:

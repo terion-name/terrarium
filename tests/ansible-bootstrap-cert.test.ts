@@ -34,6 +34,11 @@ describe("Traefik bootstrap certificate template", () => {
     expect(certConfig).toContain("certificates:");
     expect(certConfig).not.toContain("defaultCertificate");
     expect(dynamicConfig).not.toContain("zitadel-root-bootstrap");
+    expect(dynamicConfig).toContain("terrarium_management_tls_hosts");
+    expect(dynamicConfig).toContain("[terrarium_manage_domain, terrarium_proxy_domain, terrarium_lxd_domain]");
+    expect(dynamicConfig).toContain("[terrarium_auth_domain] if terrarium_idp_mode == 'local' else []");
+    expect(dynamicConfig).toContain('main: "{{ terrarium_manage_domain }}"');
+    expect(dynamicConfig).toContain('- "{{ domain }}"');
     expect(bootstrapRoutes).toContain("zitadel-root-bootstrap");
     expect(tasks).toContain("Remove Traefik bootstrap certificate config when bootstrap TLS is not required");
     expect(tasks).toContain("Remove temporary Traefik bootstrap routes when bootstrap TLS is not required");
