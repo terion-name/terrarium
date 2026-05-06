@@ -11,6 +11,10 @@ type HttpAssertionOptions = {
 
 type JsonValidator = (value: unknown) => void;
 
+export const HTTP_FETCH_TIMEOUT_MS = 20000;
+export const CURL_PROCESS_TIMEOUT_MS = 30000;
+const HTTP_POLL_INTERVAL_MS = 5000;
+
 function curlResolveArgs(url: string, resolveIp?: string): string[] {
   if (!resolveIp) {
     return [];
@@ -29,13 +33,35 @@ export function parseCurlHttpBodyResult(stdout: string, body: string): { status:
   return { status, body };
 }
 
+async function withFetchTimeout<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HTTP_FETCH_TIMEOUT_MS);
+  try {
+    return await task(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  return await withFetchTimeout((signal) => fetch(url, { ...init, signal }));
+}
+
+async function fetchTextWithTimeout(url: string, init: RequestInit): Promise<{ response: Response; body: string }> {
+  return await withFetchTimeout(async (signal) => {
+    const response = await fetch(url, { ...init, signal });
+    const body = await response.text();
+    return { response, body };
+  });
+}
+
 /** Polls an HTTP endpoint until it returns one of the expected status codes. */
 export async function waitForHttpStatus(url: string, expectedStatuses: number[], timeoutMs = 180000): Promise<Response> {
   const deadline = Date.now() + timeoutMs;
   let lastResponse: Response | null = null;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url, { redirect: "manual" });
+      const response = await fetchWithTimeout(url, { redirect: "manual" });
       lastResponse = response;
       if (expectedStatuses.includes(response.status)) {
         return response;
@@ -43,7 +69,7 @@ export async function waitForHttpStatus(url: string, expectedStatuses: number[],
     } catch {
       // Ignore transient DNS/TLS startup errors while services converge.
     }
-    await Bun.sleep(5000);
+    await Bun.sleep(HTTP_POLL_INTERVAL_MS);
   }
   throw new Error(`timed out waiting for ${url} to return one of [${expectedStatuses.join(", ")}], last status: ${lastResponse?.status ?? "none"}`);
 }
@@ -70,7 +96,7 @@ async function readHttpsBody(url: string, options: HttpAssertionOptions = {}): P
       ...(options.insecure ? ["-k"] : []),
       ...curlResolveArgs(url, options.resolveIp),
       url
-    ]);
+    ], { timeoutMs: CURL_PROCESS_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(result.stderr.trim() || result.stdout.trim() || `failed to fetch ${url}`);
     }
@@ -123,7 +149,7 @@ export async function waitForHttpStatusResolved(
       ...(insecure ? ["-k"] : []),
       ...curlResolveArgs(url, resolveIp),
       url
-    ]);
+    ], { timeoutMs: CURL_PROCESS_TIMEOUT_MS });
     const status = (result.stdout || "").trim();
     lastStatus = status || lastStatus;
     lastError = result.stderr.trim() || result.stdout.trim() || lastError;
@@ -135,7 +161,7 @@ export async function waitForHttpStatusResolved(
       }
     }
 
-    await Bun.sleep(5000);
+    await Bun.sleep(HTTP_POLL_INTERVAL_MS);
   }
 
   throw new Error(
@@ -168,8 +194,7 @@ export async function expectHttpBodyContains(
           return;
         }
       } else {
-        const response = await fetch(url, { redirect: "follow" });
-        const body = await response.text();
+        const { response, body } = await fetchTextWithTimeout(url, { redirect: "follow" });
         lastStatus = String(response.status);
         lastBody = body;
         if (body.includes(needle)) {
@@ -180,7 +205,7 @@ export async function expectHttpBodyContains(
       lastBody = String(error);
     }
 
-    await Bun.sleep(5000);
+    await Bun.sleep(HTTP_POLL_INTERVAL_MS);
   }
 
   const bodySnippet = lastBody.replace(/\s+/g, " ").trim().slice(0, 400);
@@ -217,7 +242,7 @@ export async function expectHttpsJson(
       lastError = error instanceof Error ? error.message : String(error);
     }
 
-    await Bun.sleep(5000);
+    await Bun.sleep(HTTP_POLL_INTERVAL_MS);
   }
 
   const bodySnippet = lastBody.replace(/\s+/g, " ").trim().slice(0, 400);

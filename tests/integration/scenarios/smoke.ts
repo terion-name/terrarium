@@ -71,7 +71,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
 
     const localAdmin = await readLocalZitadelAdmin(primarySsh);
     await verifyManagementSurfaces(context, primary, localAdmin);
-    await verifyLxdApi(primary);
+    await verifyLxdApi(primary, context);
 
     const plainRoute = `https://plain-${context.config.slug}.${rootDomain}:8080`;
     const authRoute = `https://auth-${context.config.slug}.${rootDomain}:8080@auth`;

@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
-import { parseCurlHttpBodyResult } from "./http";
+import { CURL_PROCESS_TIMEOUT_MS, HTTP_FETCH_TIMEOUT_MS, parseCurlHttpBodyResult } from "./http";
 
 describe("HTTP assertion helpers", () => {
   test("uses curl's final status output instead of header-looking body content", () => {
@@ -21,5 +22,15 @@ describe("HTTP assertion helpers", () => {
   test("rejects missing or non-status curl output", () => {
     expect(() => parseCurlHttpBodyResult("", "body")).toThrow("valid final HTTP status");
     expect(() => parseCurlHttpBodyResult("HTTP/2 302", "body")).toThrow("valid final HTTP status");
+  });
+
+  test("bounds every network attempt below the outer poll deadline", () => {
+    const source = readFileSync(new URL("./http.ts", import.meta.url), "utf8");
+
+    expect(HTTP_FETCH_TIMEOUT_MS).toBeLessThan(30000);
+    expect(CURL_PROCESS_TIMEOUT_MS).toBeGreaterThan(HTTP_FETCH_TIMEOUT_MS);
+    expect(source.match(/timeoutMs: CURL_PROCESS_TIMEOUT_MS/g)?.length).toBe(2);
+    expect(source.match(/await fetchWithTimeout\(url/g)?.length).toBe(1);
+    expect(source.match(/await fetchTextWithTimeout\(url/g)?.length).toBe(1);
   });
 });

@@ -55,8 +55,10 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
   return await new Promise<CommandResult>((resolve) => {
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    const useProcessGroup = options.timeoutMs !== undefined && process.platform !== "win32";
     const proc = spawn(cmd[0] ?? "", cmd.slice(1), {
       cwd: options.cwd,
+      detached: useProcessGroup,
       env: options.env ? { ...process.env, ...options.env } : process.env,
       stdio: [options.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"]
     });
@@ -80,6 +82,18 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
       resolve(result);
     };
 
+    const killProcess = (signal: NodeJS.Signals): void => {
+      if (useProcessGroup && proc.pid) {
+        try {
+          process.kill(-proc.pid, signal);
+          return;
+        } catch {
+          // Fall back to killing the direct child if process-group signaling is unavailable.
+        }
+      }
+      proc.kill(signal);
+    };
+
     proc.stdout?.on("data", (chunk: Buffer | string) => {
       stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
@@ -96,7 +110,7 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
     proc.on("close", (code, signal) => {
       const stderrText = Buffer.concat(stderr).toString("utf8");
       finish({
-        exitCode: code ?? (signal ? 128 + signalNumber(signal) : 1),
+        exitCode: timedOut ? 124 : code ?? (signal ? 128 + signalNumber(signal) : 1),
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: timedOut ? `${stderrText}${stderrText ? "\n" : ""}command timed out after ${options.timeoutMs}ms` : stderrText
       });
@@ -104,14 +118,16 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
 
     if (options.timeoutMs !== undefined) {
       timeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
         timedOut = true;
-        proc.kill("SIGTERM");
-        killTimer = setTimeout(() => proc.kill("SIGKILL"), 2000);
-        finish({
-          exitCode: 124,
-          stdout: Buffer.concat(stdout).toString("utf8"),
-          stderr: `${Buffer.concat(stderr).toString("utf8")}${stderr.length > 0 ? "\n" : ""}command timed out after ${options.timeoutMs}ms`
-        });
+        killProcess("SIGTERM");
+        killTimer = setTimeout(() => {
+          if (!settled) {
+            killProcess("SIGKILL");
+          }
+        }, 2000);
       }, options.timeoutMs);
     }
 

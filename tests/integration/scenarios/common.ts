@@ -324,7 +324,8 @@ export async function verifyManagementSurfaces(
 }
 
 /** Verifies the public LXD endpoint serves the real API over trusted TLS and does not expose trusted anonymous access. */
-export async function verifyLxdApi(host: ManagedHost): Promise<void> {
+export async function verifyLxdApi(host: ManagedHost, context?: IntegrationContext): Promise<void> {
+  context?.logger.info(`verify ${host.label} LXD API`);
   await expectHttpsJson(
     `https://${host.domains.lxd}/1.0`,
     (body) => {
@@ -351,6 +352,7 @@ export async function verifyLxdApi(host: ManagedHost): Promise<void> {
     },
     { timeoutMs: 300000, resolveIp: host.server.ipv4 }
   );
+  context?.logger.info(`verified ${host.label} LXD API`);
 }
 
 /** Verifies a real browser login through LXD's public OIDC flow. */
@@ -480,8 +482,10 @@ ${remoteCtl("set idp oidc")} \\
   --lxd-oidc-client ${shellArg(fixture.lxdClientId)} \\
   --admin-group ${shellArg(fixture.adminGroup)}`
   );
-  await verifyManagementSurfaces(context, host, fixture.adminUser);
-  await verifyLxdApi(host);
+  await withStepTimeout(`external OIDC management surfaces for ${host.label}`, 15 * 60 * 1000, () =>
+    verifyManagementSurfaces(context, host, fixture.adminUser)
+  );
+  await withStepTimeout(`external OIDC LXD API for ${host.label}`, 6 * 60 * 1000, () => verifyLxdApi(host, context));
 }
 
 /** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
@@ -489,8 +493,8 @@ export async function switchBackToLocalIdp(context: IntegrationContext, host: Ma
   const ssh = context.ssh(host);
   await runDetachedRemoteCommand(ssh, "switch-local-idp", remoteCtl("set idp local"));
   const admin = await readLocalZitadelAdmin(ssh);
-  await verifyManagementSurfaces(context, host, admin);
-  await verifyLxdApi(host);
+  await withStepTimeout(`local ZITADEL management surfaces for ${host.label}`, 15 * 60 * 1000, () => verifyManagementSurfaces(context, host, admin));
+  await withStepTimeout(`local ZITADEL LXD API for ${host.label}`, 6 * 60 * 1000, () => verifyLxdApi(host, context));
 }
 
 /** Runs a small route-auth matrix against the currently configured OIDC provider. */
