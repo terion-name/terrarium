@@ -16,6 +16,8 @@ const PREFIX = "terrariumctl backup reconstruct";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
 const S3_RESTORE_ATTEMPTS = 3;
 const S3_RESTORE_RETRY_MS = 5000;
+const ZFS_DESTROY_ATTEMPTS = 5;
+const ZFS_DESTROY_RETRY_MS = 2000;
 
 type Manifest = {
   snapshot: string;
@@ -84,6 +86,11 @@ export function isRetriableS3RestoreError(message: string): boolean {
   ].some((needle) => lowered.includes(needle));
 }
 
+export function isRetriableZfsDestroyError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return ["dataset is busy", "device or resource busy", "target is busy", "filesystem is busy"].some((needle) => lowered.includes(needle));
+}
+
 function formatPipelineFailure(result: Awaited<ReturnType<typeof runAllowFailure>>): string {
   const parts = [`exit code ${result.exitCode}`];
   const stdout = result.stdout.trim();
@@ -98,9 +105,45 @@ function formatPipelineFailure(result: Awaited<ReturnType<typeof runAllowFailure
 }
 
 async function destroyDatasetIfExists(targetDataset: string): Promise<void> {
-  const datasetCheck = await runAllowFailure(["zfs", "list", "-H", targetDataset]);
-  if (datasetCheck.exitCode === 0) {
-    await runText(["zfs", "destroy", "-r", targetDataset], PREFIX);
+  let lastError = "";
+  for (let attempt = 1; attempt <= ZFS_DESTROY_ATTEMPTS; attempt += 1) {
+    const datasetCheck = await runAllowFailure(["zfs", "list", "-H", targetDataset]);
+    if (datasetCheck.exitCode !== 0) {
+      return;
+    }
+
+    await unmountDatasetsUnder(targetDataset);
+    const destroy = await runAllowFailure(["zfs", "destroy", "-r", "-f", targetDataset]);
+    if (destroy.exitCode === 0) {
+      return;
+    }
+
+    lastError = formatPipelineFailure(destroy);
+    if (attempt >= ZFS_DESTROY_ATTEMPTS || !isRetriableZfsDestroyError(lastError)) {
+      throw new Error(lastError);
+    }
+    console.warn(`${PREFIX}: target dataset was busy on destroy attempt ${attempt}; retrying: ${lastError}`);
+    await Bun.sleep(ZFS_DESTROY_RETRY_MS);
+  }
+
+  throw new Error(lastError || `failed to destroy ${targetDataset}`);
+}
+
+async function unmountDatasetsUnder(targetDataset: string): Promise<void> {
+  const result = await runAllowFailure(["zfs", "list", "-H", "-r", "-o", "name,mounted", targetDataset]);
+  if (result.exitCode !== 0) {
+    return;
+  }
+
+  const mountedDatasets = result.stdout
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .filter((columns) => columns.length >= 2 && columns[1] === "yes")
+    .map((columns) => columns[0] as string)
+    .sort((left, right) => right.length - left.length);
+
+  for (const dataset of mountedDatasets) {
+    await runAllowFailure(["zfs", "unmount", "-f", dataset]);
   }
 }
 

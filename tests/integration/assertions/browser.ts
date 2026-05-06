@@ -28,6 +28,7 @@ const BROWSER_OIDC_START_TIMEOUT_MS = 30000;
 const BROWSER_OIDC_HANDOFF_TIMEOUT_MS = 5000;
 const BROWSER_OIDC_RECLICK_INTERVAL_MS = 2000;
 const BROWSER_METADATA_TIMEOUT_MS = 5000;
+const BROWSER_SCREENSHOT_TIMEOUT_MS = 15000;
 const BODY_SNIPPET_LENGTH = 4000;
 const DENIAL_TEXT_MARKERS = ["403", "forbidden", "access denied", "not authorized", "permission denied"] as const;
 const ERROR_TEXT_MARKERS = [
@@ -872,7 +873,9 @@ async function loginThroughZitadelWithBrowser(
           await waitForUserFacingBody(page, options.postLoginBodyMarkers, options.postLoginLabel || "target");
         }
         stage = "capturing success screenshot";
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        await maybeWithTimeout(page.screenshot({ path: screenshotPath, fullPage: false }).then(() => undefined), BROWSER_SCREENSHOT_TIMEOUT_MS).catch(
+          () => undefined
+        );
         stage = "reading success page metadata";
         const finalUrl = page.url();
         const title = (await maybeWithTimeout(page.title().catch(() => ""), BROWSER_METADATA_TIMEOUT_MS)) ?? "";

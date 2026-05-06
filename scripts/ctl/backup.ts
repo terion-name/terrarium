@@ -62,6 +62,19 @@ async function confirmDestructive(message: string): Promise<void> {
   }
 }
 
+async function stopInstanceForRestore(instance: string): Promise<void> {
+  await runAllowFailure(["lxc", "stop", instance, "--force"]);
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    const info = await runAllowFailure(["lxc", "info", instance]);
+    if (info.exitCode !== 0 || /Status:\s+STOPPED\b/.test(info.stdout)) {
+      return;
+    }
+    await Bun.sleep(1000);
+  }
+  throw new Error(`timed out waiting for ${instance} to stop before restore`);
+}
+
 /**
  * Prints the explicit operator handoff for restore-as-new flows.
  *
@@ -424,7 +437,7 @@ async function restoreLocal(
 
   if (mode === "in-place") {
     await confirmDestructive(`Rollback ${instance} in place to ${snapshot}?`);
-    await runAllowFailure(["lxc", "stop", instance, "--force"]);
+    await stopInstanceForRestore(instance);
     await runText(["zfs", "rollback", "-r", snapshot], PREFIX);
     console.log(success(`Rolled back ${instance} to ${snapshot}`));
     console.log(`${label("Next:")} ${value(`lxc start ${instance}`)}`);
@@ -455,7 +468,7 @@ async function restoreS3(
   const target = mode === "in-place" ? `${pool}/containers/${instance}` : `${pool}/containers/${newName}`;
   if (mode === "in-place") {
     await confirmDestructive(`Reconstruct ${instance} in place into ${target}?`);
-    await runAllowFailure(["lxc", "stop", instance, "--force"]);
+    await stopInstanceForRestore(instance);
   } else if (!newName) {
     throw new Error("--as-new requires a target name");
   }
