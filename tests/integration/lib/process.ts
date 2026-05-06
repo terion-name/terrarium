@@ -67,6 +67,16 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
     let timedOut = false;
     let timeout: Timer | undefined;
     let killTimer: Timer | undefined;
+    let forceFinishTimer: Timer | undefined;
+
+    const timeoutResult = (): CommandResult => {
+      const stderrText = Buffer.concat(stderr).toString("utf8");
+      return {
+        exitCode: 124,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: `${stderrText}${stderrText ? "\n" : ""}command timed out after ${options.timeoutMs}ms`
+      };
+    };
 
     const finish = (result: CommandResult): void => {
       if (settled) {
@@ -78,6 +88,9 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
       }
       if (killTimer) {
         clearTimeout(killTimer);
+      }
+      if (forceFinishTimer) {
+        clearTimeout(forceFinishTimer);
       }
       resolve(result);
     };
@@ -108,11 +121,10 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
       });
     });
     proc.on("close", (code, signal) => {
-      const stderrText = Buffer.concat(stderr).toString("utf8");
       finish({
         exitCode: timedOut ? 124 : code ?? (signal ? 128 + signalNumber(signal) : 1),
         stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: timedOut ? `${stderrText}${stderrText ? "\n" : ""}command timed out after ${options.timeoutMs}ms` : stderrText
+        stderr: timedOut ? timeoutResult().stderr : Buffer.concat(stderr).toString("utf8")
       });
     });
 
@@ -126,6 +138,16 @@ async function runOnceAllowFailure(cmd: string[], options: CommandOptions = {}):
         killTimer = setTimeout(() => {
           if (!settled) {
             killProcess("SIGKILL");
+            forceFinishTimer = setTimeout(() => {
+              if (settled) {
+                return;
+              }
+              proc.stdout?.destroy();
+              proc.stderr?.destroy();
+              proc.stdin?.destroy();
+              proc.unref();
+              finish(timeoutResult());
+            }, 1000);
           }
         }, 2000);
       }, options.timeoutMs);

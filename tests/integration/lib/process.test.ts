@@ -23,4 +23,13 @@ describe("integration process helpers", () => {
     expect(result.stderr).toContain("command timed out after 100ms");
     expect(Date.now() - startedAt).toBeLessThan(5000);
   });
+
+  test("terminates timed-out process groups with inherited pipes", async () => {
+    const startedAt = Date.now();
+    const result = await runAllowFailure(["bash", "-lc", "sleep 10 & exit 0"], { timeoutMs: 100 });
+
+    expect(result.exitCode).toBe(124);
+    expect(result.stderr).toContain("command timed out after 100ms");
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+  });
 });

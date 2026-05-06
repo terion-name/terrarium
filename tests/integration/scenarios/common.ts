@@ -40,6 +40,9 @@ type InstallOptions = {
   zitadelAdminEmail?: string;
 };
 
+const LXD_API_POLL_TIMEOUT_MS = 90 * 1000;
+const LXD_API_VERIFY_TIMEOUT_MS = 2 * 60 * 1000;
+
 function baseEmail(ctx: IntegrationContext): string {
   return `terrarium+${ctx.config.slug}@${ctx.config.ipDnsDomain}`;
 }
@@ -325,34 +328,36 @@ export async function verifyManagementSurfaces(
 
 /** Verifies the public LXD endpoint serves the real API over trusted TLS and does not expose trusted anonymous access. */
 export async function verifyLxdApi(host: ManagedHost, context?: IntegrationContext): Promise<void> {
-  context?.logger.info(`verify ${host.label} LXD API`);
-  await expectHttpsJson(
-    `https://${host.domains.lxd}/1.0`,
-    (body) => {
-      if (!isObject(body)) {
-        throw new Error("LXD API root did not return an object");
-      }
+  await withStepTimeout(`LXD API verification for ${host.label}`, LXD_API_VERIFY_TIMEOUT_MS, async () => {
+    context?.logger.info(`verify ${host.label} LXD API`);
+    await expectHttpsJson(
+      `https://${host.domains.lxd}/1.0`,
+      (body) => {
+        if (!isObject(body)) {
+          throw new Error("LXD API root did not return an object");
+        }
 
-      const metadata = body.metadata;
-      if (!isObject(metadata)) {
-        throw new Error("LXD API root did not include metadata");
-      }
+        const metadata = body.metadata;
+        if (!isObject(metadata)) {
+          throw new Error("LXD API root did not include metadata");
+        }
 
-      if (!Array.isArray(metadata.api_extensions)) {
-        throw new Error("LXD API root did not include api_extensions");
-      }
+        if (!Array.isArray(metadata.api_extensions)) {
+          throw new Error("LXD API root did not include api_extensions");
+        }
 
-      const auth = typeof metadata.auth === "string" ? metadata.auth.toLowerCase() : "";
-      if (!auth) {
-        throw new Error("LXD API root did not include auth state");
-      }
-      if (auth === "trusted") {
-        throw new Error("LXD API root allowed trusted anonymous access");
-      }
-    },
-    { timeoutMs: 300000, resolveIp: host.server.ipv4 }
-  );
-  context?.logger.info(`verified ${host.label} LXD API`);
+        const auth = typeof metadata.auth === "string" ? metadata.auth.toLowerCase() : "";
+        if (!auth) {
+          throw new Error("LXD API root did not include auth state");
+        }
+        if (auth === "trusted") {
+          throw new Error("LXD API root allowed trusted anonymous access");
+        }
+      },
+      { timeoutMs: LXD_API_POLL_TIMEOUT_MS, resolveIp: host.server.ipv4 }
+    );
+    context?.logger.info(`verified ${host.label} LXD API`);
+  });
 }
 
 /** Verifies a real browser login through LXD's public OIDC flow. */
