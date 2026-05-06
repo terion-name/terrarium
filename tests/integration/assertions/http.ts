@@ -9,6 +9,17 @@ type HttpAssertionOptions = {
   insecure?: boolean;
 };
 
+type HttpsReadOptions = HttpAssertionOptions & {
+  followRedirects?: boolean;
+  headers?: string[];
+};
+
+export type HttpsResponse = {
+  status: number;
+  body: string;
+  headers: string;
+};
+
 type JsonValidator = (value: unknown) => void;
 
 export const HTTP_FETCH_TIMEOUT_MS = 20000;
@@ -74,17 +85,21 @@ export async function waitForHttpStatus(url: string, expectedStatuses: number[],
   throw new Error(`timed out waiting for ${url} to return one of [${expectedStatuses.join(", ")}], last status: ${lastResponse?.status ?? "none"}`);
 }
 
-async function readHttpsBody(url: string, options: HttpAssertionOptions = {}): Promise<{ status: number; body: string }> {
+export async function readHttpsResponse(url: string, options: HttpsReadOptions = {}): Promise<HttpsResponse> {
   const tempDir = await mkdtemp(join(tmpdir(), "terrarium-http-"));
   const bodyPath = join(tempDir, "body");
+  const headersPath = join(tempDir, "headers");
   try {
     const result = await runAllowFailure([
       "curl",
       "-4",
       "-sS",
-      "-L",
       "--noproxy",
       "*",
+      ...(options.followRedirects ? ["-L"] : []),
+      ...((options.headers ?? []).flatMap((header) => ["-H", header])),
+      "-D",
+      headersPath,
       "-o",
       bodyPath,
       "-w",
@@ -102,10 +117,16 @@ async function readHttpsBody(url: string, options: HttpAssertionOptions = {}): P
     }
 
     const body = await readFile(bodyPath, "utf8");
-    return parseCurlHttpBodyResult(result.stdout, body);
+    const headers = await readFile(headersPath, "utf8").catch(() => "");
+    return { ...parseCurlHttpBodyResult(result.stdout, body), headers };
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function readHttpsBody(url: string, options: HttpsReadOptions = {}): Promise<{ status: number; body: string }> {
+  const { status, body } = await readHttpsResponse(url, options);
+  return { status, body };
 }
 
 /** Polls an HTTPS endpoint with certificate verification disabled until it returns an expected status. */
@@ -187,7 +208,7 @@ export async function expectHttpBodyContains(
   while (Date.now() < deadline) {
     try {
       if (url.startsWith("https://")) {
-        const { status, body } = await readHttpsBody(url, { resolveIp, insecure });
+        const { status, body } = await readHttpsBody(url, { resolveIp, insecure, followRedirects: true });
         lastStatus = String(status || 0);
         lastBody = body;
         if (body.includes(needle)) {

@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
-import { expectHttpBodyContains, expectHttpsJson, waitForHttpStatusResolved } from "../assertions/http";
+import { expectHttpBodyContains, readHttpsResponse, waitForHttpStatusResolved, type HttpsResponse } from "../assertions/http";
 import { expectLxdUi, expectManagementSurfaces, expectManagementUi, expectProtectedRoute } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
@@ -330,34 +330,93 @@ export async function verifyManagementSurfaces(
 export async function verifyLxdApi(host: ManagedHost, context?: IntegrationContext): Promise<void> {
   await withStepTimeout(`LXD API verification for ${host.label}`, LXD_API_VERIFY_TIMEOUT_MS, async () => {
     context?.logger.info(`verify ${host.label} LXD API`);
-    await expectHttpsJson(
-      `https://${host.domains.lxd}/1.0`,
-      (body) => {
-        if (!isObject(body)) {
-          throw new Error("LXD API root did not return an object");
-        }
-
-        const metadata = body.metadata;
-        if (!isObject(metadata)) {
-          throw new Error("LXD API root did not include metadata");
-        }
-
-        if (!Array.isArray(metadata.api_extensions)) {
-          throw new Error("LXD API root did not include api_extensions");
-        }
-
-        const auth = typeof metadata.auth === "string" ? metadata.auth.toLowerCase() : "";
-        if (!auth) {
-          throw new Error("LXD API root did not include auth state");
-        }
-        if (auth === "trusted") {
-          throw new Error("LXD API root allowed trusted anonymous access");
-        }
-      },
-      { timeoutMs: LXD_API_POLL_TIMEOUT_MS, resolveIp: host.server.ipv4 }
-    );
+    const response = await waitForLxdApiRootResponse(host);
+    assertSafeLxdApiRootResponse(response, host.domains.lxd, host.domains.auth);
     context?.logger.info(`verified ${host.label} LXD API`);
   });
+}
+
+async function waitForLxdApiRootResponse(host: ManagedHost): Promise<HttpsResponse> {
+  const deadline = Date.now() + LXD_API_POLL_TIMEOUT_MS;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    try {
+      return await readHttpsResponse(`https://${host.domains.lxd}/1.0`, {
+        resolveIp: host.server.ipv4,
+        headers: ["Accept: application/json"]
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      await Bun.sleep(5000);
+    }
+  }
+
+  throw new Error(`timed out waiting for LXD API root; last error=${lastError || "none"}`);
+}
+
+export function assertSafeLxdApiRootResponse(response: HttpsResponse, lxdHost: string, authHost?: string): void {
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    const location = response.headers.match(/^location:\s*(.+)$/im)?.[1]?.trim() ?? "";
+    if (isExpectedLxdAuthRedirect(location, lxdHost, authHost)) {
+      return;
+    }
+    throw new Error(`LXD API root redirected to unexpected location: ${location || "<missing>"}`);
+  }
+
+  if ([401, 403].includes(response.status)) {
+    return;
+  }
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`LXD API root returned unexpected HTTP status ${response.status}`);
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(response.body) as unknown;
+  } catch {
+    throw new Error(`LXD API root did not return JSON; body=${response.body.replace(/\s+/g, " ").trim().slice(0, 400) || "<empty>"}`);
+  }
+
+  if (!isObject(body)) {
+    throw new Error("LXD API root did not return an object");
+  }
+
+  const metadata = body.metadata;
+  if (!isObject(metadata)) {
+    throw new Error("LXD API root did not include metadata");
+  }
+
+  if (!Array.isArray(metadata.api_extensions)) {
+    throw new Error("LXD API root did not include api_extensions");
+  }
+
+  const auth = typeof metadata.auth === "string" ? metadata.auth.toLowerCase() : "";
+  if (!auth) {
+    throw new Error("LXD API root did not include auth state");
+  }
+  if (auth === "trusted") {
+    throw new Error("LXD API root allowed trusted anonymous access");
+  }
+}
+
+function isExpectedLxdAuthRedirect(location: string, lxdHost: string, authHost?: string): boolean {
+  if (!location) {
+    return false;
+  }
+
+  let target: URL;
+  try {
+    target = new URL(location, `https://${lxdHost}`);
+  } catch {
+    return false;
+  }
+
+  if (target.host === lxdHost) {
+    return target.pathname.startsWith("/oidc/") || target.pathname.startsWith("/ui/");
+  }
+
+  return Boolean(authHost && target.host === authHost);
 }
 
 /** Verifies a real browser login through LXD's public OIDC flow. */

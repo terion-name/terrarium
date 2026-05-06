@@ -32,5 +32,6 @@ describe("HTTP assertion helpers", () => {
     expect(source.match(/timeoutMs: CURL_PROCESS_TIMEOUT_MS/g)?.length).toBe(2);
     expect(source.match(/await fetchWithTimeout\(url/g)?.length).toBe(1);
     expect(source.match(/await fetchTextWithTimeout\(url/g)?.length).toBe(1);
+    expect(source).toContain("...(options.followRedirects ? [\"-L\"] : [])");
   });
 });
