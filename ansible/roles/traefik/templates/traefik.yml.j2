@@ -18,8 +18,7 @@ certificatesResolvers:
     acme:
       email: {{ terrarium_acme_email }}
       storage: /var/lib/traefik/acme.json
-      httpChallenge:
-        entryPoint: web
+      tlsChallenge: {}
 
 log:
   level: INFO

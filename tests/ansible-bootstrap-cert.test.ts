@@ -25,12 +25,15 @@ describe("Traefik bootstrap certificate template", () => {
   test("limits bootstrap TLS to local-IDP auth and removes it when unused", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/traefik/tasks/main.yml"), "utf8");
     const playbook = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
+    const traefikConfig = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/traefik.yml.j2"), "utf8");
     const certConfig = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/bootstrap-cert.yml.j2"), "utf8");
     const dynamicConfig = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/terrarium-dynamic.yml.j2"), "utf8");
     const bootstrapRoutes = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/bootstrap-routes.yml.j2"), "utf8");
 
     expect(tasks).toContain("[terrarium_auth_domain] if terrarium_bootstrap_tls_enabled else []");
     expect(tasks).not.toContain("'*.' ~ terrarium_bootstrap_tls_root_domain");
+    expect(traefikConfig).toContain("tlsChallenge: {}");
+    expect(traefikConfig).not.toContain("httpChallenge:");
     expect(certConfig).toContain("certificates:");
     expect(certConfig).not.toContain("defaultCertificate");
     expect(dynamicConfig).not.toContain("zitadel-root-bootstrap");
@@ -51,6 +54,9 @@ describe("Traefik bootstrap certificate template", () => {
     expect(playbook).toContain("Wait for local auth domain to serve public TLS");
     expect(playbook).toContain("Restart Traefik to retry local auth ACME after public TLS wait failure");
     expect(playbook).toContain("Wait again for local auth domain to serve public TLS after ACME retry");
+    expect(playbook).toContain("Show local auth TLS diagnostics after ACME retry failure");
+    expect(playbook).toContain("Fail when local auth domain still does not serve public TLS");
+    expect(playbook).toContain("journalctl -u traefik");
     expect(playbook).toContain("terrarium_bootstrap_tls_removed is changed");
     expect(playbook.indexOf("Remove local auth bootstrap TLS material before requesting public TLS")).toBeLessThan(
       playbook.indexOf("Wait for local auth domain to serve public TLS")

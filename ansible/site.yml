@@ -349,11 +349,40 @@
       delay: 10
       until: terrarium_auth_public_tls_retry.rc == 0
       changed_when: false
+      failed_when: false
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
         - terrarium_auth_public_tls is defined
         - terrarium_auth_public_tls.rc | default(0) != 0
+
+    - name: Show local auth TLS diagnostics after ACME retry failure
+      ansible.builtin.shell: |
+        set +e
+        echo "== presented certificate =="
+        timeout 10s openssl s_client -connect 127.0.0.1:443 -servername "{{ terrarium_auth_domain }}" -showcerts </dev/null 2>/dev/null \
+          | openssl x509 -noout -subject -issuer -ext subjectAltName 2>&1 || true
+        echo
+        echo "== Traefik static TLS resolver config =="
+        sed -n '/certificatesResolvers:/,$p' "{{ terrarium_traefik_config_dir }}/traefik.yml" 2>&1 || true
+        echo
+        echo "== recent Traefik ACME logs =="
+        journalctl -u traefik --no-pager -n 300 2>&1 | grep -Ei 'acme|certificate|challenge|letsencrypt|unable|error|self-signed' || true
+      changed_when: false
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_auth_domain | default('') | length > 0
+        - terrarium_auth_public_tls_retry is defined
+        - terrarium_auth_public_tls_retry.rc | default(0) != 0
+
+    - name: Fail when local auth domain still does not serve public TLS
+      ansible.builtin.fail:
+        msg: "Local auth domain {{ terrarium_auth_domain }} still does not serve public TLS after retiring bootstrap TLS; see Traefik ACME diagnostics above."
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_auth_domain | default('') | length > 0
+        - terrarium_auth_public_tls_retry is defined
+        - terrarium_auth_public_tls_retry.rc | default(0) != 0
 
     - name: Enable Traefik sync timer after dependent services are configured
       ansible.builtin.systemd:

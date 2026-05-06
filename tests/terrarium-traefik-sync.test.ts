@@ -76,6 +76,13 @@ describe("terrarium route auth generation", () => {
     expect(source).toContain("readLocalZitadelPat(config)");
   });
 
+  test("uses TLS-ALPN ACME challenges in generated Traefik static config", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+
+    expect(source).toContain("tlsChallenge: {}");
+    expect(source).not.toContain("httpChallenge:");
+  });
+
   test("treats ZITADEL no-op updates as successful idempotent responses", () => {
     expect(
       isZitadelNoChangesResponse(
