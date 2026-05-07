@@ -59,6 +59,12 @@ describe("Traefik bootstrap certificate template", () => {
     expect(playbook).toContain("Wait again for local auth domain to serve trusted TLS after retry");
     expect(playbook).toContain("Verify local auth domain serves trusted TLS after waits");
     expect(playbook).toContain("Show local auth TLS diagnostics after trusted TLS failure");
+    expect(playbook).toContain('TERRARIUM_AUTH_DOMAIN: "{{ terrarium_auth_domain }}"');
+    expect(playbook).toContain('TERRARIUM_TRAEFIK_CONFIG_DIR: "{{ terrarium_traefik_config_dir }}"');
+    expect(playbook).toContain('-servername "$TERRARIUM_AUTH_DOMAIN"');
+    expect(playbook).toContain('"$TERRARIUM_TRAEFIK_CONFIG_DIR/traefik.yml"');
+    expect(playbook).not.toContain('-servername "{{ terrarium_auth_domain }}"');
+    expect(playbook).not.toContain('"{{ terrarium_traefik_config_dir }}/traefik.yml"');
     expect(playbook).toContain("Fail when local auth domain still does not serve trusted TLS");
     expect(playbook).toContain("terrarium_auth_trusted_tls_final.rc");
     expect(playbook).toContain("journalctl -u traefik");

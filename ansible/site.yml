@@ -374,14 +374,17 @@
       ansible.builtin.shell: |
         set +e
         echo "== presented certificate =="
-        timeout 10s openssl s_client -connect 127.0.0.1:443 -servername "{{ terrarium_auth_domain }}" -showcerts </dev/null 2>/dev/null \
+        timeout 10s openssl s_client -connect 127.0.0.1:443 -servername "$TERRARIUM_AUTH_DOMAIN" -showcerts </dev/null 2>/dev/null \
           | openssl x509 -noout -subject -issuer -ext subjectAltName 2>&1 || true
         echo
         echo "== Traefik static TLS resolver config =="
-        sed -n '/certificatesResolvers:/,$p' "{{ terrarium_traefik_config_dir }}/traefik.yml" 2>&1 || true
+        sed -n '/certificatesResolvers:/,$p' "$TERRARIUM_TRAEFIK_CONFIG_DIR/traefik.yml" 2>&1 || true
         echo
         echo "== recent Traefik ACME logs =="
         journalctl -u traefik --no-pager -n 300 2>&1 | grep -Ei 'acme|certificate|challenge|letsencrypt|unable|error|self-signed' || true
+      environment:
+        TERRARIUM_AUTH_DOMAIN: "{{ terrarium_auth_domain }}"
+        TERRARIUM_TRAEFIK_CONFIG_DIR: "{{ terrarium_traefik_config_dir }}"
       changed_when: false
       when:
         - terrarium_idp_mode == 'local'
