@@ -81,4 +81,14 @@ describe("terrarium install CLI parsing", () => {
     expect(generated.length).toBeGreaterThanOrEqual(40);
     expect(generated).toMatch(/^trm-[A-Za-z0-9_-]+$/);
   });
+
+  test("retries transient Ansible Galaxy collection download failures", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
+
+    expect(source).toContain("const ANSIBLE_GALAXY_ATTEMPTS = 4");
+    expect(source).toContain("async function installAnsibleCollections()");
+    expect(source).toContain("ansible-galaxy collection install -r requirements.yml");
+    expect(source).toContain("failed on attempt ${attempt}/${ANSIBLE_GALAXY_ATTEMPTS}; retrying");
+    expect(source).toContain("failed after ${ANSIBLE_GALAXY_ATTEMPTS} attempts");
+  });
 });

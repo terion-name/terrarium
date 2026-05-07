@@ -1328,7 +1328,9 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
         acme: {
           email: configString(config, "terrarium_acme_email") || configString(config, "terrarium_email"),
           storage: "/var/lib/traefik/acme.json",
-          tlsChallenge: {}
+          httpChallenge: {
+            entryPoint: "web"
+          }
         }
       }
     },

@@ -16,6 +16,7 @@ const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-na
 const REPO_DIR = process.env.TERRARIUM_REPO_DIR ?? "/opt/terrarium";
 const BUNDLE_DIR = process.env.TERRARIUM_BUNDLE_DIR ?? "";
 const GENERATED_ROOT_PASSWORD_PATH = "/etc/terrarium/secrets/cockpit_root_password";
+const ANSIBLE_GALAXY_ATTEMPTS = 4;
 // CAC's string transform runs after numeric coercion; readCliOption recovers exact argv values instead.
 const STRING_OPTION = {};
 
@@ -282,6 +283,24 @@ function syncLocalSourceRepo(sourcePath: string, repoDir: string): void {
   });
 }
 
+async function installAnsibleCollections(): Promise<void> {
+  let lastOutput = "";
+  for (let attempt = 1; attempt <= ANSIBLE_GALAXY_ATTEMPTS; attempt += 1) {
+    const result = await $`cd ${REPO_DIR}; ansible-galaxy collection install -r requirements.yml`.nothrow();
+    if (result.exitCode === 0) {
+      return;
+    }
+
+    lastOutput = `${result.stdout.toString()}\n${result.stderr.toString()}`.trim();
+    if (attempt < ANSIBLE_GALAXY_ATTEMPTS) {
+      warn(`ansible-galaxy collection install failed on attempt ${attempt}/${ANSIBLE_GALAXY_ATTEMPTS}; retrying`);
+      await Bun.sleep(attempt * 5000);
+    }
+  }
+
+  fail(`ansible-galaxy collection install failed after ${ANSIBLE_GALAXY_ATTEMPTS} attempts${lastOutput ? `\n${lastOutput}` : ""}`);
+}
+
 async function prepareRepo(ref: string): Promise<void> {
   const sourcePath = localSourcePath(REPO_URL);
   if (sourcePath && existsSync(join(sourcePath, "ansible", "site.yml"))) {
@@ -305,7 +324,7 @@ async function prepareRepo(ref: string): Promise<void> {
     fail("compiled Terrarium binaries are missing from the repository checkout");
   }
 
-  await $`cd ${REPO_DIR}; ansible-galaxy collection install -r requirements.yml`;
+  await installAnsibleCollections();
 }
 
 function dashedIp(ip: string): string {

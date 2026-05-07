@@ -17,6 +17,15 @@ describe("release workflow", () => {
     expect(release.on.push.tags).toEqual(["*"]);
   });
 
+  test("validate workflow retries transient Ansible Galaxy collection failures", () => {
+    const source = readFileSync(join(repoRoot, ".github/workflows/validate.yml"), "utf8");
+
+    expect(source).toContain("for attempt in 1 2 3 4; do");
+    expect(source).toContain("ansible-galaxy collection install -r requirements.yml");
+    expect(source).toContain('if [ "$attempt" -eq 4 ]; then');
+    expect(source).toContain("sleep $((attempt * 5))");
+  });
+
   test("validates release tags before preflight and publishing", () => {
     const source = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
     const workflow = YAML.parse(source);

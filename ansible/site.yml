@@ -291,10 +291,6 @@
       changed_when: terrarium_bootstrap_tls_retired is changed
       when: terrarium_bootstrap_tls_retired is changed
 
-    - name: Restart LXD after retiring bootstrap TLS trust
-      ansible.builtin.command: systemctl try-restart snap.lxd.daemon.service
-      when: terrarium_bootstrap_tls_retired is changed
-
     - name: Restart Traefik after retiring bootstrap TLS
       ansible.builtin.systemd:
         name: traefik

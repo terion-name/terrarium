@@ -32,8 +32,9 @@ describe("Traefik bootstrap certificate template", () => {
 
     expect(tasks).toContain("[terrarium_auth_domain] if terrarium_bootstrap_tls_enabled else []");
     expect(tasks).not.toContain("'*.' ~ terrarium_bootstrap_tls_root_domain");
-    expect(traefikConfig).toContain("tlsChallenge: {}");
-    expect(traefikConfig).not.toContain("httpChallenge:");
+    expect(traefikConfig).toContain("httpChallenge:");
+    expect(traefikConfig).toContain("entryPoint: web");
+    expect(traefikConfig).not.toContain("tlsChallenge:");
     expect(certConfig).toContain("certificates:");
     expect(certConfig).not.toContain("defaultCertificate");
     expect(dynamicConfig).not.toContain("zitadel-root-bootstrap");
@@ -48,19 +49,23 @@ describe("Traefik bootstrap certificate template", () => {
     expect(bootstrapRoutes).toContain("zitadel-root-bootstrap");
     expect(tasks).toContain("Remove Traefik bootstrap certificate config when bootstrap TLS is not required");
     expect(tasks).toContain("Remove temporary Traefik bootstrap routes when bootstrap TLS is not required");
-    expect(tasks).toContain("systemctl try-restart snap.lxd.daemon.service");
     expect(playbook).toContain("Retire local auth bootstrap TLS before verifying public TLS");
     expect(playbook).toContain("dynamic/bootstrap-routes.yml");
     expect(playbook).toContain('"{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"');
     expect(playbook).toContain('"{{ terrarium_traefik_config_dir }}/bootstrap-certs"');
     expect(playbook).toContain("/usr/local/share/ca-certificates/terrarium-bootstrap.crt");
     expect(playbook).toContain("Refresh system CA certificates after retiring bootstrap TLS");
-    expect(playbook).toContain("Restart LXD after retiring bootstrap TLS trust");
+    expect(playbook).not.toContain("Restart LXD after retiring bootstrap TLS trust");
+    expect(playbook).not.toContain("systemctl try-restart snap.lxd.daemon.service");
+    expect(playbook).not.toContain("lxc config device remove");
+    expect(playbook).not.toContain("lxc config device add");
+    expect(playbook).not.toContain("Wait for ZITADEL login loopback proxy after LXD restart");
     expect(playbook).toContain("Restart Traefik after retiring bootstrap TLS");
     expect(playbook).toContain("Wait for local auth domain to serve public TLS");
     expect(playbook).toContain("Restart Traefik to retry local auth ACME after public TLS wait failure");
     expect(playbook).toContain("Wait again for local auth domain to serve public TLS after ACME retry");
     expect(playbook).toContain("Verify local auth domain serves public TLS after waits");
+    expect(playbook).toContain("- -fsS");
     expect(playbook).toContain("Show local auth TLS diagnostics after public TLS failure");
     expect(playbook).toContain('TERRARIUM_AUTH_DOMAIN: "{{ terrarium_auth_domain }}"');
     expect(playbook).toContain('TERRARIUM_TRAEFIK_CONFIG_DIR: "{{ terrarium_traefik_config_dir }}"');
