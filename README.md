@@ -6,462 +6,63 @@
     </picture>
 </p>
 
-Terrarium turns a plain Ubuntu 24.04 VPS into something much more useful: a secure home for isolated environments, with a built-in time machine. It is designed for the way people actually work with agents and development tools today, where giving software real freedom is powerful, but giving it unlimited freedom on your host is a bad idea.
+Managing secure, isolated infrastructure usually requires a lot of specialized knowledge. Terrarium changes that. It transforms a standard Ubuntu 24.04 VPS into a friendly, secure home for your applications, development environments, and AI agents—complete with a built-in time machine for undoing mistakes. 
 
-If you want to run agent systems like OpenClaw, Hermes, or other tools that need full shell access, custom packages, background services, and room to experiment, Terrarium gives them their own LXD containers on ZFS. That means they can operate inside real environments instead of cramped Docker setups, while the host stays hardened and recoverable. When an agent makes a mess, installs the wrong thing, or mutates a system beyond recognition, you can step backward through small ZFS snapshots instead of rebuilding everything from scratch. And if the whole VPS disappears, S3 exports give you an off-host disaster-recovery path.
+Whether you're running complex Docker Compose stacks, giving AI agents room to experiment, or hosting your own web-based IDEs, Terrarium brings simplicity to operations that used to be complicated. It isolates your workloads in LXD containers, keeping your host system pristine and secure. If an experiment goes wrong or a service breaks, you don't have to rebuild everything from scratch. You can simply roll back in time using automated ZFS snapshots. 
 
-Terrarium is just as useful for human workflows. You can spin up development environments, temporary sandboxes, internal tools, or web-based apps like browser-accessible editors and agent UIs, then expose them through Traefik with automatic proxying and TLS. Each environment stays isolated, configurable, and easy to back up, so you get the flexibility of a full VPS without turning the whole server into a shared blast radius.
+With Terrarium, you get the freedom of a full VPS without the fear of turning your server into a shared blast radius. It makes advanced infrastructure management accessible, safe, and surprisingly forgiving.
 
-The goal is simple: make a single VPS feel safe enough for experimentation, capable enough for real work, and forgiving enough that you can move fast without being one bad command away from starting over.
+## 📚 Documentation
 
-## Documentation
-
-- Published docs site: [terion-name.github.io/terrarium](https://terion-name.github.io/terrarium/)
-- [Docs home](docs/README.md)
+- **Live Site:** [terion-name.github.io/terrarium](https://terion-name.github.io/terrarium/)
+- [Docs Home](docs/README.md)
 - [Getting Started](docs/getting-started/README.md)
-- [Operations](docs/operations/README.md)
-- [Reference](docs/reference/README.md)
+- [Provider Guides](docs/providers/README.md)
+- [Operations & Backups](docs/operations/README.md)
+- [terrariumctl Reference](docs/reference/terrariumctl.md)
 
+## 🚀 Quick Install
 
-## Install:
-
-```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
-```
-
-The shell bootstrap is intentionally thin. The release-published `install.sh` is pinned to the release it came from, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, clones the Terrarium repo into `/opt/terrarium`, and stages that binary into the checkout. Default and tag-like release installs fail closed if the release cannot be resolved or downloaded. Source builds are only used when you explicitly target a branch-like `--ref` such as `main`.
-
-If you want to pin a specific release instead of `latest`, use the tagged release asset directly:
-
-```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/download/0.0.0-beta3/install.sh | bash
-```
-
-Terrarium provisions the host with:
-
-- [Cockpit](https://github.com/cockpit-project/cockpit) with [cockpit-zfs](https://github.com/45Drives/cockpit-zfs) and [cockpit-S3ObjectBroswer](https://github.com/45Drives/cockpit-S3ObjectBroswer)
-- [LXD](https://github.com/canonical/lxd) with the built-in web UI
-- [OpenZFS](https://github.com/openzfs/zfs)
-- [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
-- [Traefik](https://github.com/traefik/traefik) with the built-in dashboard for public management endpoints
-- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) for management OIDC gatekeeping, preferring Docker Hardened Images directly when registry credentials are present and Terrarium's GHCR mirror otherwise
-- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel) at `auth.<domain>`, running as a Terrarium-managed LXD system instance
-- External OIDC issuer support when you do not want to self-host the IDP
-- [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening) OS and SSH hardening
-
-## Supported Host
-
-- Ubuntu Server 24.04 LTS
-- Single-host install by default
-- Experimental multi-node LXD clustering through `terrariumctl cluster ...`
-- LXC containers only
-
-## Install Modes
-
-Interactive:
+To get started on a fresh Ubuntu 24.04 server, simply run:
 
 ```bash
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-Non-interactive:
+Terrarium automatically provisions your host with everything you need for a modern, secure setup:
+- **LXD & OpenZFS:** For isolated container environments and instant snapshots.
+- **Traefik:** For effortless public routing with automatic SSL certificates.
+- **Cockpit:** A sleek web UI to manage your server, storage, and networking.
+- **Single Sign-On (SSO):** Built-in authentication (via ZITADEL or your own OIDC provider) to keep your private apps secure.
+- **System Hardening:** Out-of-the-box OS and SSH security configurations.
 
-```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
-  --non-interactive \
-  --email admin@your-domain.tld \
-  --acme-email certs@your-domain.tld \
-  --idp local \
-  --generate-root-pwd \
-  --storage-mode file \
-  --yes
-```
+## 💡 Why Use Terrarium?
 
-## Storage Strategy
+### Security & Isolation Made Simple
+Your containers are never exposed directly to the internet. They live in a private network, meaning that random scans and probes won't reach them. You decide exactly what to publish to the web—and you can lock it all down with automatic Single Sign-On.
 
-Recommended:
+### Built-in Time Machine
+Mistakes happen. Terrarium automatically takes snapshots of your environments. If an AI agent deletes the wrong folder or an update breaks your app, you can rewind to a working state in seconds. For disaster recovery, Terrarium can even export these snapshots securely to S3.
 
-- Attach a dedicated block volume and use `--storage-mode disk`.
+### Visual Management
+You don't have to memorize a hundred command-line flags. Terrarium provides beautiful web interfaces: Cockpit for the host system, the LXD UI for your containers, and the Traefik dashboard for your network traffic.
 
-Fallback:
+## 🖥️ Recommended Hardware
 
-- If the VPS only has the default root disk, Terrarium can create a file-backed ZFS pool with `--storage-mode file`.
+Terrarium is designed to be lightweight, but giving your environments a bit of breathing room is always a good idea. 
 
-Partition mode:
+- **Minimum:** `2 vCPU`, `4 GB RAM`, and a separate `80 GB` disk for containers.
+- **Recommended:** `4 vCPU`, `8-16 GB RAM`, and a separate `150+ GB` disk.
 
-- `--storage-mode partition` is intended for an existing unused partition or allocatable free space on a non-root disk.
-- In interactive mode, Terrarium discovers allocatable partition targets, suggests the largest one, and asks for confirmation.
-- In non-interactive mode, `--storage-source` is required for `disk` and `partition` mode. Use `--storage-source auto` to let Terrarium pick the largest valid target automatically.
-- Terrarium does not try to shrink the mounted root filesystem.
+*Tip: For the best experience and performance, attach a dedicated block storage volume to your VPS during creation. Terrarium will automatically format and use it for your containers and snapshots.*
 
-## Recommended Hardware
+## 📖 Popular Guides
 
-Terrarium runs on small VPSes, but the comfortable starting point depends more on container churn and snapshot retention than on the Terrarium services themselves.
+Want to see what you can build? Check out our guides:
+- [Host an Isolated VSCodium Web IDE](docs/guides/vscode.md)
+- [Run AI Agents like OpenClaw](docs/guides/openclaw.md)
+- [Deploy Multi-Service Docker Compose Stacks](docs/guides/compose.md)
+- [Protect Published Services with OIDC](docs/guides/auth-protection.md)
 
-- Minimum practical host: `2 vCPU`, `4 GB RAM`, `30-40 GB` boot disk, and a separate `80-120 GB` ZFS disk for light personal use.
-- Recommended general-purpose host: `4 vCPU`, `8-16 GB RAM`, `40-60 GB` boot disk, and a separate `150-300 GB` ZFS disk.
-- Heavier agent or multi-environment host: `8 vCPU`, `16+ GB RAM`, `50-80 GB` boot disk, and `300+ GB` on the ZFS disk.
-
-Storage sizing guidance:
-
-- Keep the boot disk relatively small. It mainly holds Ubuntu, logs, packages, Terrarium state, and the control plane.
-- Put LXD containers and snapshots on the separate ZFS disk whenever your provider supports block storage.
-- Terrarium keeps its local time-machine history as ZFS snapshots on the same pool as the containers. Those snapshots are copy-on-write, so they do not duplicate all data up front, but they do retain changed blocks for as long as the snapshots live.
-- Current default local retention is `4` 15-minute snapshots, `24` hourly snapshots, `14` daily snapshots, and `3` monthly snapshots.
-- Terrarium enables ZFS `compression=zstd` on the pool. Dedup is not enabled.
-- S3 exports are separate from local sizing. They are streamed out of ZFS and compressed with `zstd` before upload, so they do not need extra permanent local disk beyond Terrarium’s working state.
-- For the local time-machine history, size the ZFS disk around `2x-3x` your expected live container data if the containers mostly append data or change a moderate amount day to day.
-- If your workloads rewrite large files, rebuild package trees often, or keep databases/churn-heavy workspaces inside the containers, `3x-4x` live data is safer.
-- On providers without attachable block storage, Terrarium still works with `--storage-mode file`, but you should choose a noticeably larger root disk because the host OS, live container data, and snapshots all share the same filesystem.
-
-Example sizing:
-
-- If you expect about `50 GB` of live container data, a good starting point is `20-30 GB` for the boot disk plus `100-150 GB` for the ZFS disk.
-- If that `50 GB` includes heavy churn, frequent rebuilds, package installs, caches, or mutable databases, prefer `150-250 GB` on the ZFS disk.
-- If you must use `--storage-mode file`, combine both budgets on the root disk. In that same `50 GB` example, you would typically want `120-180 GB` total root storage, and more if the containers are churn-heavy.
-
-## Provider Guides
-
-- [Provider guide index](docs/providers/README.md)
-- [DigitalOcean](docs/providers/digitalocean.md)
-- [Vultr](docs/providers/vultr.md)
-- [Hetzner Cloud](docs/providers/hetzner.md)
-- [Hostinger](docs/providers/hostinger.md)
-
-## Guides
-
-- [Guide index](docs/guides/README.md)
-- [OpenClaw](docs/guides/openclaw.md)
-- [Hermes](docs/guides/hermes.md)
-- [VSCodium Web IDE](docs/guides/vscode.md)
-- [Isolated Docker Compose deployments](docs/guides/compose.md)
-- [Protecting published services with OIDC](docs/guides/auth-protection.md)
-
-## Public Endpoints
-
-By default, Terrarium exposes:
-
-- `https://manage.<dashed-public-ip>.traefik.me` for Cockpit
-- `https://proxy.<dashed-public-ip>.traefik.me` for the Traefik dashboard
-- `https://lxd.<dashed-public-ip>.traefik.me` for the LXD API and UI
-- `https://auth.<dashed-public-ip>.traefik.me` for self-hosted ZITADEL when `--idp=local` is enabled
-
-You can override the domains with:
-
-- `--domain`
-- `--manage-domain`
-- `--proxy-domain`
-- `--lxd-domain`
-- `--auth-domain`
-
-Email settings:
-
-- `--email` sets the Terrarium contact/admin email and is used as the default ZITADEL bootstrap admin email.
-- `--acme-email` sets the ACME account identity used by Traefik and LXD certificate automation.
-- If `--acme-email` is omitted, Terrarium falls back to `--email`.
-
-Cockpit login:
-
-- Terrarium hardens SSH to key-based auth; it does not rely on SSH password login.
-- `manage.<domain>` is gated by host-level `oauth2-proxy` through Traefik `ForwardAuth`.
-- Only users in `terrarium_admin_group` pass the OIDC gate for Cockpit and LXD management access.
-- Cockpit still authenticates through the host's local PAM accounts after the OIDC gate, so `root` needs a usable local password.
-- If root has no local password, interactive install prompts for one. In non-interactive mode, pass `--generate-root-pwd` or `--root-pwd-file`.
-- `--generate-root-pwd` writes the generated password to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions.
-- Terrarium uses that password during provisioning and does not persist the plaintext in `/etc/terrarium/config.yaml`.
-
-## Reconfiguration
-
-The installer keeps the checked out repository at `/opt/terrarium`. During first bootstrap it writes the resolved config to `/etc/terrarium/config.yaml`; after LXD is initialized, Terrarium syncs that document into the LXD dqlite-backed project `terrarium-system`.
-
-Changing settings through `terrariumctl set ...` updates the dqlite-backed config store, refreshes `/etc/terrarium/config.yaml` as the local Ansible/export file, and re-runs the local Ansible reconciliation.
-
-What gets updated on change:
-
-- Traefik config changes trigger a Traefik restart.
-- `oauth2-proxy` is rendered and restarted when IDP, admin-group, or management-domain settings change.
-- LXD domain, ACME, OIDC issuer/client settings, and IdP group mappings are applied directly through `lxc config set` and `lxc auth`; they do not require a full LXD restart.
-- Self-hosted ZITADEL runs in the managed `terrarium-idp` LXD instance and is enabled, disabled, restarted, and reconciled when its rendered config changes.
-- Terrarium then re-runs `terrariumctl proxy sync`, and when IDP mode is `local`, also re-runs `terrariumctl idp sync`.
-
-## Clustering
-
-Terrarium clustering uses LXD's native cluster membership and dqlite state. The
-Terrarium config is stored in LXD project metadata, so joined nodes can export
-the same config and reconfigure locally.
-
-Typical first member:
-
-```bash
-terrariumctl cluster init \
-  --member node1 \
-  --address 10.0.0.11:8443 \
-  --central-addresses 10.0.0.11,10.0.0.12,10.0.0.13 \
-  --peer-cidr 10.0.0.0/24
-```
-
-Typical additional member:
-
-```bash
-terrariumctl cluster token node2
-terrariumctl cluster join --token '<token>' --address 10.0.0.12:8443 --peer-cidr 10.0.0.0/24 --yes
-```
-
-Terrarium creates an OVN workload network named `terrarium-ovn` and points the
-default LXD profiles at it. Use at least three cluster members for a real
-quorum-tolerant setup; clustering does not make local ZFS storage magically
-shared.
-
-`lxdbr0` stays as the managed parent/uplink network. Host-side Traefik reaches
-published OVN workloads through Terrarium-managed LXD `proxy` devices bound to
-loopback, so it does not depend on direct host routing to private OVN instance
-addresses.
-
-## terrariumctl Reference
-
-Top-level commands:
-
-| Command | Arguments | Defaults | Meaning |
-| --- | --- | --- | --- |
-| `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host, including preflight verification for external OIDC and S3 when enabled. |
-| `terrariumctl status` | none | n/a | Shows Terrarium service status, management endpoints, IDP mode, admin group, and the oauth2-proxy state. |
-| `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
-| `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
-| `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
-| `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the saved config. |
-| `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
-| `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
-| `terrariumctl cluster status` | none | n/a | Shows LXD cluster state and the Terrarium OVN network. |
-| `terrariumctl cluster init` | required: `--member`, `--address`; optional: `--central-addresses`, `--peer-cidr` | network `terrarium-ovn`, parent `lxdbr0` | Enables LXD clustering on the first member and reconciles Terrarium OVN networking. |
-| `terrariumctl cluster token` | required: member name | n/a | Mints a single-use LXD cluster join token. |
-| `terrariumctl cluster join` | required: `--token`, `--address`; optional: `--peer-cidr`, `--yes` | storage pool `terrarium` | Joins the local node to an existing LXD cluster, exports shared Terrarium config, and reconfigures. |
-| `terrariumctl cluster ovn configure` | optional: `--central-addresses`, `--peer-cidr` | network `terrarium-ovn`, parent `lxdbr0` | Updates Terrarium OVN central member and peer firewall settings. |
-| `terrariumctl proxy sync` | none | n/a | Rebuilds Traefik dynamic config and Terrarium-managed UFW rules from LXC `user.proxy` labels. |
-| `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--seal` | password prompt, `uid=100000`, `gid=100000`, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
-| `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
-| `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
-| `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
-| `terrariumctl idp status` | none | n/a | Shows the managed `terrarium-idp` instance and its ZITADEL compose services. |
-| `terrariumctl idp logs` | optional: `--lines` | `120` | Prints recent ZITADEL compose logs from inside the managed IDP instance. |
-| `terrariumctl idp backup` | none | local snapshot; exports to S3 when enabled | Creates a manual recursive snapshot of the managed IDP instance. |
-| `terrariumctl idp restore` | optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores the managed IDP instance through the normal Terrarium backup/restore flow. |
-| `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, re-verifies external OIDC when needed, and re-runs reconciliation. |
-| `terrariumctl set emails` | optional flags | existing values when omitted | Updates Terrarium contact, ACME, and ZITADEL admin emails. |
-| `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, verifies external OIDC settings when applicable, and reconfigures oauth2-proxy plus LXD management auth together. |
-| `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings, verifies the target with a real test operation, and can enable or disable S3 exports. |
-| `terrariumctl set syncoid` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates syncoid replication settings and can enable or disable syncoid. |
-
-`terrariumctl install` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| `--non-interactive` | none | no | interactive mode if omitted | Disables prompts and requires all needed config through flags. |
-| `--yes` | none | no | prompt before destructive actions | Auto-confirms destructive or confirmation prompts. |
-| `--ref` | git branch or tag | no | `main` | Checks out a specific Terrarium ref in `/opt/terrarium`. |
-| `--email` | email address | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Sets the Terrarium contact/admin email and default ZITADEL bootstrap admin email. |
-| `--acme-email` | email address | no | falls back to `--email` | Sets the ACME account identity for Traefik and LXD certificate automation. |
-| `--domain` | root domain | no | service domains default to `<service>.<dashed-public-ip>.traefik.me` when omitted | Sets the root domain used to derive service subdomains. |
-| `--manage-domain` | domain | no | `manage.<domain>` when `--domain` is set, otherwise `manage.<dashed-public-ip>.traefik.me` | Overrides the Cockpit domain. |
-| `--proxy-domain` | domain | no | `proxy.<domain>` when `--domain` is set, otherwise `proxy.<dashed-public-ip>.traefik.me` | Overrides the Traefik dashboard domain. |
-| `--lxd-domain` | domain | no | `lxd.<domain>` when `--domain` is set, otherwise `lxd.<dashed-public-ip>.traefik.me` | Overrides the LXD domain. |
-| `--idp` | `local` or `oidc` | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Selects whether Terrarium uses self-hosted ZITADEL (`local`) or an external OIDC issuer (`oidc`). |
-| `--admin-group` | group name | yes when `--idp=oidc`; no otherwise | `terrarium-admins` when `--idp=local`, otherwise prompted in interactive mode | Sets the management admin group that is allowed into Cockpit and LXD. |
-| `--oidc` | issuer URL | yes when `--idp=oidc`; no otherwise | derived from `https://<auth-domain>` when `--idp=local` | Sets the OIDC issuer URL. |
-| `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
-| `--oidc-secret` | client secret | yes when `--idp=oidc` and `--oidc-secret-file` is omitted; no otherwise | none | Sets the external OIDC client secret used by Cockpit's oauth2-proxy, LXD, and published-route auth. Prefer `--oidc-secret-file` for automation. |
-| `--oidc-secret-file` | path | yes when `--idp=oidc` and `--oidc-secret` is omitted; no otherwise | none | Reads the external OIDC client secret from a root-readable file. |
-| `--lxd-oidc-client` | client ID | no | falls back to `--oidc-client` | Uses a separate external OIDC client for LXD. |
-| `--lxd-oidc-secret` | client secret | no | falls back to `--oidc-secret` | Sets the separate LXD OIDC client secret. Prefer `--lxd-oidc-secret-file` for automation. |
-| `--lxd-oidc-secret-file` | path | no | none | Reads the separate LXD OIDC client secret from a root-readable file. |
-| `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
-| `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
-| `--generate-root-pwd` | none | yes in non-interactive mode when root has no usable local password unless `--root-pwd-file` is passed; no otherwise | none | Generates a strong Cockpit root password and saves it to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions. |
-| `--root-pwd-file` | path | yes in non-interactive mode when root has no usable local password unless `--generate-root-pwd` is passed; no otherwise | none | Reads the Cockpit root password from a local file. |
-| `--storage-mode` | `disk`, `partition`, or `file` | yes in non-interactive mode; no in interactive mode | prompted or auto-selected in interactive mode | Selects how the LXD ZFS pool is created. |
-| `--storage-source` | path or `auto` | yes for `disk` and `partition` in non-interactive installs; no in interactive mode | prompted when needed in interactive mode | Sets the source disk or partition for `disk` or `partition` mode, or uses `auto` to pick the largest valid target. |
-| `--storage-size` | size string | only for `file` mode when overriding the default | `64G` in interactive prompts and non-interactive fallback | Sets the size of the file-backed ZFS pool for `file` mode. |
-| `--enable-s3` | none | no | disabled | Enables S3-backed archive exports. |
-| `--s3-endpoint` | URL | only when using a custom S3-compatible provider | `https://s3.amazonaws.com` when omitted | Sets a custom S3-compatible API endpoint. |
-| `--s3-bucket` | bucket name | yes if `--enable-s3` is set | none | Sets the destination bucket for S3 exports. |
-| `--s3-region` | region name | no | `us-east-1` when omitted | Sets the S3 region. |
-| `--s3-prefix` | prefix | no | `terrarium` | Sets the object prefix under the bucket. |
-| `--s3-access-key` | access key | yes if `--enable-s3` is set | none | Sets the S3 access key. |
-| `--s3-secret-key` | secret key | yes if `--enable-s3` is set and `--s3-secret-key-file` is omitted | none | Sets the S3 secret key. Prefer `--s3-secret-key-file` for automation. |
-| `--s3-secret-key-file` | path | yes if `--enable-s3` is set and `--s3-secret-key` is omitted | none | Reads the S3 secret key from a root-readable file. |
-| `--enable-syncoid` | none | no | disabled | Enables syncoid replication to a second ZFS host. |
-| `--syncoid-target` | host | yes if `--enable-syncoid` is set | none | Sets the remote SSH target for syncoid replication. |
-| `--syncoid-target-dataset` | dataset | yes if `--enable-syncoid` is set | `backup/terrarium` in interactive prompts | Sets the remote target dataset for syncoid replication. |
-| `--syncoid-ssh-key` | path | yes if `--enable-syncoid` is set | `/root/.ssh/id_ed25519` in interactive prompts | Sets the SSH key used for syncoid replication. |
-
-Install verification notes:
-
-- Interactive password and secret prompts are masked.
-- For automation, use `--generate-root-pwd` or `--root-pwd-file` for Cockpit, and prefer `--oidc-secret-file`, `--lxd-oidc-secret-file`, and `--s3-secret-key-file` over argv secrets.
-- In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials.
-- In interactive mode, S3 is not accepted until Terrarium can reach the bucket and complete a write/delete verification object cycle.
-- In non-interactive mode, the same checks run once and the install exits on failure.
-
-`terrariumctl backup restore` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| `--source` | `local` or `s3` | no | `local` | Chooses whether restore data comes from local ZFS snapshots or from S3 manifests and streams. |
-| `--instance` | instance name | yes | none | Names the source instance to restore from. |
-| `--at` | snapshot fragment or timestamp | no | latest local snapshot or latest S3 manifest chain | Selects the restore point to match. |
-| `--as-new` | new instance name | no | in-place restore | Restores into a new dataset and then hands off into interactive `lxd recover`. |
-
-Restore behavior:
-
-- `terrariumctl backup restore --instance NAME` restores from the latest local snapshot in place by default after confirmation. Terrarium stops the instance if needed, restores the dataset, and then tells you to start the instance again.
-- `terrariumctl backup restore --source local|s3 --instance NAME [--at ...] --as-new NEWNAME` restores the chosen restore point, or the latest one if `--at` is omitted, prints a visible notice explaining what is about to happen, and then launches interactive `lxd recover` for you.
-- For `--as-new`, the expected follow-up is:
-  1. Terrarium starts `lxd recover`
-  2. Select the reported storage pool
-  3. Import the recovered volume as the new instance name
-  4. Verify with `lxc list NEWNAME`
-
-`terrariumctl mount add` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| positional `protocol` | `smb` or `cifs` | yes | none | Chooses the SMB/CIFS mount handler. Both values map to a managed CIFS mount. |
-| positional `hostPath` | absolute host path | yes | none | The mount point to create on the Terrarium host. |
-| positional `address` | share address | yes | none | The SMB share address, usually `//server/share`. |
-| positional `username` | username | yes | none | The SMB/CIFS username written to the managed credentials file. |
-| `-p`, `--password` | password | no | prompt if omitted | The SMB/CIFS password. Omit it to let Terrarium prompt securely instead of putting it in shell history. |
-| `--password-file` | path | no | none | Reads the SMB/CIFS password from a root-readable file for non-interactive runs without putting it in shell history or process args. |
-| `--uid` | uid | no | `100000` | UID presented for files on the mounted share. This maps to root inside Terrarium's default unprivileged LXD containers. |
-| `--gid` | gid | no | `100000` | GID presented for files on the mounted share. This maps to root inside Terrarium's default unprivileged LXD containers. |
-| `--file-mode` | octal mode | no | `0660` | File permissions presented on the mounted share. |
-| `--dir-mode` | octal mode | no | `0770` | Directory permissions presented on the mounted share. |
-| `--seal` | `true` or `false` | no | `true` | Enables or disables the SMB encryption option explicitly. |
-
-Example:
-
-```bash
-terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
-```
-
-`terrariumctl set domains` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| positional `rootDomain` | domain | no | prompted when omitted | Sets the new root domain. |
-| `--manage-domain` | domain | no | `manage.<rootDomain>` | Overrides the Cockpit domain. |
-| `--proxy-domain` | domain | no | `proxy.<rootDomain>` | Overrides the Traefik dashboard domain. |
-| `--lxd-domain` | domain | no | `lxd.<rootDomain>` | Overrides the LXD domain. |
-| `--auth-domain` | domain | no | `auth.<rootDomain>` when self-hosted ZITADEL is enabled | Overrides the ZITADEL domain. |
-
-`terrariumctl set emails` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| `--email` | email address | no | existing configured value | Updates the Terrarium contact/admin email. |
-| `--acme-email` | email address | no | existing configured value or falls back to `--email` | Updates the ACME account email. |
-| `--zitadel-admin-email` | email address | no | existing configured value or falls back to `--email` | Updates the self-hosted ZITADEL bootstrap admin email. |
-
-`terrariumctl set idp` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| positional mode | `local` or `oidc` | yes | none | Switches the Terrarium IDP mode. |
-| `--auth-domain` | domain | no | derived from the current root domain or IP when mode is `local` | Overrides the self-hosted ZITADEL auth domain. |
-| `--admin-group` | group name | required when mode is `oidc`; optional otherwise | existing configured value, or `terrarium-admins` when mode is `local` | Sets the management admin group for Cockpit and LXD authorization. |
-| `--oidc` | issuer URL | required when mode is `oidc` and no issuer is already configured | existing configured issuer, or derived from `auth-domain` when mode is `local` | Sets the OIDC issuer URL. |
-| `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID shared by Cockpit's oauth2-proxy, LXD, and published-route auth. |
-| `--oidc-secret` | client secret | required when mode is `oidc` and no client secret is already configured and `--oidc-secret-file` is omitted | existing configured value | Sets the external OIDC client secret shared by Cockpit's oauth2-proxy, LXD, and published-route auth. Prefer `--oidc-secret-file` for automation. |
-| `--oidc-secret-file` | path | required when mode is `oidc`, no client secret is already configured, and `--oidc-secret` is omitted | none | Reads the external OIDC client secret from a root-readable file. |
-| `--lxd-oidc-client` | client ID | no | falls back to `--oidc-client` | Uses a separate external OIDC client for LXD. |
-| `--lxd-oidc-secret` | client secret | no | falls back to `--oidc-secret` | Sets the separate LXD OIDC client secret. Prefer `--lxd-oidc-secret-file` for automation. |
-| `--lxd-oidc-secret-file` | path | no | none | Reads the separate LXD OIDC client secret from a root-readable file. |
-| `--zitadel-admin-email` | email address | no | existing configured value or `--email` | Updates the ZITADEL bootstrap admin email when mode is `local`. |
-
-External OIDC note:
-
-- Terrarium auto-provisions OIDC clients only for self-hosted ZITADEL.
-- When you use external OIDC, Terrarium persists the issuer URL, client ID, client secret, and admin group, and configures the management oauth2-proxy hosts, LXD, and published-route auth from them.
-- The external client must allow `https://<manage-domain>/oauth2/callback`, `https://<proxy-domain>/oauth2/callback`, and `https://<lxd-domain>/oidc/callback`.
-- If you want to use `@auth` on published routes, the external client must also allow each generated `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
-- The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
-- `terrariumctl set idp oidc --oidc ... --oidc-client ... --oidc-secret-file ... --admin-group ...` verifies the external issuer and credentials before reconfiguring both the Cockpit OIDC gate and LXD management authorization.
-- If your provider needs separate OIDC clients for Cockpit/published routes and LXD, pass `--lxd-oidc-client` plus `--lxd-oidc-secret-file`.
-
-Local ZITADEL note:
-
-- Local ZITADEL runs in the `terrarium-idp` LXD system instance, so its data is part of the LXD/ZFS backup set instead of host Docker state.
-- Terrarium auto-provisions a management role named after `terrarium_admin_group`, defaulting to `terrarium-admins`.
-- The bootstrap admin is granted that role automatically.
-- Terrarium also installs a small ZITADEL Action that flattens Terrarium role assignments into a `groups` claim for oauth2-proxy and LXD.
-
-`terrariumctl set s3` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| `--enable` | none | no | keeps current state | Enables S3 exports. |
-| `--disable` | none | no | keeps current state | Disables S3 exports. |
-| `--s3-endpoint` | URL | no | existing configured value | Updates the S3 endpoint. |
-| `--s3-bucket` | bucket name | required when S3 is enabled | existing configured value | Updates the S3 bucket. |
-| `--s3-region` | region name | no | existing configured value | Updates the S3 region. |
-| `--s3-prefix` | prefix | no | existing configured value or `terrarium` | Updates the S3 object prefix. |
-| `--s3-access-key` | access key | required when S3 is enabled | existing configured value | Updates the S3 access key. |
-| `--s3-secret-key` | secret key | required when S3 is enabled and no existing secret is configured and `--s3-secret-key-file` is omitted | existing configured value | Updates the S3 secret key. Prefer `--s3-secret-key-file` for automation. |
-| `--s3-secret-key-file` | path | required when S3 is enabled, no existing secret is configured, and `--s3-secret-key` is omitted | none | Reads the S3 secret key from a root-readable file. |
-
-S3 verification notes:
-
-- When S3 is enabled or updated, Terrarium verifies the target bucket with a real write/delete probe.
-- This catches wrong endpoint, wrong credentials, wrong bucket, and missing write permissions before backup settings are persisted.
-
-`terrariumctl set syncoid` options:
-
-| Flag | Argument | Required | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| `--enable` | none | no | keeps current state | Enables syncoid replication. |
-| `--disable` | none | no | keeps current state | Disables syncoid replication. |
-| `--syncoid-target` | host | required when syncoid is enabled | existing configured value | Updates the remote syncoid SSH target. |
-| `--syncoid-target-dataset` | dataset | required when syncoid is enabled | existing configured value | Updates the remote syncoid dataset. |
-| `--syncoid-ssh-key` | path | no | existing configured value or `/root/.ssh/id_ed25519` | Updates the SSH key used by syncoid. |
-
-
-`terrariumctl set domains` updates the persisted root domain, derives `manage.`, `lxd.`, and `auth.` subdomains unless you override them, and then re-runs the full Ansible reconciliation so Traefik, LXD, and ZITADEL pick up the new external hostnames.
-
-When self-hosted ZITADEL is enabled, Terrarium generates the initial admin password inside the managed IDP instance. Read it with `lxc exec terrarium-idp -- cat /etc/terrarium/secrets/zitadel_admin_password`.
-
-
-## LXC Proxy Labels
-
-Terrarium can sync LXC `user.proxy` labels into Traefik every minute.
-
-Examples:
-
-```bash
-lxc config set my-app user.proxy "https://app.example.com:3000,http://app-insecure.example.com:3000"
-lxc config set ide user.proxy "https://code.example.com:3000@auth"
-lxc config set hermes user.proxy "https://hermes.example.com:8642@auth:agents,admins"
-lxc config set game user.proxy "tcp://25565:25565,udp://19132:19132"
-```
-
-Rules:
-
-- `https://domain[:container_port][/path]` creates HTTP-to-HTTPS redirect plus a TLS router to a port in LXC container. If path is provided it will add prefix to upstream route.
-- `http://domain[:container_port][/path]` creates an HTTP router only.
-- Append `@auth` to an HTTP(S) route to require OIDC login through Terrarium's shared published-app auth gate.
-- Append `@auth:group,anothergroup` to require OIDC login and membership in at least one listed group.
-- Route-level auth currently supports only HTTP(S) routes on the Terrarium root domain or its subdomains, because the route-auth cookies use the Terrarium root domain. If no root domain is configured, route auth is effectively limited to the `manage` hostname.
-- `tcp://hostport:containerport` exposes a raw TCP port through Traefik.
-- `udp://hostport:containerport` exposes a raw UDP port through Traefik.
-- Dynamic TCP/UDP host ports are also opened and closed in UFW automatically by the sync job.
-- Auth-protected published routes are backed by host-side `oauth2-proxy` instances managed automatically by `terrariumctl proxy sync`.
-- `terrariumctl proxy sync` also reconciles host-loopback LXD `proxy` devices for published container backends and points Traefik at those localhost targets.
-- If a backend proxy device cannot be reconciled, the sync fails without publishing a partially broken Traefik config.
-
-## Development
-
-Validate locally:
-
-```bash
-bun install
-bun run build
-bash -n install.sh
-ansible-playbook -i ansible/inventory.ini ansible/site.yml --syntax-check
-```
+---
+*Ready to dive deeper? Check out the [full documentation](https://terion-name.github.io/terrarium/) to learn about storage strategies, custom domains, automated backups, and more.*

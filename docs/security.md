@@ -1,176 +1,62 @@
 # Security Model
 
-Terrarium is designed to make the safe path feel natural, especially for people who want powerful environments without becoming full-time infrastructure operators.
+Terrarium is designed to make the safe path feel natural. It's built for people who want powerful environments without having to become full-time infrastructure and security engineers.
 
-The short version:
+The short version of how Terrarium keeps you safe:
+- **Containers are private by default.**
+- **Workloads are unprivileged.**
+- **The host machine is heavily hardened.**
+- **Public exposure is always explicitly chosen.**
+- **A built-in time machine catches your mistakes.**
 
-- containers are private by default
-- workload containers are unprivileged LXC by default
-- the host is hardened
-- public exposure is explicit
-- a built-in time machine is part of the default storage model
-
-## Private By Default Networking
+## 🛡️ Private By Default Networking
 
 This is one of Terrarium's most important properties.
 
-LXC containers live on Terrarium's private LXD network by default. On current installs that workload network is OVN-backed, with `lxdbr0` kept as the parent/uplink. Containers do not sit on the public internet with every open service directly reachable from the outside.
+When you create an LXC container, it lives on Terrarium's private internal network. Your containers **do not** sit on the public internet, and their internal services are not reachable from the outside.
 
-Published services still terminate at host-side Traefik. For OVN-backed
-containers, Terrarium reaches the workload through LXD-managed OVN network
-forwards rather than exposing the container's private address directly.
+This means:
+- Random internet scans and bots cannot hit your container services directly.
+- If a database or app is listening on `0.0.0.0` inside a container, it is still completely private.
+- You can run databases, Redis caches, dev servers, and internal APIs inside the container without instantly exposing them to the world.
 
-That means:
+A service only becomes public when you *explicitly* choose to expose it through Terrarium's Traefik proxy.
 
-- random internet scans do not hit container services directly
-- a service listening on `0.0.0.0` inside the container is still not automatically public
-- databases, Redis, metrics ports, dev servers, admin panels, and internal APIs can exist inside the container without instantly becoming internet-facing
+### Why This Matters
+For AI agents and development stacks, this is a game-changer. An autonomous agent can install packages, run background services, and open local ports inside its container without turning your whole VPS into a public attack surface. You can test your apps safely in the dark before turning on the lights.
 
-Something only becomes public when you explicitly expose it through Terrarium.
+## 🔒 Host Hardening
 
-Usually that means one of these:
+Terrarium doesn't just secure the containers; it locks down the host server itself:
+- **SSH is Key-Only:** Password-based SSH logins are completely disabled to stop brute-force attacks.
+- **Firewall (UFW):** Defaults to denying all incoming traffic.
+- **Dashboard Protection:** Your management UIs (Cockpit, LXD, Traefik) are hidden behind a secure Single Sign-On (OIDC) gate.
 
-- publish an HTTP(S) route with `user.proxy`
-- publish a specific raw TCP or UDP port
+You won't find management ports left open to the internet. Everything is routed and controlled through Terrarium's secure proxy layer.
 
-If you do neither, the workload stays private behind the host.
+## 🐳 Docker inside LXC
 
-## Why This Is Useful In Practice
+Terrarium sets up your containers to be "Docker-friendly" by default, but it does it safely. 
 
-This matters a lot for the kinds of workloads Terrarium is built for.
+Terrarium workload containers are **unprivileged LXC containers**. This means the "root" user inside your container is not the real "root" user of the host machine. 
 
-Examples:
+When you install Docker inside one of these containers, that Docker daemon and all of its nested containers sit behind an extra security boundary. This keeps complex app stacks completely isolated from your host, preventing your server from becoming one messy, vulnerable shared Docker environment.
 
-- an agent can install packages, run background services, and open local ports without turning the whole VPS into a public attack surface
-- a Docker Compose stack inside an LXC can expose Postgres, Redis, worker dashboards, and internal APIs for local use inside that environment without making them reachable from the internet
-- a web IDE can listen on `0.0.0.0:8080` inside the container and still stay private until you deliberately publish it
+*(Want strict isolation without Docker support? Terrarium provides a `strict` profile you can apply to containers that don't need nested virtualization.)*
 
-This does not make bad software safe. It does reduce the blast radius of simple mistakes.
+## ⏪ The Time Machine As Security
 
-## Explicit Exposure
+Security isn't just about blocking hackers. It's also about recovering from mistakes.
 
-Terrarium keeps exposure intentional.
+Terrarium's built-in ZFS snapshots act as an automated time machine. If an AI agent runs a bad command, a software update breaks your app, or you accidentally delete the wrong file, you don't have to rebuild everything. You just step the environment backward in time.
 
-- web apps are usually published through Traefik
-- TLS is handled on the host
-- optional OIDC protection can be added at the host layer
-- raw TCP and UDP exposure is also explicit and synced into UFW
+If you enable S3 exports, this protection extends beyond the server itself. Even if the entire VPS is deleted, your data survives in the cloud.
 
-So the default mental model is:
+## ⚠️ What Terrarium Does Not Do
 
-1. run whatever you need inside the container
-2. test it privately
-3. publish only the parts that should be reachable
+Terrarium provides an incredibly secure foundation, but it isn't magic. You still need to:
+- Keep your software updated.
+- Think carefully before publishing apps to the internet.
+- Use Terrarium's built-in OIDC protection for sensitive internal dashboards.
 
-## Host Hardening
-
-Terrarium also hardens the host itself:
-
-- SSH is key-only
-- password SSH is disabled
-- UFW defaults to deny incoming
-- host management tools are protected separately from workloads
-- optional local ZITADEL or external OIDC can gate management access
-
-Cockpit and LXD are not just left open on default ports. They are routed and controlled through the Terrarium management layer.
-
-## Container Profiles
-
-Terrarium makes the Docker-friendly profile the LXD `default` profile, so a
-normal launch uses it automatically:
-
-```bash
-lxc launch images:ubuntu/24.04 devbox
-```
-
-The compatibility alias `terrarium` has the same settings, so older commands
-that pass `--profile terrarium` still work.
-
-Terrarium workload containers are unprivileged LXC containers by default. The
-profiles use isolated ID maps, so root inside the container is not host root.
-When you run Docker inside one of these containers, Docker still needs
-Docker-friendly LXC features, but the nested Docker daemon and its containers
-sit behind the extra LXC user-namespace boundary instead of running directly on
-the host. That is a useful additional layer against badly configured Docker
-deployments.
-
-The baseline `default` and `terrarium` profiles include:
-
-- `security.idmap.isolated=true`
-- `security.nesting=true`
-- `security.syscalls.intercept.mknod=true`
-- `security.syscalls.intercept.setxattr=true`
-
-Why Terrarium does this by default:
-
-- running Docker Compose inside its own LXC is a very common Terrarium use case
-- it keeps complex app stacks away from the host
-- it avoids turning the host into one giant shared Docker machine
-
-Tradeoff:
-
-- this is more permissive than a minimal non-nested container profile
-- it is a convenience and compatibility choice, not the narrowest possible baseline
-- it does not make broad Docker privileges, unsafe host bind mounts, or exposed
-  app admin panels safe
-
-Terrarium also creates a `strict` profile for workloads that should not need
-nested container runtimes:
-
-```bash
-lxc launch images:ubuntu/24.04 locked-down --profile strict
-```
-
-The `strict` profile keeps isolated ID maps, the Terrarium ZFS root disk, and
-the private OVN NIC, but omits the Docker-friendly nesting and syscall
-intercept settings.
-
-When the host exposes `/dev/kvm`, Terrarium additionally creates a layered
-`kvm` profile for workloads that need nested virtualization:
-
-```bash
-lxc launch images:ubuntu/24.04 vm-lab --profile default --profile kvm
-```
-
-The `kvm` profile passes `/dev/kvm` into the container and enables nesting. It
-does not make KVM appear on providers that do not expose hardware
-virtualization to the VPS.
-
-## The Time Machine As A Security Feature
-
-Security is not only about blocking attackers. It is also about recovering from mistakes.
-
-Terrarium keeps a local time machine with ZFS snapshots, so if a workload breaks itself, gets misconfigured, or an agent makes a bad change, you can often step the environment backward instead of rebuilding it.
-
-If you enable S3 exports, that story extends beyond the host itself. Local snapshots are for fast recovery on the same VPS; S3 exports are for disaster recovery when the machine or disk is gone.
-
-That is especially useful for:
-
-- agent experiments
-- temporary sandboxes
-- dependency-heavy development environments
-- self-hosted apps with risky upgrade steps
-
-## What Terrarium Does Not Do For You
-
-Terrarium improves the default posture, but it does not replace judgment.
-
-You still need to:
-
-- keep software updated
-- decide which apps should be public
-- decide which routes need OIDC protection
-- avoid exposing raw ports unnecessarily
-- use reasonable app-level auth where appropriate
-
-Terrarium gives you safer defaults and better recovery. It does not turn every workload into a secure workload automatically.
-
-## Recommended Habit
-
-Treat containers as private first and public second.
-
-If a service does not need to be reachable from outside, do not publish it. If it does need to be reachable, prefer:
-
-1. HTTP(S) through Traefik
-2. OIDC protection when the app does not have strong built-in auth
-3. raw TCP/UDP exposure only when you actually need it
+**The Golden Rule:** Treat containers as private first. If a service doesn't *need* to be on the internet, don't publish it. 

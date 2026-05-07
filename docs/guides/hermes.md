@@ -1,66 +1,55 @@
 # Hermes on Terrarium
 
-Hermes is a very natural Terrarium workload: it wants a real Linux environment, shell access, mutable state, and enough room to install tools over time. Terrarium gives Hermes that freedom inside its own LXC, while the host stays hardened and gives you a built-in time machine if the environment drifts or breaks.
+Hermes is an AI agent that works in the background. Like OpenClaw, it wants a full Linux environment with shell access, the ability to run multiple processes, and a place to install packages over time.
 
-This is a strong fit when you want an agent to have real power, but you do not want that power landing directly on the VPS host.
+Terrarium is the perfect host for Hermes because it gives the agent a powerful sandbox to experiment in, without risking your primary server. It also makes exposing the Hermes Web API incredibly simple using the built-in Traefik proxy.
 
-## Why this works well
+---
 
-- Security: Hermes runs inside its own container instead of directly on the host.
-- Isolation: its packages, caches, logs, and sessions stay in one place.
-- Time machine: if the environment drifts or the agent breaks its own dependencies, you can step the container back to a recent snapshot.
-- Networking: Hermes exposes an HTTP API cleanly, so it fits Terrarium's built-in Traefik automation very well.
+## 1. Create the Container
 
-## Create the container
+You can do this visually in the LXD UI or from the CLI.
 
-You can do this either in the LXD UI or from the CLI.
-
-In the LXD UI:
-
-1. Open `https://lxd.<your-domain>` and log in.
-2. Create a new instance from the `images:ubuntu/24.04` image.
-3. Use the default profile so the container gets Terrarium's storage and isolation settings.
-4. Name it `hermes`.
-5. Start the container.
-
-From the CLI:
-
+**From the CLI:**
 ```bash
 lxc launch images:ubuntu/24.04 hermes
 ```
 
-## Recommended setup: enter the container and do the human part there
+*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new `ubuntu/24.04` instance named `hermes`.)*
 
-For Hermes, this is the path I would actually recommend to a person. The installer and setup flow are interactive, and using them from inside the container is much more humane than trying to tunnel every step through repeated host-side one-liners.
+## 2. Install Hermes
 
-Open a shell in the container:
+Hermes has a great interactive setup script, so the easiest way to install it is to jump inside the container and let it guide you.
 
+Enter the container:
 ```bash
 lxc exec hermes -- bash
 ```
 
-Then run the setup inside that shell:
-
+Update the system and install the required tools:
 ```bash
 apt-get update
 apt-get install -y git curl
+```
+
+Download and run the official installer:
+```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
 source ~/.bashrc
+```
+
+Finally, start the interactive setup to configure your API keys (like OpenRouter) and preferences:
+```bash
 hermes setup
 ```
 
-At that point, let Hermes walk you through the interactive setup. That is where you should configure:
+## 3. Expose the Hermes API
 
-- the model provider
-- credentials such as `OPENROUTER_API_KEY`
-- tool preferences
-- any gateway integrations you want
+Hermes includes a built-in API server that you can publish to the internet. 
 
-## Expose the Hermes API through Terrarium
+We need to tell Hermes to listen on all interfaces (`0.0.0.0`) so that Terrarium's Traefik proxy can forward traffic to it.
 
-Hermes has a documented API server. That is the piece you should expose through Terrarium.
-
-Still inside the container shell, append the API server settings:
+Still inside the container, append these settings to the Hermes config file:
 
 ```bash
 cat >> ~/.hermes/.env <<'EOF'
@@ -73,34 +62,39 @@ EOF
 ```
 
 Start the API server:
-
 ```bash
 hermes gateway
 ```
 
-Leave the container shell, then publish it from the host:
+Now, exit the container:
+```bash
+exit
+```
 
+## 4. Publish the Route with Terrarium
+
+Now that Hermes is running inside the private network on port `8642`, let's publish it securely to the public internet using Terrarium's `user.proxy` label.
+
+Run this on the host:
 ```bash
 lxc config set hermes user.proxy "https://hermes.example.com:8642"
 terrariumctl proxy sync
 ```
 
-That gives you:
+Terrarium will instantly:
+- Provision a Let's Encrypt SSL certificate for `hermes.example.com`.
+- Route traffic from that domain directly to your Hermes API server.
 
-- Hermes listening on `0.0.0.0:8642` inside the LXC
-- Traefik terminating TLS on the host
-- automatic routing from `https://hermes.example.com` to the container
+## 5. Keep Hermes Running Automatically (Systemd)
 
-## Make it persistent
+If your server reboots, you want Hermes to start back up automatically.
 
-Go back into the container:
-
+Go back inside the container:
 ```bash
 lxc exec hermes -- bash
 ```
 
-Create a systemd unit:
-
+Create a systemd service:
 ```bash
 cat > /etc/systemd/system/hermes-gateway.service <<'EOF'
 [Unit]
@@ -124,147 +118,10 @@ systemctl daemon-reload
 systemctl enable --now hermes-gateway.service
 ```
 
-## Automation version
+## Advanced: Store Memories externally
 
-If you want the same setup condensed into host-side commands, this is the scriptable path:
+Hermes keeps its memories as plain Markdown files. By default, these live at `~/.hermes/memories/MEMORY.md`. 
 
-```bash
-lxc launch images:ubuntu/24.04 hermes
-lxc exec hermes -- bash -lc 'apt-get update && apt-get install -y git curl'
-lxc exec hermes -- bash -lc 'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
-lxc exec hermes -- bash -lc "cat >> ~/.hermes/.env <<'EOF'
-API_SERVER_ENABLED=true
-API_SERVER_HOST=0.0.0.0
-API_SERVER_PORT=8642
-API_SERVER_KEY=replace-with-a-long-random-secret
-API_SERVER_CORS_ORIGINS=https://hermes.example.com
-EOF"
-lxc exec hermes -- bash -lc "cat > /etc/systemd/system/hermes-gateway.service <<'EOF'
-[Unit]
-Description=Hermes API gateway
-After=network-online.target
-Wants=network-online.target
+If you want to read and edit those memories from your own laptop or another server, you can use Terrarium's [External Shared Storage](../getting-started/external-shared-storage.md) feature to mount an external cloud drive directly into the container. 
 
-[Service]
-Type=simple
-User=root
-Environment=HOME=/root
-ExecStart=/bin/bash -lc 'source ~/.bashrc && hermes gateway'
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now hermes-gateway.service"
-lxc config set hermes user.proxy "https://hermes.example.com:8642"
-terrariumctl proxy sync
-```
-
-Use that only if you already know your Hermes config inputs and do not need the interactive setup flow.
-
-## Notes from upstream docs
-
-- The Hermes installer needs only `git`; it installs Python 3.11, Node.js v22, `uv`, `ripgrep`, and `ffmpeg` automatically.
-- The API server defaults to `127.0.0.1:8642`.
-- When binding to a non-loopback address like `0.0.0.0`, `API_SERVER_KEY` is required.
-- Browser CORS is off by default, so you should set `API_SERVER_CORS_ORIGINS` explicitly when exposing it through a browser-facing hostname.
-
-## Advanced: store memory and artifacts on a Storage Box
-
-Hermes separates a few kinds of state:
-
-- curated memory lives in `~/.hermes/memories/`, especially `MEMORY.md` and `USER.md`
-- session search uses SQLite at `~/.hermes/state.db`
-- gateway transcripts live under `~/.hermes/sessions/`
-- skills live under `~/.hermes/skills/`
-
-The best Storage Box target is the human-editable material: `memories/`, optional skills, and a convention-based `artifacts/` directory for outputs you want to browse from another machine. Keep the active SQLite database local to the container. SQLite over SMB/CIFS is a tempting little foot-gun because locking and WAL behavior depend on the network filesystem.
-
-First mount the Storage Box on the Terrarium host. The general workflow is documented in [External Shared Storage](../getting-started/external-shared-storage), but the short version is:
-
-```bash
-terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
-```
-
-Create Hermes directories on the host-mounted share:
-
-```bash
-mkdir -p /srv/shared/storage-box/hermes/{memories,skills,artifacts,exports}
-```
-
-If you have not run `hermes setup` yet, attach those directories directly where Hermes already expects them:
-
-```bash
-lxc exec hermes -- mkdir -p /root/.hermes
-lxc config device add hermes hermes-memories disk \
-  source=/srv/shared/storage-box/hermes/memories \
-  path=/root/.hermes/memories
-lxc config device add hermes hermes-skills disk \
-  source=/srv/shared/storage-box/hermes/skills \
-  path=/root/.hermes/skills
-lxc config device add hermes hermes-artifacts disk \
-  source=/srv/shared/storage-box/hermes/artifacts \
-  path=/root/hermes-artifacts
-```
-
-Then run `hermes setup` normally. Hermes will read and write memory at its normal path, while the actual files live on the Storage Box.
-
-If Hermes is already set up, stop the gateway and copy the existing directories to the Storage Box before adding the disk devices. Mounting a disk over an existing directory hides the old directory contents.
-
-```bash
-lxc exec hermes -- systemctl stop hermes-gateway.service 2>/dev/null || true
-if lxc exec hermes -- test -d /root/.hermes/memories; then
-  lxc exec hermes -- tar -C /root/.hermes/memories -cf - . | tar -C /srv/shared/storage-box/hermes/memories -xf -
-fi
-if lxc exec hermes -- test -d /root/.hermes/skills; then
-  lxc exec hermes -- tar -C /root/.hermes/skills -cf - . | tar -C /srv/shared/storage-box/hermes/skills -xf -
-fi
-lxc exec hermes -- mkdir -p /root/.hermes
-lxc config device add hermes hermes-memories disk \
-  source=/srv/shared/storage-box/hermes/memories \
-  path=/root/.hermes/memories
-lxc config device add hermes hermes-skills disk \
-  source=/srv/shared/storage-box/hermes/skills \
-  path=/root/.hermes/skills
-lxc config device add hermes hermes-artifacts disk \
-  source=/srv/shared/storage-box/hermes/artifacts \
-  path=/root/hermes-artifacts
-```
-
-Use `/root/hermes-artifacts` as the place where you ask Hermes to write long-lived reports, datasets, plans, generated documents, or research output:
-
-```bash
-lxc exec hermes -- systemctl start hermes-gateway.service
-```
-
-A useful Storage Box layout is:
-
-```text
-/srv/shared/storage-box/hermes/
-  memories/
-    MEMORY.md
-    USER.md
-  skills/
-  artifacts/
-  exports/
-```
-
-You can mount the same Storage Box on your laptop or desktop and edit `MEMORY.md`, `USER.md`, skills, or artifacts directly. For memory edits, stop Hermes or avoid active sessions while editing; Hermes loads memory as a snapshot at session start, so changes normally appear in the next session.
-
-For session history, prefer Hermes' export commands instead of moving `state.db` to SMB:
-
-```bash
-lxc exec hermes -- hermes sessions export /root/hermes-artifacts/hermes-sessions.jsonl
-```
-
-That gives you portable transcripts on the Storage Box while keeping the live database on local container storage.
-
-## Upstream docs used for this guide
-
-- [Hermes installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation/)
-- [Hermes API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/)
-- [Hermes persistent memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
-- [Hermes sessions](https://hermes-agent.nousresearch.com/docs/user-guide/sessions/)
-- [Hermes skills system](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/)
+Map your external Hetzner Storage Box to `/root/.hermes/memories` to create a cloud-backed memory bank for your AI agents.

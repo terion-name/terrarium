@@ -1,55 +1,39 @@
 # Terrarium on Vultr
 
-Official references:
+Vultr is an excellent provider for Terrarium. Their Cloud Compute instances are highly capable, and attaching secondary Block Storage for your ZFS time machine is fast and intuitive.
 
-- [How to Add Vultr SSH Keys](https://docs.vultr.com/platform/other/ssh-keys/add-ssh-keys)
-- [SSH Keys reference](https://docs.vultr.com/reference/vultr-cli/ssh-keys)
-- [Create SSH key](https://docs.vultr.com/reference/vultr-cli/ssh-keys/create)
-- [How to Provision Vultr Cloud Compute Instances](https://docs.vultr.com/products/compute/cloud-compute/provisioning)
-- [Instance create](https://docs.vultr.com/reference/vultr-cli/instance/create)
-- [Block Storage provisioning](https://docs.vultr.com/products/cloud-storage/block-storage/provisioning)
-- [Block Storage create](https://docs.vultr.com/reference/vultr-cli/block-storage/create)
-- [Block Storage attach](https://docs.vultr.com/reference/vultr-cli/block-storage/attach)
-- [How to Mount Vultr Block Storage Volume on Linux](https://docs.vultr.com/products/cloud-storage/block-storage/mount/linux)
-- [VPC 2.0 create](https://docs.vultr.com/reference/vultr-cli/vpc-2/create)
-- [Attach an instance to VPC 2.0](https://docs.vultr.com/reference/vultr-cli/instance/vpc2/attach)
+## Recommended Setup
 
-## Recommended shape
+To give your containers and time machine the best performance:
+- **Image:** Ubuntu 24.04 LTS x64
+- **Boot Disk:** Keep the default instance disk for the OS.
+- **Data Disk:** Add separate **Block Storage** in the same region.
+- **Terrarium Mode:** `--storage-mode disk`
 
-- Ubuntu image: Ubuntu 24.04 LTS x64
-- Boot disk: keep the normal instance root disk
-- Data disk: add separate Block Storage in the same region
-- Terrarium mode: `--storage-mode disk`
-
-## Console flow
+## Creating the Server (Web Console)
 
 1. Add your SSH key to Vultr.
 2. Create a new Cloud Compute instance with Ubuntu 24.04 and that SSH key.
 3. Create a Block Storage volume in the same region.
 4. Attach the Block Storage volume to the instance.
-5. SSH into the server and install Terrarium with `disk` mode.
+5. SSH into the server and install Terrarium.
 
 Example install:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
-  --email admin@your-domain.tld \
-  --acme-email certs@your-domain.tld \
-  --idp local \
-  --storage-mode disk \
-  --storage-source auto
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-## vultr-cli flow
+## Creating the Server (CLI / vultr-cli)
+
+If you prefer the terminal, you can easily deploy your Terrarium server using `vultr-cli`.
 
 Create the SSH key:
-
 ```bash
 vultr-cli ssh-key create --name terrarium --key "$(cat ~/.ssh/id_ed25519.pub)"
 ```
 
-Create the instance:
-
+Create the Instance:
 ```bash
 vultr-cli instance create \
   --region=fra \
@@ -60,8 +44,7 @@ vultr-cli instance create \
   --ssh-keys="<ssh-key-id>"
 ```
 
-Create the Block Storage volume:
-
+Create the Block Storage Volume:
 ```bash
 vultr-cli block-storage create \
   --region=fra \
@@ -69,28 +52,16 @@ vultr-cli block-storage create \
   --label=terrarium-data
 ```
 
-Attach the Block Storage volume:
-
+Attach the Volume:
 ```bash
 vultr-cli block-storage attach <block-storage-id> --instance=<instance-id>
 ```
 
-Then SSH in and install Terrarium:
+Finally, SSH into your new server and run the automated installer.
 
-```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
-  --email admin@your-domain.tld \
-  --acme-email certs@your-domain.tld \
-  --idp local \
-  --storage-mode disk \
-  --storage-source auto
-```
+## Private Network for Clustering
 
-## Private network for clustering
-
-For clustered Terrarium, create one Vultr VPC 2.0 network and attach every
-Terrarium instance to it. Use the VPC 2.0 subnet as the endpoint for
-Terrarium's WireGuard cluster mesh.
+For clustered Terrarium, create one Vultr VPC 2.0 network and attach every Terrarium instance to it. Use the VPC 2.0 subnet as the endpoint for Terrarium's WireGuard cluster mesh.
 
 Create a VPC 2.0 network:
 
@@ -129,19 +100,14 @@ terrariumctl cluster init
 terrariumctl cluster invite node2
 ```
 
-Then run the printed `terrariumctl cluster join --token ... --wireguard ...` command on the new
-node. Terrarium should auto-select the VPC private address as the WireGuard
-endpoint. If it does not, pass the private endpoint explicitly and invite peers
-by their private address:
+Then run the printed `terrariumctl cluster join --token ... --wireguard ...` command on the new node. Terrarium should auto-select the VPC private address as the WireGuard endpoint. If it does not, pass the private endpoint explicitly and invite peers by their private address:
 
 ```bash
 terrariumctl cluster init --wireguard-endpoint 10.42.0.11:51820
 terrariumctl cluster invite node2 10.42.0.12
 ```
 
-Provider firewalls only need WireGuard `51820/udp` between exact VPC 2.0 member
-addresses. Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or
-Geneve `6081/udp`; Terrarium carries those inside WireGuard.
+Provider firewalls only need WireGuard `51820/udp` between exact VPC 2.0 member addresses. Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or Geneve `6081/udp`; Terrarium carries those inside WireGuard.
 
 ## Notes
 

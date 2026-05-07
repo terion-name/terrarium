@@ -1,164 +1,81 @@
 # Shared Data Between Containers
 
-Sometimes you want several Terrarium containers to see the same small piece of state.
+Sometimes you need several of your isolated environments to share the exact same files. 
 
-Common examples:
+For example, you might want to:
+- Share one API login file across multiple AI agents.
+- Create a shared "memory" folder for different services to read from.
+- Keep a central configuration directory that all your worker containers pull from.
 
-- one Codex login that several agent environments should reuse
-- shared CLI credentials for internal tools
-- one small config or cache directory that belongs to a group of related containers
+The cleanest, most native way to do this in Terrarium is by creating a **Shared LXD Custom Volume**. 
 
-For this case, the cleanest Terrarium-native pattern is a **shared LXD custom storage volume**.
+This creates an isolated chunk of storage that exists independently of any single container. You can attach it to as many containers as you want at the same time. If you delete a container, the shared volume (and its data) survives.
 
-That gives you a shared filesystem that:
+---
 
-- is separate from any one container
-- can be attached to multiple containers at the same time
-- survives deleting and recreating a container
-- stays inside the Terrarium/LXD storage model instead of turning into ad hoc host bind mounts
+## 🛠️ The Easy Way: Using the LXD UI
 
-LXD documents this directly: custom filesystem volumes can be shared between multiple instances and are retained until you delete them. Source: [How to manage storage volumes](https://documentation.ubuntu.com/lxd/stable-5.21/howto/storage_volumes/)
+If you prefer a visual approach, you can do all of this right from your browser.
 
-## When To Use This Pattern
+### 1. Create the Shared Volume
+1. Open the **LXD UI** at `lxd.<your-domain>`.
+2. Go to **Storage**, select your `terrarium` storage pool, and click **Volumes**.
+3. Click **Create Volume** and choose the `Custom` type.
+4. Name it something clear, like `agent-memory`.
 
-Use a shared custom volume when:
+### 2. Attach It to Your Containers
+1. Go to the **Instances** tab and select a container (e.g., `openclaw`).
+2. Click **Devices** -> **Add Device** -> **Disk**.
+3. Choose the custom volume you just created (`agent-memory`).
+4. Set the **Target Path** where you want it to appear inside the container (e.g., `/srv/shared-memory`).
+5. Repeat this process for any other containers that need access.
 
-- the shared data is small
-- you want it to live on the same Terrarium storage pool
-- the same data should be visible in multiple containers
-- you do not need to browse or edit it directly from your laptop all the time
+---
 
-This is a good fit for shared credentials, small agent memories, common configuration, or a shared working directory for a few related environments.
+## 💻 The Hacker Way: Using the CLI
 
-If the data should also be mounted on your own computer and live outside the VPS, use [External Shared Storage](./external-shared-storage) instead.
+If you prefer the terminal, you can accomplish the exact same thing with a few quick commands.
 
-## Example: One Codex Login Across Several Agent Containers
-
-Imagine you have three separate containers:
-
-- `openclaw`
-- `hermes`
-- `research`
-
-You want all three to see the same Codex credentials so you can authorize once and reuse it.
-
-OpenAI's Codex CLI defaults `CODEX_HOME` to `~/.codex`, and the upstream codebase documents that credentials are persisted in `CODEX_HOME/auth.json`. That makes `~/.codex` the correct shared mount point for this specific workflow.
-
-The important idea is:
-
-- create one shared volume
-- attach it to each container at the path where Codex expects its home directory
-
-## Create The Shared Volume
-
-On the host:
-
+**1. Create the volume:**
 ```bash
-lxc storage volume create terrarium codex-auth
+lxc storage volume create terrarium agent-memory
 ```
 
-This creates a filesystem volume on the Terrarium storage pool that we will use for Codex state.
+**2. Attach it to your containers:**
+```bash
+lxc storage volume attach terrarium agent-memory openclaw agent-memory /srv/shared-memory
+lxc storage volume attach terrarium agent-memory hermes agent-memory /srv/shared-memory
+```
 
-## Attach It To Containers
+*In this example, both the `openclaw` and `hermes` containers can now read and write to the `/srv/shared-memory` folder, and they will instantly see each other's changes.*
 
-Attach the same volume to each container at the credentials path you want to share.
+---
 
-Example:
+## Example: Sharing a Single Login
+
+Let's say you have three separate AI containers (`openclaw`, `hermes`, and `research`), and you want all of them to use the same OpenAI Codex login.
+
+Instead of authenticating three separate times, you can just share the folder where the tool expects its credentials to be stored.
 
 ```bash
+# Create the volume
+lxc storage volume create terrarium codex-auth
+
+# Attach it exactly where the CLI expects the auth file to live
 lxc storage volume attach terrarium codex-auth openclaw codex-auth /root/.codex
 lxc storage volume attach terrarium codex-auth hermes codex-auth /root/.codex
 lxc storage volume attach terrarium codex-auth research codex-auth /root/.codex
 ```
 
-For this Codex-specific example, the path does matter:
+Now, just log into one of those containers, run the login command, and *boom*—all three containers are authenticated instantly.
 
-- one shared volume
-- same mount path in every container that should reuse the login
+---
 
-## Authorize Once
+## When *Not* To Use This
 
-Now enter one of the containers and complete the login flow there:
+This feature is fantastic for small, internal state sharing. However, you should **not** use this if:
+- You want to access the files directly from your personal laptop over the internet.
+- You have massive amounts of data that shouldn't live on your VPS's main drive.
+- The data needs to survive if you delete your entire VPS.
 
-```bash
-lxc exec openclaw -- bash
-```
-
-After Codex writes its credentials into `/root/.codex/auth.json`, the same files are visible in the other containers because they are all looking at the same shared volume.
-
-## Verify It
-
-From another container:
-
-```bash
-lxc exec hermes -- ls -la /root/.codex
-```
-
-If you see the same files, the sharing is working.
-
-## Helpful Variations
-
-### Shared agent memory directory
-
-```bash
-lxc storage volume create terrarium agent-memory
-lxc storage volume attach terrarium agent-memory openclaw agent-memory /srv/shared-memory
-lxc storage volume attach terrarium agent-memory hermes agent-memory /srv/shared-memory
-```
-
-### Shared configuration directory
-
-```bash
-lxc storage volume create terrarium shared-config
-lxc storage volume attach terrarium shared-config worker-a shared-config /srv/shared-config
-lxc storage volume attach terrarium shared-config worker-b shared-config /srv/shared-config
-```
-
-## Things To Keep In Mind
-
-- This data is **shared live**. If one container changes or deletes files, the others see that immediately.
-- This is best for small shared state, not for giant datasets.
-- A shared custom volume is not “owned” by one container. Treat it as a shared resource on purpose.
-- If multiple tools write to the same files in incompatible ways, sharing will become confusing. Use one shared volume only when the data is genuinely meant to be shared.
-
-## UI Path
-
-If you prefer to do this visually, the shipped LXD UI handles most of this flow well.
-
-### Create the shared volume in LXD UI
-
-1. Open `Storage`.
-2. Select the Terrarium storage pool.
-3. Open `Volumes`.
-4. Create a new `Custom` filesystem volume.
-5. Give it a clear name such as `codex-auth` or `agent-memory`.
-
-### Attach it to each container in LXD UI
-
-1. Open `Instances`.
-2. Select a container such as `openclaw`.
-3. Open `Devices`.
-4. Add a new `Disk` device.
-5. Choose the custom volume you created.
-6. Set the target path inside the container, for example `/root/.codex`.
-7. Repeat for every other container that should share the same data.
-
-### Finish the login inside one container
-
-The last part still happens inside the container itself:
-
-1. Open `Console` for one of the containers in LXD UI.
-2. Run the tool's normal login flow there.
-3. Check another container and confirm the same files are visible at the same path.
-
-This is one of the nicer Terrarium workflows for non-console-heavy users: the storage object and the device wiring can both be done from the LXD UI, and you only drop into the container console for the actual app login.
-
-## When Not To Use This
-
-Do **not** use this pattern when:
-
-- the data should also be available on your laptop or desktop
-- the data is large and should live outside the VPS
-- the data needs its own separate backup lifecycle
-
-For those cases, use [External Shared Storage](./external-shared-storage).
+If you need any of those features, check out the [External Shared Storage](./external-shared-storage.md) guide instead.

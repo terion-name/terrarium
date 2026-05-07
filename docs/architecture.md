@@ -1,275 +1,71 @@
 # Terrarium Architecture
 
-Terrarium turns a single Ubuntu 24.04 host into a hardened control plane for isolated LXD container environments, with a ZFS-backed time machine and optional off-host disaster recovery.
-
-## Layers
-
-Terrarium is split into four layers:
-
-1. `install.sh`
-   Thin bootstrap only. The release-published installer is pinned to its own release, downloads the matching compiled `terrariumctl` bundle from GitHub Releases, and fails closed if a default or tag-like release cannot be resolved or downloaded. It falls back to a source build only when the operator explicitly passes a branch-like ref such as `main`.
-2. `terrariumctl`
-   Single Terrarium binary. It owns install-time prompting, config rendering, status and maintenance commands, backup/restore flows, proxy sync, IDP sync, and config updates through `terrariumctl set ...`.
-3. Ansible
-   Owns host provisioning and idempotent reconciliation. Terrarium exports the current config to `/etc/terrarium/config.yaml`, then Ansible converges the host into that state.
-4. Host helpers
-   Systemd timers and services invoke `terrariumctl` subcommands for recurring host-side work such as Traefik proxy sync, S3 export, and optional syncoid replication.
-
-## Bootstrap And Reconciliation
-
-- `terrariumctl install` is interactive by default.
-- Non-interactive installs require explicit flags for the critical choices such as IDP mode and storage mode.
-- The installer clones or updates the Terrarium repo into `/opt/terrarium`, stages the compiled binary into that checkout, writes a temporary config payload, and invokes Ansible locally.
-- During first bootstrap, the resolved configuration is written as `/etc/terrarium/config.yaml` because LXD is not initialized yet.
-- After LXD is ready, Terrarium publishes the same document into the LXD dqlite-backed project `terrarium-system` under `user.terrarium.config_b64`.
-- After that point, `terrariumctl` treats the LXD dqlite-backed value as canonical and keeps `/etc/terrarium/config.yaml` as a local YAML export for Ansible and operator inspection.
-- Sensitive one-time values that should not live in the persisted config, such as a root password supplied for Cockpit login, are passed to Ansible through a temporary secrets file and then removed.
-- Post-install changes are handled through `terrariumctl set domains`, `set emails`, `set idp`, `set s3`, and `set syncoid`, followed by a local reconciliation run.
-
-## Config Store
-
-Terrarium deliberately reuses LXD's existing dqlite cluster store instead of running a second consensus database on the host.
-
-- LXD already runs a dqlite node on each cluster member.
-- LXD project configuration is cluster metadata, so it is replicated with the rest of LXD's dqlite state.
-- Terrarium stores its config payload as base64-encoded YAML in the `terrarium-system` project key `user.terrarium.config_b64`.
-- `terrariumctl config import` copies `/etc/terrarium/config.yaml` into that store.
-- `terrariumctl config export` recreates `/etc/terrarium/config.yaml` from that store.
-- `terrariumctl reconfigure` exports from the store before invoking Ansible, so a node converges from the cluster copy when the dqlite store is present.
-
-This shared config store is the foundation for Terrarium clustering. Cluster
-membership itself is still LXD-native: Terrarium wraps the supported LXD
-bootstrap, token, and join flows instead of running a second membership system.
-
-## Control Plane
-
-- Traefik is the only public web entrypoint.
-- Cockpit listens on loopback and is reverse-proxied through Traefik.
-- A host-level `oauth2-proxy` instance also listens on loopback and is published through same-domain `/oauth2/*` routes on both the Cockpit and Traefik dashboard hostnames.
-- LXD listens on loopback and is reverse-proxied through Traefik on the public LXD hostname. LXD still owns its native API/UI OIDC auth model.
-- Self-hosted ZITADEL, when enabled, runs as the Terrarium-managed `terrarium-idp` LXD system instance and is published through Traefik.
-- UFW defaults to deny incoming and allow outgoing. Terrarium explicitly opens only the expected public ports, then adds or removes dynamic TCP/UDP rules for container-level proxy exposure.
-
-## Network Isolation Model
-
-Terrarium containers are not public by default.
-
-They sit on Terrarium's private LXD network, which gives them an important baseline layer of protection:
-
-- inbound scans from the internet do not hit container services directly
-- a process binding `0.0.0.0` inside a container is not automatically internet-reachable
-- misconfigured internal services are less likely to become public by accident
-
-This is especially useful for complex or messy environments. Even when a workload opens several internal ports inside the container, they do not become public on the host unless Terrarium explicitly publishes them through Traefik or raw TCP/UDP proxy rules.
-
-## Cluster And OVN Model
-
-Terrarium uses LXD clustering for multi-node membership and OVN for the default
-workload network.
-
-- `terrariumctl cluster init` enables LXD clustering on the first member after
-  creating the local WireGuard mesh endpoint and binding `core.https_address`
-  to the first tunnel address.
-- `terrariumctl cluster invite` wraps `lxc cluster add` and prints the
-  simplified join command for the next member. The invite command also
-  allocates the joining member's tunnel IP and WireGuard key material.
-  `terrariumctl cluster token` prints only the raw LXD token for automation.
-- `terrariumctl cluster join` feeds a deterministic LXD preseed into
-  `lxd init --preseed`; the normal invite flow starts WireGuard first, joins
-  LXD through the tunnel address, exports the shared Terrarium config, and
-  reconfigures the joined node.
-- `terrariumctl cluster ovn configure` records the OVN central members and
-  exact tunnel peer CIDRs in the shared config, discovering current LXD member
-  addresses when explicit values are omitted, then reconciles host networking.
-
-Terrarium keeps `lxdbr0` as the managed parent/uplink network and creates
-`terrarium-ovn` as the logical workload network. The default, `terrarium`, and
-`strict` profiles attach new containers to `terrarium-ovn`.
-
-The cluster transport model has two layers. Provider/public interfaces only
-need WireGuard `51820/udp` from invited member endpoints. Inside the WireGuard
-mesh, Terrarium only opens LXD/OVN cluster ports for configured
-`terrarium_cluster_peer_cidrs`, covering LXD API `8443`, OVN
-northbound/southbound database ports `6641`/`6642`, and OVN Geneve `6081/udp`.
-
-The default cluster commands use exact `/32` WireGuard tunnel peer entries.
-Broader CIDRs are supported only as an explicit operator choice and should be
-reserved for fully trusted tunnel networks.
-
-OVN database access has a second boundary: Terrarium generates a cluster OVN CA
-and configures OVN central, LXD, and Open vSwitch with certificate-backed
-`ssl:` database remotes. This authenticates OVN control-plane clients. The
-WireGuard mesh encrypts the provider/local transport that carries LXD, OVN DB,
-and Geneve traffic between members.
-
-This is enough for one LXD management plane and cross-member container
-networking. It is not a blanket HA promise: storage locality, instance
-placement, public endpoint failover, and stateful app replication remain
-workload design decisions.
-
-## Authentication Model
-
-- SSH is hardened to key-based access; password SSH is disabled.
-- Cockpit is now gated by host-level OIDC through Traefik `ForwardAuth` and `oauth2-proxy`.
-- Only members of `terrarium_admin_group` are allowed through the OIDC gate for Cockpit and LXD management access.
-- Cockpit still authenticates against the host's local PAM accounts after the OIDC gate, so `root` needs a usable local password for Cockpit login.
-- If root does not already have one, Terrarium prompts for a password during interactive install or requires `--generate-root-pwd` or `--root-pwd-file` in non-interactive mode.
-- Generated Cockpit root passwords are saved under `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions and are not written to `/etc/terrarium/config.yaml`.
-- IDP mode has two variants:
-  - `local`: Terrarium deploys ZITADEL in the `terrarium-idp` LXD system instance and derives the OIDC issuer from the Terrarium auth domain.
-  - `oidc`: Terrarium uses an external OIDC issuer and stores the issuer URL plus client credentials.
-- Terrarium persists `terrarium_admin_group`, defaulting to `terrarium-admins` in local mode.
-- For self-hosted ZITADEL, Terrarium provisions the management role and a token-complement Action that emits a flat `groups` claim.
-- For external OIDC, Terrarium expects the provider to emit a `groups` claim that contains `terrarium_admin_group`.
-- LXD uses native OIDC plus IdP-group mappings to grant only the management group `admin` on `server`.
-
-## Proxy Model
-
-- A host-side sync job runs every minute and also on demand via `terrariumctl proxy sync`.
-- It reads `lxc list -f json`, enriches instance state, and inspects each container’s `user.proxy` label.
-- It reconciles host-loopback LXD `proxy` devices for labeled container backends and uses those localhost listeners as Traefik backends.
-- Supported label formats are:
-  - `https://domain[:container_port][/path]`
-  - `http://domain[:container_port][/path]`
-  - `https://domain[:container_port][/path]@auth`
-  - `https://domain[:container_port][/path]@auth:group1,group2`
-  - `http://domain[:container_port][/path]@auth`
-  - `http://domain[:container_port][/path]@auth:group1,group2`
-  - `tcp://hostport:containerport`
-  - `udp://hostport:containerport`
-- The sync job renders Traefik dynamic config, extends static Traefik entrypoints when raw TCP/UDP ports are needed, and reconciles Terrarium-managed UFW rules for those dynamic ports.
-- For auth-protected published routes, the sync job also reconciles a host-side oauth2-proxy route-auth stack and publishes per-route callbacks under `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
-- `@auth` means “any authenticated user”.
-- `@auth:group1,group2` means “any authenticated user in at least one listed group”.
-- Route-level auth is currently limited to HTTP(S) hosts on the Terrarium root domain or its subdomains. If no root domain is configured, only the `manage` hostname qualifies. Each route-auth oauth2-proxy still uses an exact-host cookie.
-
-The key behavior for non-experts is simple:
-
-- listening inside the container does not make a service public
-- adding a `user.proxy` rule does
-- if you do not publish it, it stays behind the host
+If you're curious about how Terrarium works under the hood, you're in the right place. 
 
-## Storage
+Terrarium takes a single Ubuntu 24.04 host and turns it into a hardened control plane for isolated LXC container environments. It handles the networking, the ZFS-backed time machine, and the automated off-site backups so you don't have to.
 
-Terrarium creates a dedicated ZFS pool for LXD using one of three modes:
+## The Core Layers
 
-- `disk`
-  Dedicated non-root block device. Terrarium wipes it and creates the pool directly on that device.
-- `partition`
-  Existing unused partition or allocatable free space on a non-root disk. Interactive mode discovers allocatable targets and suggests the largest one. Non-interactive mode requires `--storage-source`, and `--storage-source auto` resolves to the largest valid target.
-- `file`
-  File-backed ZFS pool on the root filesystem. This is the fallback when the VPS has only the root disk or when the provider does not support attachable block storage.
+Terrarium is built on four main layers:
 
-Pool behavior:
+1. **`install.sh`**  
+   A lightweight bootstrap script. It safely downloads the correct compiled version of Terrarium for your system and kicks off the setup.
+2. **`terrariumctl`**  
+   The brains of the operation. This single binary handles the interactive installer, renders your configuration, manages backups and restores, and syncs your web proxy routing.
+3. **Ansible**  
+   The builder. `terrariumctl` generates a state file, and Ansible securely provisions your host to match that exact state (setting up ZFS, installing Traefik, hardening SSH, etc.).
+4. **Host Helpers**  
+   Systemd timers running quietly in the background. They trigger `terrariumctl` to periodically sync your network routes, take ZFS snapshots, and export backups to S3.
 
-- Terrarium creates the pool with `compression=zstd`, `atime=off`, `xattr=sa`, and `normalization=formD`.
-- Dedup is not enabled.
-- Terrarium does not attempt to shrink the mounted root filesystem.
-
-## Container Profiles
+## Configuration & Storage
 
-Terrarium manages a small set of LXD profiles:
+### Where Does the Config Live?
+Terrarium is smart about not reinventing the wheel. Instead of running a complex secondary database just to store your settings, it uses LXD's built-in, highly available database (`dqlite`). 
+- A backup copy of your config is always kept at `/etc/terrarium/config.yaml` so you can read it easily.
+- Whenever you make changes using commands like `terrariumctl set domains`, Terrarium updates the LXD database and tells Ansible to seamlessly apply the changes.
 
-- `default`
-  The normal Terrarium profile. Users can omit `--profile` for ordinary containers.
-- `terrarium`
-  Compatibility alias with the same settings as `default`.
-- `strict`
-  Stricter full profile for workloads that do not need Docker-friendly nesting.
-- `kvm`
-  Layered profile created only when `/dev/kvm` exists on the host.
-
-Baseline `default` and `terrarium` profile behavior:
-
-- `security.idmap.isolated=true`
-- `security.nesting=true`
-- `security.syscalls.intercept.mknod=true`
-- `security.syscalls.intercept.setxattr=true`
-- root disk on the Terrarium pool
-- NIC attached to `terrarium-ovn`
-
-Terrarium does not make ordinary workload containers privileged. The isolated
-ID map means container root, including root inside a Docker daemon nested in the
-container, is still separated from host root by LXC's user-namespace boundary.
-That gives Docker-heavy deployments a host protection layer they would not get
-from running all Docker workloads directly on the VPS.
-
-This is an intentional product choice: Terrarium optimizes for isolated environments that can still run realistic developer and agent workloads, including Docker Compose stacks, instead of optimizing for the narrowest possible LXC feature surface.
-
-The `strict` profile keeps the Terrarium root disk and OVN NIC but omits
-nesting and syscall intercepts. The `kvm` profile adds `/dev/kvm` as a
-`unix-char` device and can be combined with `default` when the provider exposes
-hardware virtualization.
-
-## Backup Model
-
-Terrarium has three backup paths:
-
-1. Local time machine
-   Managed by `sanoid` on the ZFS pool that backs LXD containers.
-2. Optional off-host ZFS replication
-   Managed by `syncoid`, recursively replicating `pool/containers` to another ZFS host.
-3. Optional S3-style archive export
-   Managed by `terrariumctl backup export`, which writes manifests locally and uploads compressed ZFS streams plus JSON manifests to S3-compatible object storage.
-
-Current local snapshot retention:
-
-- `frequently = 4`
-- `hourly = 24`
-- `daily = 14`
-- `monthly = 3`
-
-This gives Terrarium two layers of recovery:
-
-- the local time machine for fast, small-step recovery on the same host
-- S3 export for disaster recovery when the host or disk is gone
-
-S3 export behavior:
-
-- Terrarium records the last exported snapshot per instance under `/var/lib/terrarium/lastsnapshots`.
-- It uploads either a full `zfs send` or an incremental `zfs send -I` stream.
-- Streams are compressed with `zstd` before upload.
-- JSON manifests are stored locally under `/var/lib/terrarium/catalog` and remotely alongside the streams.
-
-## Restore Model
-
-Local in-place restore:
-
-- Implemented as `zfs rollback -r`.
-- Non-interactive apart from the safety confirmation.
-
-Local as-new restore:
-
-- Implemented as a `zfs clone`.
-- Terrarium explains what is about to happen and then launches interactive `lxd recover`, because the final import step is still interactive upstream.
-
-S3 in-place restore:
-
-- Terrarium downloads the manifest chain for the selected restore point.
-- It replays the compressed ZFS send chain into the target dataset with `zfs receive -F`.
-
-S3 as-new restore:
-
-- Terrarium reconstructs the dataset for the chosen restore point.
-- It then explains the next steps and hands off into interactive `lxd recover`, just like local `--as-new`.
-
-## Runtime Paths
-
-Important runtime paths in the current implementation:
-
-- Repo checkout: `/opt/terrarium`
-- Canonical config store: LXD dqlite-backed project `terrarium-system`, key `user.terrarium.config_b64`
-- Local config export: `/etc/terrarium/config.yaml`
-- Secrets directory: `/etc/terrarium/secrets`
-- General state: `/var/lib/terrarium`
-- oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy`
-- oauth2-proxy published-route runtime: `/var/lib/terrarium/oauth2-proxy-routes`
-- S3 catalog: `/var/lib/terrarium/catalog`
-- Last exported snapshots: `/var/lib/terrarium/lastsnapshots`
-
-## Scope
-
-- Supported host OS: Ubuntu Server 24.04
-- Deployment model: single host only
-- Workload model: LXC containers only
-- Terrarium is built around isolated, rewritable container environments for agents, development sandboxes, and exposed internal web apps
+### The ZFS Storage Engine
+Terrarium relies heavily on OpenZFS to provide its magic time machine and fast containers. Depending on your VPS, it provisions ZFS in one of three ways:
+- **`disk` (Recommended):** Terrarium takes full ownership of an empty attached volume.
+- **`partition`:** Uses an empty partition on a non-root drive.
+- **`file`:** Carves out a virtual disk file on your primary root drive (great for cheap, single-disk servers).
+
+## The Network Model
+
+Terrarium's networking is designed around a single principle: **Private by Default**.
+
+- Your containers live on an isolated virtual network (`terrarium-ovn`). 
+- They have zero direct exposure to the public internet.
+- A service running on port `8080` inside a container is only accessible inside that container.
+
+### How Traffic Gets In (The Proxy Model)
+To expose an app to the web, you add a simple label to the container (e.g., `user.proxy="https://myapp.domain.com"`). 
+
+Every minute, Terrarium scans your containers. When it sees that label, it automatically:
+1. Creates an internal bridge to the container.
+2. Tells Traefik to route internet traffic from `myapp.domain.com` through that bridge.
+3. Provisions a Let's Encrypt SSL certificate.
+4. *(Optional)* Wraps the whole route in a Single Sign-On (OIDC) authentication gate if you added the `@auth` tag.
+
+## The Security Model
+
+Terrarium doesn't just isolate your apps; it hardens the host itself.
+- **SSH:** Locked down to key-based access only.
+- **Firewall:** Blocks all incoming traffic by default.
+- **Unprivileged Containers:** Even if an attacker breaks out of a Docker instance inside your container, they are still trapped in an unprivileged LXC namespace, completely separated from the host's actual root user.
+
+### Authentication (IDP)
+Terrarium secures all of your management dashboards (Cockpit, LXD, Traefik). It either:
+- Runs a local instance of **ZITADEL** to manage your users and groups.
+- Connects to your existing external identity provider (like Google or Auth0) using **OIDC**.
+
+## The Time Machine (Backups)
+
+Terrarium gives you three layers of safety:
+
+1. **The Local Time Machine (ZFS Snapshots)**
+   Managed automatically by a tool called `sanoid`. It takes fast, incremental snapshots of your containers every 15 minutes. Perfect for undoing a bad `rm -rf` or a broken `apt upgrade`.
+2. **Off-Host Replication (Syncoid)**
+   *(Optional)* If you have a second server, Terrarium can constantly mirror your ZFS state to it.
+3. **Disaster Recovery (S3 Exports)**
+   *(Optional)* Terrarium can compress your snapshots and stream them directly to an S3 bucket (like AWS or Cloudflare R2). If your server catches on fire, you can restore your exact environments onto a brand new machine.

@@ -1,21 +1,22 @@
 # Operations
 
-These pages cover the things you do after the host is already installed:
+Your server is up and running. Now what? 
 
-- [Reconfiguration](./reconfiguration)
-- [Clustering](./clustering)
-- [Backups and Restore](./backups-and-restore)
+This section covers all the things you do *after* Terrarium is installed. Whether you want to change your domain name, set up automated S3 backups, or link multiple servers together into a cluster, you'll find the guides here.
 
-The main operational entrypoint is `terrariumctl`.
+- **[Reconfiguration](reconfiguration.md):** How to safely change your domains, emails, and login methods without breaking anything.
+- **[Clustering](clustering.md):** How to link multiple Terrarium servers together into a highly available swarm.
+- **[Backups and Restore](backups-and-restore.md):** How to use your built-in time machine and off-site S3 exports.
 
-Most day-2 changes are done through:
+### The `terrariumctl` Command
 
+Your primary tool for managing Terrarium is `terrariumctl`. It's a single, powerful command that handles almost everything.
+
+The most common commands you'll use day-to-day are:
 - `terrariumctl set domains`
 - `terrariumctl set emails`
-- `terrariumctl set idp`
-- `terrariumctl set s3`
-- `terrariumctl set syncoid`
-- `terrariumctl cluster status`
-- `terrariumctl proxy sync`
+- `terrariumctl set idp` (To change between local ZITADEL and external OIDC logins)
+- `terrariumctl set s3` (To configure off-site backups)
+- `terrariumctl proxy sync` (To manually update your network routing rules)
 
-For the full command surface, see [terrariumctl Reference](../reference/terrariumctl).
+*Want to see everything it can do? Check out the full [terrariumctl Reference](../reference/terrariumctl.md).*

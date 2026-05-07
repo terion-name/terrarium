@@ -1,6 +1,6 @@
 # Domains and Authentication
 
-Terrarium gives the host a few public management endpoints and can either self-host the identity provider or use an external one.
+Terrarium sets up a few public management endpoints for the host and lets you choose between a self-hosted identity provider or an external one.
 
 ## Default Public Endpoints
 
@@ -9,9 +9,9 @@ By default, Terrarium exposes:
 - `https://manage.<dashed-public-ip>.traefik.me` for Cockpit
 - `https://proxy.<dashed-public-ip>.traefik.me` for the Traefik dashboard
 - `https://lxd.<dashed-public-ip>.traefik.me` for the LXD API and UI
-- `https://auth.<dashed-public-ip>.traefik.me` for self-hosted ZITADEL when `--idp=local`
+- `https://auth.<dashed-public-ip>.traefik.me` for self-hosted ZITADEL when `--idp=local` is used
 
-You can override those with:
+You can override those endpoints with:
 
 - `--domain`
 - `--manage-domain`
@@ -19,123 +19,101 @@ You can override those with:
 - `--lxd-domain`
 - `--auth-domain`
 
-If you set only `--domain`, Terrarium derives:
+If you provide a custom root domain like `--domain example.com`, Terrarium automatically derives the subdomains:
 
 - `manage.<domain>`
 - `proxy.<domain>`
 - `lxd.<domain>`
-- `auth.<domain>` when self-hosted ZITADEL is enabled
+- `auth.<domain>` (if self-hosted ZITADEL is enabled)
 
-These domains are for management and explicitly published services. They are not a sign that every service inside every container is reachable from outside.
+These domains are strictly for management and explicitly published services. A service running inside a container is not reachable from the outside until you deliberately publish it.
 
 ## Email Settings
 
-- `--email`
-  Terrarium contact/admin email and the default ZITADEL bootstrap admin email
-- `--acme-email`
-  ACME account identity for Traefik and LXD certificate automation
+- `--email`: Sets the primary Terrarium contact/admin email and is used as the default ZITADEL bootstrap admin email.
+- `--acme-email`: Used as the ACME account identity so Traefik and LXD can automate your SSL certificates.
 
-If `--acme-email` is omitted, Terrarium falls back to `--email`.
+If you don't provide an `--acme-email`, Terrarium simply falls back to using the primary `--email`.
 
 ## Management Authentication
 
-Terrarium separates SSH access from web management access.
+Terrarium enforces a strict separation between command-line SSH access and web management access.
 
 ### SSH
-
-- SSH is hardened to key-based auth
-- password SSH is disabled
+- SSH is hardened to allow key-based authentication only.
+- Password-based SSH logins are completely disabled.
 
 ### Cockpit
+Cockpit access requires passing two layers of authentication:
 
-Cockpit is protected in two layers:
+1. An OIDC gate handled through Traefik `ForwardAuth` and host-level `oauth2-proxy`.
+2. A standard Cockpit PAM login on the host machine.
 
-1. OIDC gate through Traefik `ForwardAuth` and host-level `oauth2-proxy`
-2. normal Cockpit PAM login on the host
+This means users must first pass the OIDC Single Sign-On gate. Once past that, they still need a valid local host account to log into Cockpit (in practice, this means `root` needs a local password).
 
-That means:
+If `root` does not already have a password:
+- The interactive installer will prompt you to create one.
+- The non-interactive installer requires either the `--generate-root-pwd` or `--root-pwd-file` flag.
 
-- users must pass the OIDC gate first
-- Cockpit still needs a usable local host account to log in
-- in practice, `root` needs a local password for Cockpit
-
-If `root` does not already have one:
-
-- interactive install prompts for it
-- non-interactive install requires `--generate-root-pwd` or `--root-pwd-file`
-
-When generated, Terrarium saves the password to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions. Terrarium does not store the plaintext in `/etc/terrarium/config.yaml`.
+When Terrarium generates the password, it saves it securely to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions. It does not store the plaintext password in your `/etc/terrarium/config.yaml` file.
 
 ### LXD
+LXD handles its own native OIDC authentication and authorization.
+- Terrarium automatically configures the necessary OIDC issuer and client settings.
+- Access is strictly granted only to members of your configured Terrarium admin group.
 
-LXD keeps native OIDC auth and authorization.
+## Identity Provider (IDP) Modes
 
-- OIDC issuer/client settings are configured by Terrarium
-- access is granted only to members of the configured Terrarium admin group
+Terrarium supports two different ways to handle user logins.
 
-## IDP Modes
+### Mode 1: Local (`--idp local`)
 
-Terrarium supports two identity-provider modes.
-
-### `--idp local`
-
-Terrarium deploys ZITADEL on the host and provisions the clients and claims it needs.
+Terrarium deploys ZITADEL directly on the host and automatically provisions the clients and claims it needs.
 
 Defaults:
+- Auth domain: `auth.<domain>` or `auth.<dashed-public-ip>.traefik.me`
+- Admin group: `terrarium-admins`
 
-- auth domain: `auth.<domain>` or `auth.<dashed-public-ip>.traefik.me`
-- admin group: `terrarium-admins`
+Terrarium will automatically:
+- Provision the necessary management role.
+- Grant that role to the bootstrap admin user.
+- Emit a flat `groups` claim for `oauth2-proxy` and LXD to read.
 
-Terrarium also:
+### Mode 2: External OIDC (`--idp oidc`)
 
-- provisions the management role
-- grants that role to the bootstrap admin
-- emits a flat `groups` claim for `oauth2-proxy` and LXD
+If you prefer to use an external provider (like Google Workspace, GitHub, or Auth0), Terrarium can connect to it.
 
-### `--idp oidc`
-
-Terrarium uses an external OIDC provider.
-
-You must provide:
-
+You must provide the following:
 - `--oidc`
 - `--oidc-client`
 - `--oidc-secret-file` or `--oidc-secret`
 - `--admin-group`
 
-Requirements for the external provider:
+**Requirements for your external provider:**
+You must configure your provider to allow the following callback URLs:
+- `https://<manage-domain>/oauth2/callback`
+- `https://<proxy-domain>/oauth2/callback`
+- `https://<lxd-domain>/oidc/callback`
+- If you plan to protect published app routes with `@auth`, you must also allow each generated app callback: `https://<route-host>/oauth2/route/<generated-route-id>/callback`
 
-- allow `https://<manage-domain>/oauth2/callback`
-- allow `https://<proxy-domain>/oauth2/callback`
-- allow `https://<lxd-domain>/oidc/callback`
-- allow each generated `https://<route-host>/oauth2/route/<generated-route-id>/callback` if you want to protect published app routes with `@auth`
-- emit a `groups` claim as a JSON string array containing the configured admin group
+Additionally, the external provider must emit a `groups` claim as a JSON string array containing the configured admin group.
 
-Terrarium reuses the same external OIDC client for:
-
+Terrarium reuses the exact same external OIDC client for:
 - Cockpit's oauth2-proxy
 - LXD
-- published HTTP(S) routes protected with `@auth`
+- Published HTTP(S) routes protected with the `@auth` label
 
-If your identity provider requires a separate client for LXD, pass
-`--lxd-oidc-client` and `--lxd-oidc-secret-file`. For automation, prefer
-secret-file flags over argv secrets.
+If your identity provider requires you to use a separate client specifically for LXD, you can pass `--lxd-oidc-client` and `--lxd-oidc-secret-file`. For automated setups, always prefer using the secret-file flags over passing secrets directly as arguments.
 
-## Admin Group
+## The Admin Group
 
-The management admin group controls who gets into:
+The management admin group controls who is allowed to access:
+- Cockpit (through `oauth2-proxy`)
+- LXD (through native OIDC group mapping)
 
-- Cockpit, through `oauth2-proxy`
-- LXD, through native OIDC group mapping
+- **Local mode default:** `terrarium-admins`
+- **External OIDC mode:** You must explicitly define this using `--admin-group`
 
-Local mode default:
+This group is intentionally kept separate from app-level route protection. You can grant a user access to a published app without giving them management access to the Terrarium host.
 
-- `terrarium-admins`
-
-External OIDC mode:
-
-- required explicitly through `--admin-group`
-
-This is intentionally separate from app-level route protection. Management access and published app access do not need to be the same thing.
-
-If you want to protect published app routes, continue to [Protecting Published Services with OIDC](../guides/auth-protection.md).
+If you want to learn how to lock your published apps behind this same authentication system, continue to the [Protecting Published Services with OIDC](../guides/auth-protection.md) guide.

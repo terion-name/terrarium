@@ -1,101 +1,60 @@
 # Storage and Sizing
 
-Terrarium works best when the host has a small boot disk and a separate disk for LXD container data plus the local ZFS time machine.
+Choosing the right hardware and storage setup is the most important decision you'll make before installing Terrarium. 
 
-## Recommended Storage Strategy
+Because Terrarium relies heavily on ZFS to power its "time machine" snapshots, it treats storage a bit differently than a standard server setup.
 
-Best setup:
+## The Golden Rule: Two Disks Are Better Than One
 
-- boot disk for Ubuntu and Terrarium control-plane services
-- separate block volume for the ZFS pool that stores LXD containers and snapshots
+For the best performance and safety, you should create a VPS with **two separate drives**:
+1. **A small boot disk:** Just for the Ubuntu operating system and Terrarium's core control plane.
+2. **A larger attached volume:** Dedicated entirely to your LXD containers and their snapshots.
 
-Recommended mode for that setup:
+If you have two disks, you will choose **`--storage-mode disk`** during installation. Terrarium will automatically format the second drive and use it exclusively for your isolated environments.
 
-- `--storage-mode disk`
+### What if I only have one disk?
+No problem. If your hosting provider doesn't support attachable volumes, you can use **`--storage-mode file`**. Terrarium will carve out space on your main drive. You'll just want to make sure you purchase a server with a much larger primary disk to hold both the OS and your containers.
 
-Fallback:
+## How the Time Machine Uses Space
 
-- if your provider only gives you one disk, use `--storage-mode file`
+Terrarium keeps a running history of your environments. If you break something, you can instantly rewind to a working state. 
 
-`partition` mode exists for cases where you already have an unused partition or safe free space on a non-root disk, but it is not the primary Terrarium path.
+By default, Terrarium keeps:
+- The last 4 snapshots taken every 15 minutes.
+- The last 24 hourly snapshots.
+- The last 14 daily snapshots.
+- The last 3 monthly snapshots.
 
-## How The Local Time Machine Uses Space
+These snapshots are incredibly efficient. They don't make full copies of your data; they only save the blocks of data that have *changed*. 
 
-Terrarium keeps its local time-machine history as ZFS snapshots on the same pool as the containers.
+However, if your applications are constantly writing and deleting massive files, or you frequently rebuild large databases, those changed blocks will add up. 
 
-That means:
+## Sizing Recommendations
 
-- snapshots are copy-on-write, not full copies
-- they keep changed blocks for as long as the snapshots exist
-- the more your workloads rewrite large files or churn package trees and caches, the more space snapshots will consume over time
+Here is a good starting point based on how you plan to use Terrarium:
 
-Current default local retention:
+### 1. The Tinkerer (Minimum Practical Host)
+Great for personal use, a few web apps, or light AI agent testing.
+- **CPU / RAM:** `2 vCPU` / `4 GB RAM`
+- **Boot Disk:** `30 - 40 GB`
+- **ZFS Container Disk:** `80 - 120 GB`
 
-- `4` 15-minute snapshots
-- `24` hourly snapshots
-- `14` daily snapshots
-- `3` monthly snapshots
+### 2. The Builder (Recommended General Purpose)
+Great for hosting a self-hosted browser IDE, a complex Compose stack, and a few active AI agents.
+- **CPU / RAM:** `4 vCPU` / `8 - 16 GB RAM`
+- **Boot Disk:** `40 - 60 GB`
+- **ZFS Container Disk:** `150 - 300 GB`
 
-So the smallest automatic local time-machine step is 15 minutes.
+### 3. The Power User (Heavy Workloads)
+Great for data-heavy apps, active databases, and running many environments at once.
+- **CPU / RAM:** `8+ vCPU` / `16+ GB RAM`
+- **Boot Disk:** `50 - 80 GB`
+- **ZFS Container Disk:** `300+ GB`
 
-Pool defaults:
+### A Rule of Thumb for ZFS
+Estimate how much space the actual data inside your containers will use, and then **multiply that by 2x or 3x** to account for the snapshot history. 
 
-- `compression=zstd`
-- dedup disabled
+For example, if you think your apps will use 50 GB of data, attach a 150 GB volume for your ZFS disk to ensure your time machine always has plenty of room to breathe.
 
-S3 exports are separate from the local time machine. They are streamed from ZFS and compressed with `zstd` before upload, so they do not need extra permanent local storage beyond Terrarium's working state.
-
-## Hardware Guidance
-
-- Minimum practical host:
-  - `2 vCPU`
-  - `4 GB RAM`
-  - `30-40 GB` boot disk
-  - separate `80-120 GB` ZFS disk
-- Recommended general-purpose host:
-  - `4 vCPU`
-  - `8-16 GB RAM`
-  - `40-60 GB` boot disk
-  - separate `150-300 GB` ZFS disk
-- Heavier multi-environment or agent-heavy host:
-  - `8 vCPU`
-  - `16+ GB RAM`
-  - `50-80 GB` boot disk
-  - `300+ GB` ZFS disk
-
-## How Much ZFS Space To Plan For
-
-As a starting point:
-
-- for moderate churn, plan `2x-3x` your expected live container data
-- for churn-heavy workloads, plan `3x-4x`
-
-Examples:
-
-- if you expect `50 GB` of live container data, a good starting point is:
-  - `20-30 GB` boot disk
-  - `100-150 GB` ZFS disk
-- if that same `50 GB` is churn-heavy, prefer:
-  - `150-250 GB` ZFS disk
-- if you must use `--storage-mode file`, combine both budgets on the root disk:
-  - typically `120-180 GB` total for that same `50 GB` workload
-
-## Mode-Specific Notes
-
-### `disk`
-
-- best fit for most providers that support attached block storage
-- Terrarium wipes the selected non-root disk and creates the ZFS pool there
-
-### `partition`
-
-- use only when you already have a safe target on a non-root disk
-- Terrarium can discover free extents and unused partitions, but it will not shrink the mounted root filesystem
-
-### `file`
-
-- easiest fallback on single-disk VPSes
-- host OS, container data, and snapshots all share the same filesystem
-- choose a noticeably larger root disk than you would for a separate-disk setup
-
-For provider-specific examples, see [Provider Guides](../providers/README.md).
+---
+*Ready to launch your server? Check our [Provider Guides](../providers/README.md) to see exactly how to attach these storage volumes on providers like DigitalOcean and Hetzner.*

@@ -1,26 +1,16 @@
 # Terrarium on DigitalOcean
 
-Official references:
+DigitalOcean is one of the best places to run Terrarium. Droplets are fast, and attaching a secondary Block Storage Volume for your containers takes only a few clicks.
 
-- [How to Add SSH Keys to New or Existing Droplets](https://docs.digitalocean.com/products/droplets/how-to/add-ssh-keys/)
-- [Set up a Production-Ready Droplet](https://docs.digitalocean.com/products/droplets/getting-started/recommended-droplet-setup/)
-- [Linux Images for Droplets](https://docs.digitalocean.com/products/droplets/details/images/)
-- [How to Create and Set Up Volumes for Use with Droplets](https://docs.digitalocean.com/products/volumes/how-to/create/)
-- [How to Mount Volumes](https://docs.digitalocean.com/products/volumes/how-to/mount/)
-- [doctl compute droplet create](https://docs.digitalocean.com/reference/doctl/reference/compute/droplet/create/)
-- [doctl compute volume create](https://docs.digitalocean.com/reference/doctl/reference/compute/volume/create/)
-- [doctl compute volume-action attach](https://docs.digitalocean.com/reference/doctl/reference/compute/volume-action/attach/)
-- [How to Create a VPC](https://docs.digitalocean.com/products/networking/vpc/how-to/create/)
-- [doctl vpcs create](https://docs.digitalocean.com/reference/doctl/reference/vpcs/create/)
+## Recommended Setup
 
-## Recommended shape
+To give your containers and time machine the best performance:
+- **Image:** Ubuntu 24.04 (LTS) x64
+- **Boot Disk:** Keep the default Droplet disk for the OS.
+- **Data Disk:** Add a separate **Volume** for Terrarium to use.
+- **Terrarium Mode:** `--storage-mode disk`
 
-- Ubuntu image: `ubuntu-24-04-x64`
-- Boot disk: keep the normal Droplet root disk
-- Data disk: add a separate DigitalOcean Volume for Terrarium ZFS
-- Terrarium mode: `--storage-mode disk`
-
-## Console flow
+## Creating the Server (Web Console)
 
 1. Create or upload your SSH key in DigitalOcean.
 2. Create a new Droplet with Ubuntu 24.04 and select that SSH key.
@@ -28,32 +18,23 @@ Official references:
 4. Attach the volume to the Droplet.
 5. Make sure the volume is not left auto-formatted and auto-mounted for normal filesystem use before handing it to Terrarium.
 6. SSH into the Droplet as `root`.
-7. Run Terrarium and point it at the attached volume.
 
-Example install:
+Once your Droplet is online, run the installer:
 
 ```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
-  --email admin@your-domain.tld \
-  --acme-email certs@your-domain.tld \
-  --idp local \
-  --storage-mode disk \
-  --storage-source auto
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-`auto` works well here when the Droplet has exactly one extra attached volume.
+## Creating the Server (CLI / doctl)
 
-## doctl flow
+If you prefer the terminal, you can spin up the perfect Terrarium Droplet using `doctl`.
 
 Create or import the SSH key:
-
 ```bash
 doctl compute ssh-key import terrarium --public-key-file ~/.ssh/id_ed25519.pub
-doctl compute ssh-key list
 ```
 
 Create the Volume:
-
 ```bash
 doctl compute volume create terrarium-data \
   --region fra1 \
@@ -61,7 +42,6 @@ doctl compute volume create terrarium-data \
 ```
 
 Create the Droplet with Ubuntu 24.04:
-
 ```bash
 doctl compute droplet create terrarium-1 \
   --region fra1 \
@@ -71,27 +51,15 @@ doctl compute droplet create terrarium-1 \
 ```
 
 Attach the Volume:
-
 ```bash
 doctl compute volume-action attach <volume-id> <droplet-id> --wait
 ```
 
-Then SSH in and install Terrarium:
+Finally, SSH into your new Droplet and run the automated installer.
 
-```bash
-curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash -s -- \
-  --email admin@your-domain.tld \
-  --acme-email certs@your-domain.tld \
-  --idp local \
-  --storage-mode disk \
-  --storage-source auto
-```
+## Private Network for Clustering
 
-## Private network for clustering
-
-For clustered Terrarium, put every Droplet in the same DigitalOcean VPC in the
-same region. DigitalOcean VPC networks are private to your account and are not
-reachable from the public internet.
+For clustered Terrarium, put every Droplet in the same DigitalOcean VPC in the same region. DigitalOcean VPC networks are private to your account and are not reachable from the public internet.
 
 Create a VPC:
 
@@ -126,21 +94,14 @@ terrariumctl cluster init
 terrariumctl cluster invite node2
 ```
 
-Then run the printed `terrariumctl cluster join --token ... --wireguard ...` command on the new
-node. Terrarium should auto-select the VPC address as the WireGuard endpoint.
-If it does not, pass the private endpoint explicitly and invite peers by their
-private address:
+Then run the printed `terrariumctl cluster join --token ... --wireguard ...` command on the new node. Terrarium should auto-select the VPC address as the WireGuard endpoint. If it does not, pass the private endpoint explicitly and invite peers by their private address:
 
 ```bash
 terrariumctl cluster init --wireguard-endpoint 10.42.0.11:51820
 terrariumctl cluster invite node2 10.42.0.12
 ```
 
-Provider firewalls only need WireGuard `51820/udp` between exact VPC member
-addresses. Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or
-Geneve `6081/udp`; Terrarium carries those inside WireGuard. Public firewall
-rules should only cover the normal Terrarium ingress ports documented in
-[Services and Endpoints](../reference/services-and-endpoints.md).
+Provider firewalls only need WireGuard `51820/udp` between exact VPC member addresses. Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or Geneve `6081/udp`; Terrarium carries those inside WireGuard. 
 
 ## Notes
 

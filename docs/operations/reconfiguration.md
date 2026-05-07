@@ -1,18 +1,18 @@
 # Reconfiguration
 
-Terrarium is meant to be changed in place. You do not reinstall the host every time you want to update a domain, change the IDP, or enable S3 disaster recovery.
+Terrarium is designed to be flexible. You don't need to reinstall your server or start from scratch just because you want to change your domain name, switch your login provider, or enable off-site backups. You can reconfigure everything in place safely.
 
-## Where Terrarium Stores State
+## Where Terrarium Stores Your Settings
 
-- repo checkout: `/opt/terrarium`
-- canonical config store: LXD dqlite-backed project `terrarium-system`, key `user.terrarium.config_b64`
-- local config export: `/etc/terrarium/config.yaml`
+Terrarium stores its configuration inside LXD's highly available internal database (`dqlite`). This means that if you have a cluster of servers, they all share the exact same configuration automatically.
 
-`terrariumctl set ...` updates the dqlite-backed config, refreshes the local YAML export, and then runs local reconciliation.
-Those day-2 updates skip the heavy OS hardening pass, because hardening is
-already applied during install and full `terrariumctl reconfigure` runs.
+A backup, human-readable copy of your settings is always kept at `/etc/terrarium/config.yaml`.
 
-## Main Reconfiguration Commands
+Whenever you run a `terrariumctl set ...` command, Terrarium updates the database, updates the text file, and then seamlessly applies the changes to your system. (It's smart enough to skip the heavy OS-hardening steps during routine updates, making reconfigurations very fast).
+
+## The Main Reconfiguration Commands
+
+Here are the commands you'll use to change how Terrarium behaves:
 
 - `terrariumctl set domains`
 - `terrariumctl set emails`
@@ -20,94 +20,72 @@ already applied during install and full `terrariumctl reconfigure` runs.
 - `terrariumctl set s3`
 - `terrariumctl set syncoid`
 
-There is also:
+*(If you ever need to manually force Terrarium to re-apply its configuration across the entire host, you can run `terrariumctl reconfigure`)*
 
-- `terrariumctl reconfigure`
-- `terrariumctl config import`
-- `terrariumctl config export`
-- `terrariumctl cluster ovn configure`
+---
 
-`terrariumctl reconfigure` re-runs the local Ansible reconciliation using the current saved config. When the LXD dqlite-backed store is present, it exports that config to `/etc/terrarium/config.yaml` first so Ansible sees the cluster copy.
+## Examples: How to Change Your Setup
 
-`terrariumctl config import` publishes the local YAML export into the LXD dqlite-backed store. Terrarium runs this automatically after install/reconfigure once LXD exists.
-
-`terrariumctl config export` recreates `/etc/terrarium/config.yaml` from the dqlite-backed store. This is mostly useful for cluster admission and debugging workflows.
-
-`terrariumctl cluster ovn configure` updates the shared cluster networking
-settings and then runs the same local reconciliation path. Without flags, it
-discovers online LXD member addresses, keeps an odd OVN central set, and adds
-exact member CIDRs to the peer firewall list.
-
-## What Gets Updated On Change
-
-- Traefik config changes trigger a Traefik restart
-- `oauth2-proxy` is rendered and restarted when IDP, admin-group, or management-domain settings change
-- LXD domain, ACME, OIDC issuer/client settings, and IdP group mappings are applied directly through `lxc config set` and `lxc auth`
-- self-hosted ZITADEL is enabled, disabled, or restarted inside the managed `terrarium-idp` LXD instance when its rendered config changes
-- Terrarium then re-runs `terrariumctl proxy sync`
-- when IDP mode is `local`, Terrarium also re-runs `terrariumctl idp sync`
-
-## Typical Changes
-
-### Change Domains
+### 1. Change Your Domain Name
+Want to switch from the default `traefik.me` domain to your own custom domain? 
 
 ```bash
 terrariumctl set domains example.com
 ```
 
-Optional overrides:
+Terrarium will automatically update Traefik, request new SSL certificates from Let's Encrypt, and update your dashboard URLs to `manage.example.com`, `lxd.example.com`, etc.
 
-- `--manage-domain`
-- `--lxd-domain`
-- `--auth-domain`
-
-### Change Email Settings
+### 2. Update Your Contact / SSL Emails
+If you need to change the email address used for Let's Encrypt certificates or system alerts:
 
 ```bash
 terrariumctl set emails --email ops@example.com --acme-email certs@example.com
 ```
 
-### Switch Between Local And External IDP
+### 3. Switch Between Local and External Logins (IDP)
+Decided you want to stop using the built-in ZITADEL login and switch to your company's Google Workspace or Auth0? 
 
-Local ZITADEL:
-
-```bash
-terrariumctl set idp local
-terrariumctl idp status
-```
-
-External OIDC:
-
+First, securely save your new OIDC secret to a file:
 ```bash
 install -m 600 /dev/null /root/terrarium-oidc-secret
 printf '%s\n' 'super-secret' > /root/terrarium-oidc-secret
+```
 
+Then, tell Terrarium to switch to external OIDC mode:
+```bash
 terrariumctl set idp oidc \
   --oidc https://issuer.example.com \
   --oidc-client terrarium \
   --oidc-secret-file /root/terrarium-oidc-secret \
   --admin-group terrarium-admins
 ```
+Terrarium will automatically test the connection to your new provider before applying the changes to ensure you don't accidentally lock yourself out.
 
-If LXD needs a separate OIDC client, add `--lxd-oidc-client` and
-`--lxd-oidc-secret-file`.
+*(Want to switch back to the built-in ZITADEL login? Just run `terrariumctl set idp local`)*
 
-### Enable S3 Backups
+### 4. Enable S3 Disaster Recovery Backups
+Ready to start automatically exporting your ZFS snapshots to an off-site S3 bucket?
 
+Securely save your S3 secret key:
 ```bash
 install -m 600 /dev/null /root/terrarium-s3-secret
 printf '%s\n' 'replace-with-real-secret' > /root/terrarium-s3-secret
+```
 
+Then enable S3 exports:
+```bash
 terrariumctl set s3 \
   --enable \
   --s3-endpoint https://nbg1.your-objectstorage.com \
   --s3-bucket terrarium-backups \
   --s3-region eu-central \
-  --s3-access-key ... \
+  --s3-access-key YOUR_ACCESS_KEY \
   --s3-secret-key-file /root/terrarium-s3-secret
 ```
+Terrarium will verify the credentials by uploading and deleting a test file before saving the configuration.
 
-### Enable Syncoid
+### 5. Enable Syncoid Replication
+If you have a second ZFS server and want to continuously mirror your snapshots to it:
 
 ```bash
 terrariumctl set syncoid \
@@ -116,3 +94,13 @@ terrariumctl set syncoid \
   --syncoid-target-dataset backup/terrarium \
   --syncoid-ssh-key /root/.ssh/id_ed25519
 ```
+
+---
+
+## What Actually Happens When You Reconfigure?
+
+Terrarium is designed to be non-disruptive. When you change a setting:
+- Traefik routing changes trigger a graceful Traefik restart.
+- IDP changes re-render and restart the `oauth2-proxy` without dropping active container traffic.
+- ZITADEL settings are updated inside the `terrarium-idp` container.
+- Terrarium automatically runs `terrariumctl proxy sync` to ensure all your published apps reflect the new domains and authentication rules.

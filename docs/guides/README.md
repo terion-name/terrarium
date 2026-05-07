@@ -1,23 +1,25 @@
 # Guides
 
-These guides are meant to be concrete runbooks, not just ideas.
+Welcome to the runbooks. These guides are meant to be concrete, step-by-step instructions—not just high-level ideas.
 
-Each page below explains:
+Each guide explains exactly how to run a specific app or AI agent inside Terrarium. You'll learn:
+- **What to install:** The exact commands to run inside your LXC container.
+- **How to create the container:** Step-by-step using either the sleek LXD web UI or the terminal.
+- **How to configure it:** A humane, interactive path for setting up the software.
+- **How to publish it:** Whether the app should stay completely private, or be exposed to the internet using Terrarium's `user.proxy` labels.
+- **How to secure it:** The best way to handle authentication (like locking a web app behind Single Sign-On).
 
-- what to install inside the LXC
-- how to create the container in the shipped LXD UI or from the CLI
-- the humane interactive path for configuring the workload from inside the container
-- a separate host-side automation version for people who want a condensed script
-- how authentication works
-- whether the service should stay private, use Terrarium's `user.proxy`, or follow a different access pattern
-- why Terrarium is a good fit for that workload in the first place
+### The Golden Rule
+Remember: **Everything inside a Terrarium container is completely private by default.** 
 
-Important: not every workload should be exposed the same way.
+You can run databases, internal APIs, and experimental AI agents without worrying about accidentally exposing them to the public internet. Only the routes you explicitly tag with a `user.proxy` label will become internet-facing.
 
-- [Hermes](hermes.md) maps cleanly to Terrarium's normal reverse-proxy pattern.
-- [VSCodium Web IDE](vscode.md) is the recommended browser-editor path for Terrarium: open marketplace by default, normal web serving, and clean `user.proxy` exposure.
-- [OpenClaw](openclaw.md) is different. Upstream recommends keeping the gateway on loopback and accessing it through SSH or Tailscale unless you are intentionally configuring a secured non-loopback deployment.
-- [Isolated Docker Compose deployments](compose.md) are a good fit when you want a whole app stack inside one time-machine-enabled container.
-- [Dokploy](dokploy.md) is the next step when you want a UI-driven deployment control plane and want to treat multiple Terrarium LXCs as Dokploy servers.
-- [Coolify](coolify.md) is another UI-driven deployment platform that fits Terrarium when each LXC is treated as a small SSH-managed Docker server.
-- [Protecting published services with OIDC](auth-protection.md) explains the recommended SSO pattern for routes that should not rely on weak or missing built-in auth.
+### Choose Your Guide:
+
+- **[VSCodium Web IDE](vscode.md):** The absolute best way to code in the cloud. Spin up a browser-based editor that is completely isolated and secured by SSO.
+- **[OpenClaw](openclaw.md):** Give the powerful autonomous AI agent a safe, disposable sandbox to execute code in.
+- **[Hermes](hermes.md):** Run agent-driven background services and expose only the user interface to the web.
+- **[Docker Compose Stacks](compose.md):** The cleanest way to run multi-container apps (like a web server + Postgres + Redis) without making a mess of your host machine.
+- **[Dokploy](dokploy.md):** Turn your Terrarium containers into an automated, UI-driven deployment platform (like Heroku or Vercel).
+- **[Coolify](coolify.md):** Another excellent, self-hosted Heroku alternative that runs perfectly inside a single Terrarium LXC.
+- **[Protecting Services with OIDC](auth-protection.md):** The magic label that forces users to log in before they can see your published web apps.

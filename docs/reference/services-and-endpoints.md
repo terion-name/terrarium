@@ -1,79 +1,73 @@
 # Services and Endpoints
 
-This page collects the most important host services, public endpoints, and runtime paths.
+When you install Terrarium, it sets up a powerful, hardened environment using several industry-standard tools. Here is a breakdown of what runs where, how it's secured, and where you can find its configuration.
 
-## Host Services
+---
 
-Terrarium provisions the host with:
+## 🛠️ The Core Stack
 
-- [Cockpit](https://github.com/cockpit-project/cockpit) with [cockpit-zfs](https://github.com/45Drives/cockpit-zfs) and [cockpit-S3ObjectBroswer](https://github.com/45Drives/cockpit-S3ObjectBroswer)
-- [LXD](https://github.com/canonical/lxd)
-- [OpenZFS](https://github.com/openzfs/zfs)
-- [sanoid and syncoid](https://github.com/jimsalterjrs/sanoid)
-- [Traefik](https://github.com/traefik/traefik) with the built-in dashboard
-- [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy), preferring Docker Hardened Images directly when registry credentials are present and Terrarium's GHCR mirror otherwise
-- Optional self-hosted [ZITADEL](https://github.com/zitadel/zitadel), running as the `terrarium-idp` LXD system instance with a Postgres sidecar that uses the same upstream-DHI, GHCR-mirror, public-fallback image order
-- Open vSwitch/OVN for the Terrarium LXD workload network
-- [devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening)
+Terrarium automatically installs and configures the following tools on your host machine:
 
-## Default Public Endpoints
+- **[LXD](https://github.com/canonical/lxd):** The hypervisor that runs your isolated Linux containers.
+- **[OpenZFS](https://github.com/openzfs/zfs):** The advanced file system providing instant snapshots and data integrity.
+- **[Cockpit](https://github.com/cockpit-project/cockpit):** A visual web dashboard for managing the host server.
+- **[Traefik](https://github.com/traefik/traefik):** The dynamic proxy that handles routing and Let's Encrypt SSL certificates.
+- **[ZITADEL](https://github.com/zitadel/zitadel) (Optional):** Your built-in Single Sign-On (SSO) provider.
+- **[OAuth2-Proxy](https://github.com/oauth2-proxy/oauth2-proxy):** The gatekeeper that forces users to authenticate before accessing protected routes.
+- **[Sanoid / Syncoid](https://github.com/jimsalterjrs/sanoid):** Automated ZFS snapshot retention and replication.
+- **[devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening):** An Ansible collection that automatically secures the host OS and SSH settings.
 
-- `https://manage.<dashed-public-ip>.traefik.me`
-- `https://proxy.<dashed-public-ip>.traefik.me`
-- `https://lxd.<dashed-public-ip>.traefik.me`
-- `https://auth.<dashed-public-ip>.traefik.me` when local ZITADEL is enabled
+---
 
-These can be overridden with:
+## 🌐 Public Endpoints
 
-- `--domain`
-- `--manage-domain`
-- `--proxy-domain`
-- `--lxd-domain`
-- `--auth-domain`
+By default, Terrarium publishes the following URLs (which automatically resolve to your server's IP via `traefik.me`):
 
-## Authentication Summary
+| Service | Default URL | Purpose |
+| --- | --- | --- |
+| **Cockpit** | `manage.<your-ip>.traefik.me` | Manage the host server, read logs, check ZFS. |
+| **Traefik** | `proxy.<your-ip>.traefik.me` | View live network routing rules. |
+| **LXD UI** | `lxd.<your-ip>.traefik.me` | Create and manage containers. |
+| **ZITADEL** | `auth.<your-ip>.traefik.me` | Manage users and SSO (if using `--idp local`). |
 
-- SSH: key-only
-- Cockpit: OIDC gate through `oauth2-proxy`, then local PAM login
-- LXD: native OIDC plus Terrarium-managed group mapping
-- Published app routes: optional OIDC gate through `@auth` or `@auth:group1,group2` on HTTP(S) routes under the Terrarium root domain; with no root domain configured, route auth is limited to the `manage` hostname
+*(You can override these to use your own custom domain using the `terrariumctl set domains` command).*
 
-## Runtime Paths
+---
 
-- repo checkout: `/opt/terrarium`
-- canonical config store: LXD dqlite-backed project `terrarium-system`, key `user.terrarium.config_b64`
-- local config export: `/etc/terrarium/config.yaml`
-- secrets: `/etc/terrarium/secrets`
-- general state: `/var/lib/terrarium`
-- oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy`
-- route-auth oauth2-proxy runtime: `/var/lib/terrarium/oauth2-proxy-routes`
-- local ZITADEL instance: `terrarium-idp`
-- local ZITADEL bootstrap password: `lxc exec terrarium-idp -- cat /etc/terrarium/secrets/zitadel_admin_password`
-- S3 catalog: `/var/lib/terrarium/catalog`
-- last exported snapshots: `/var/lib/terrarium/lastsnapshots`
+## 🔒 Security Posture
 
-## Internal Cluster Ports
+- **SSH:** Restricted to Key-Based authentication only. Password logins are disabled.
+- **Cockpit & Traefik Dashboards:** Protected by the Terrarium SSO gate (`oauth2-proxy`). You must log in via your identity provider first. Cockpit requires a secondary login using the host's `root` password.
+- **LXD Dashboard:** Uses native OIDC. You must belong to the Terrarium "Admin Group" to gain access.
+- **Your Apps:** Completely private by default. If you publish an app using the `user.proxy="...@auth"` tag, it is automatically protected by the same SSO gate.
 
-When clustering is enabled, Terrarium creates a WireGuard mesh and opens
-WireGuard only for configured joining/member endpoints:
+---
 
-- `51820/udp` for Terrarium cluster WireGuard handshakes
+## 📁 Important File Paths
 
-Inside the WireGuard mesh, Terrarium only opens these ports for configured
-`terrarium_cluster_peer_cidrs`, which are normally exact tunnel IPs:
+If you ever need to dig into the server's internals, here is where everything lives:
 
-- `8443/tcp` for LXD cluster/API traffic
-- `6641/tcp` for OVN northbound database traffic
-- `6642/tcp` for OVN southbound database traffic
-- `6081/udp` for OVN Geneve overlay traffic
+| Path | What's Inside? |
+| --- | --- |
+| `/etc/terrarium/config.yaml` | Your human-readable configuration backup. |
+| `/etc/terrarium/secrets/` | Generated passwords (like your Cockpit root login). |
+| `/var/lib/terrarium/` | General state files, S3 backup manifests, and OAuth proxy configs. |
+| `/opt/terrarium/` | The Terrarium source code repository. |
 
-Default cluster commands store exact `/32` tunnel CIDRs such as
-`10.255.54.2/32`. Broad peer subnets are an explicit trust decision because
-every host in the range can reach the LXD/OVN control-plane ports above.
+*Note: The **canonical** configuration is actually stored inside LXD's `dqlite` database. Do not edit `/etc/terrarium/config.yaml` by hand; always use `terrariumctl set` commands.*
 
-OVN database traffic uses Terrarium-managed TLS. Cluster initialization creates
-an OVN CA, each node receives a local OVN certificate during reconfiguration,
-and LXD/Open vSwitch connect to OVN northbound/southbound databases through
-`ssl:` remotes. Geneve overlay traffic on `6081/udp` is plain OVN tunnel
-traffic, but it is carried inside the Terrarium WireGuard mesh in the default
-cluster design.
+---
+
+## 🔗 Internal Cluster Ports (Advanced)
+
+If you link multiple Terrarium servers into a cluster, they communicate over a highly secure WireGuard mesh. 
+
+**Publicly Exposed Ports:**
+- **`51820/udp`**: The *only* port opened between cluster members. This handles the encrypted WireGuard tunnel.
+
+**Internal Ports (Carried safely *inside* the WireGuard tunnel):**
+- **`8443/tcp`**: LXD cluster communication.
+- **`6641/tcp` & `6642/tcp`**: OVN database traffic (which Terrarium secures with mutual TLS certificates).
+- **`6081/udp`**: OVN overlay traffic (container-to-container communication).
+
+You never need to open these internal ports on your hosting provider's firewall. Terrarium handles all the complex routing securely through the single WireGuard connection.

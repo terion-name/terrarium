@@ -1,19 +1,23 @@
 # Getting Started
 
-This section covers the pieces you usually want before the first install:
+Welcome to Terrarium. Before you install, it helps to understand a few key concepts so you can set up your server exactly how you want it. 
 
-- [Installation](./installation)
-- [Storage and Sizing](./storage)
-- [Domains and Authentication](./domains-and-auth)
-- [Management GUIs](./management-guis)
-- [Shared Data Between Containers](./shared-data-between-containers)
-- [External Shared Storage](./external-shared-storage)
+This section covers everything you need to know to get up and running:
 
-Recommended order:
+- **[Installation](./installation):** The step-by-step process for getting Terrarium onto your VPS.
+- **[Storage and Sizing](./storage):** How to choose the right hardware and structure your storage for the best performance and snapshot capabilities.
+- **[Domains and Authentication](./domains-and-auth):** Setting up custom domains and choosing how you want to handle Single Sign-On (SSO) for your private apps.
+- **[Management GUIs](./management-guis):** A quick tour of the built-in visual dashboards you get right out of the box.
+- **[Shared Data Between Containers](./shared-data-between-containers):** How to let your isolated environments safely share files.
+- **[External Shared Storage](./external-shared-storage):** Connecting Terrarium to external storage solutions like Hetzner Storage Boxes.
 
-1. decide whether you can attach a separate block volume
-2. choose your root domain or accept the default generated domains
-3. choose your identity provider mode
-4. run the installer
+### 🗺️ Recommended Path
 
-For provider-specific VPS creation steps, continue to [Provider Guides](../providers/).
+To get off to the best start, we recommend following these steps:
+
+1. **Plan your storage:** Decide if your provider allows you to attach a separate block volume (highly recommended for performance and backups). 
+2. **Pick a domain:** Decide whether you want to use your own custom domain or rely on Terrarium's automatically generated `traefik.me` domains.
+3. **Choose your login method:** Decide if you want to use Terrarium's built-in local identity provider (ZITADEL) or bring your own (like Google, GitHub, or Auth0).
+4. **Install:** Run the automated setup script.
+
+*Creating your VPS right now? Check out our [Provider Guides](../providers/) for specific setup instructions for DigitalOcean, Hetzner, Vultr, and others.*

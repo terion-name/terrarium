@@ -1,38 +1,32 @@
 # Provider Guides
 
-These guides focus on one Terrarium-friendly pattern:
+Terrarium works beautifully across many cloud providers, but the absolute best experience comes from following one simple pattern:
 
-1. Create an Ubuntu 24.04 VPS
-2. Add your SSH key during provisioning
-3. Attach separate block storage when the provider supports it
-4. Install Terrarium in `disk` mode
+1. Create a fresh **Ubuntu 24.04 VPS**.
+2. Add your **SSH key** during creation (so you don't need a password).
+3. Attach a **separate block storage volume** (if your provider offers it).
+4. Run the Terrarium installer in **`disk`** mode.
 
-Recommended providers for the cleanest Terrarium setup:
+By putting your containers on their own dedicated volume, you keep your system clean and give your ZFS time machine plenty of room to operate.
 
-| Provider | Separate block storage | Private clustering network | CLI creation docs | Best Terrarium mode |
+## Recommended Cloud Providers
+
+Here are step-by-step guides for creating the perfect VPS on popular cloud platforms:
+
+| Provider | Supports Extra Storage? | Clustering Network? | Best Terrarium Mode | Setup Guide |
 | --- | --- | --- | --- | --- |
-| [DigitalOcean](digitalocean.md) | Yes | Yes, VPC | Yes (`doctl`) | `disk` |
-| [Vultr](vultr.md) | Yes | Yes, VPC 2.0 | Yes (`vultr-cli`) | `disk` |
-| [Hetzner Cloud](hetzner.md) | Yes | Yes, Networks | Yes (`hcloud`) | `disk` |
-| [Hostinger](hostinger.md) | No documented attachable block volume | No documented multi-VPS private network | Limited CLI docs; use hPanel for creation | `file` |
+| **DigitalOcean** | Yes | Yes (VPC) | `disk` | [Read Guide](digitalocean.md) |
+| **Hetzner Cloud** | Yes | Yes (Networks) | `disk` | [Read Guide](hetzner.md) |
+| **Vultr** | Yes | Yes (VPC 2.0) | `disk` | [Read Guide](vultr.md) |
+| **Hostinger** | No | No | `file` | [Read Guide](hostinger.md) |
 
-> [!WARNING]
-> Hostinger is included because it is popular with agent users and often comes up when people are experimenting with low-cost VPS hosts. But we do not recommend it for Terrarium because it lacks independently attachable block storage and a private multi-node network for clustering.
+*Note: Hostinger is included because it's popular for low-cost setups. However, because it lacks attachable block storage, we highly recommend DigitalOcean, Hetzner, or Vultr for the best Terrarium experience.*
 
-General recommendation:
+## A Note on Clustering (Advanced)
 
-- Prefer `disk` mode with a separate data volume.
-- Keep the boot disk for Ubuntu and host services.
-- Reserve the extra volume for LXD and ZFS snapshots.
+If you plan to link multiple Terrarium servers together into a cluster:
+- **Use Private Networks:** Always put your servers in the same provider-level VPC or Private Network. 
+- **Stay Regional:** Keep your servers in the same physical region to ensure low latency and compatibility.
+- **Let Terrarium Handle the Mesh:** Terrarium uses WireGuard to securely connect your servers. You only need to allow WireGuard traffic (`51820/udp`) through your provider's firewall between the specific IP addresses of your servers. Terrarium handles all the complex container networking inside that secure tunnel.
 
-Clustering recommendation:
-
-- Put every Terrarium cluster member in the same provider private network, VPC, or VPC 2.0 when the provider supports it.
-- Terrarium clusters use a WireGuard mesh by default, so private networking is recommended but not mandatory.
-- Keep the cluster members in one provider region unless you know that provider's private network spans the regions you want to use.
-- Let `terrariumctl cluster init` auto-discover the best WireGuard endpoint first.
-- If auto-discovery picks the wrong endpoint, pass `--wireguard-endpoint <private-or-public-ip>:51820`.
-- Open WireGuard `51820/udp` only between exact cluster member endpoint IPs.
-- Do not expose LXD `8443/tcp`, OVN `6641/tcp`, OVN `6642/tcp`, or Geneve `6081/udp` on provider firewalls; Terrarium carries them inside WireGuard.
-
-See [Clustering](../operations/clustering.md) for the Terrarium-side workflow.
+*Ready to cluster? Check out the [Clustering Guide](../operations/clustering.md) once your servers are up.*

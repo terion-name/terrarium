@@ -1,142 +1,98 @@
 # Backups and Restore
 
-Terrarium has three backup paths:
+Terrarium provides three different layers of protection for your data, giving you the flexibility to easily undo a small mistake or recover your entire server after a catastrophe.
 
-1. local time machine with ZFS snapshots
-2. optional off-host recursive ZFS replication through syncoid
-3. optional S3-style archive export using compressed ZFS streams
+1. **The Local Time Machine (ZFS Snapshots):** Fast, automatic snapshots of your containers every 15 minutes.
+2. **Disaster Recovery (S3 Exports):** Encrypted and compressed off-site backups to the cloud.
+3. **Off-Host Replication (Syncoid):** Constant ZFS-to-ZFS mirroring to a second server (optional).
 
-The mental model is:
+## The Local Time Machine
 
-- local snapshots are the fast time machine for day-to-day mistakes
-- S3 exports are the disaster-recovery copy for losing the host entirely
+By default, Terrarium takes an incredibly lightweight snapshot of your containers in the background using a tool called `sanoid`. 
 
-## Local Time Machine
+Your local history retains:
+- **4** 15-minute snapshots
+- **24** hourly snapshots
+- **14** daily snapshots
+- **3** monthly snapshots
 
-Local time-machine history is managed by `sanoid` on the ZFS pool that backs LXD containers.
+*(Because ZFS snapshots only store changed data blocks, keeping all of these snapshots requires very little storage space.)*
 
-Current default retention:
+### Useful Commands
 
-- `4` 15-minute snapshots
-- `24` hourly snapshots
-- `14` daily snapshots
-- `3` monthly snapshots
-
-Useful commands:
-
+**See your available snapshots:**
 ```bash
 terrariumctl backup list
-terrariumctl backup restore --instance my-app
-terrariumctl backup restore --instance my-app --at autosnap_2026-04-19_10:00:00_hourly
-terrariumctl idp backup
-terrariumctl idp restore
 ```
 
-By default, restore is:
-
-- source: `local`
-- restore point: latest snapshot
-- mode: in-place
-
-## Local ZITADEL
-
-When local ZITADEL is enabled, Terrarium runs it as the managed LXD instance
-`terrarium-idp`. Its database and bootstrap material live inside that instance,
-so the normal LXD/ZFS snapshot and S3 export machinery covers it.
-
-Useful commands:
-
+**Restore a container to its absolute latest state (Undo the last 15 minutes):**
 ```bash
-terrariumctl idp status
-terrariumctl idp backup
-terrariumctl idp restore
-terrariumctl idp restore --source s3 --at autosnap_2026-04-19_10:00:00_hourly
+terrariumctl backup restore --instance my-app
 ```
 
-`terrariumctl idp backup` creates a manual recursive snapshot of the IDP
-instance. If S3 exports are enabled, it also exports the current backup chain
-after creating that snapshot.
+**Restore a container to a specific point in time:**
+```bash
+terrariumctl backup restore --instance my-app --at autosnap_2026-04-19_10:00:00_hourly
+```
 
-## In-Place Restore
+## Restoring In-Place vs. Restoring As New
 
-`terrariumctl backup restore --instance NAME` restores in place by default.
+When you run a standard `restore` command, Terrarium gracefully stops your container, instantly rewinds its hard drive to the requested snapshot, and tells you to start it back up. **This overwrites the broken container.**
 
-Behavior:
+But what if you want to inspect a snapshot *without* destroying the current version of the app? 
 
-- Terrarium stops the instance if needed
-- rolls the dataset back with `zfs rollback -r`
-- tells you to start the instance again
-
-This path is non-interactive apart from the safety confirmation.
-
-## Restore As New
-
-If you want to recover an instance as a new LXD instance:
-
+You can restore a snapshot as a completely **new, separate container**:
 ```bash
 terrariumctl backup restore --instance my-app --as-new my-app-restored
 ```
+*Note: Terrarium automatically strips the network routing labels off the restored copy. This prevents the clone from accidentally hijacking your live website's traffic.*
 
-Terrarium will:
+## Disaster Recovery: S3 Exports
 
-1. reconstruct or clone the dataset
-2. rewrite the recovered LXD metadata for the new instance name
-3. remove host-bound proxy devices and Terrarium `user.proxy` labels from the recovered copy
-4. print a clear notice about what happens next
-5. launch interactive `lxd recover`
+If your VPS catches on fire or is accidentally deleted, local snapshots won't save you. You need off-site backups.
 
-The recovered instance is intentionally private until you publish it again. This prevents a restored copy from binding the same host ports or hijacking the same public route as the source instance.
+If you enabled S3 backups during installation (or later via `terrariumctl set s3`), Terrarium will compress your ZFS snapshots and stream them directly to an S3-compatible bucket (like AWS S3, Cloudflare R2, or Backblaze B2).
 
-Why this is interactive:
-
-- the final upstream import step still depends on `lxd recover`
-
-## S3 Exports
-
-When S3 is enabled, Terrarium can export the current ZFS backup chain to S3-compatible object storage.
-
-This is the disaster-recovery layer. It is not just another local snapshot copy on the same disk.
-
-Useful command:
-
+**Trigger a manual S3 upload:**
 ```bash
 terrariumctl backup export
 ```
 
-Terrarium:
-
-- records the last exported snapshot per instance under `/var/lib/terrarium/lastsnapshots`
-- uploads either a full `zfs send` or incremental `zfs send -I`
-- compresses streams with `zstd`
-- stores manifests locally under `/var/lib/terrarium/catalog`
-
-## S3 Restore
-
-You can restore from S3 by switching the source:
-
+**Restore a completely destroyed container from the cloud:**
 ```bash
 terrariumctl backup restore --source s3 --instance my-app
-terrariumctl backup restore --source s3 --instance my-app --as-new my-app-restored
+```
+*(This command works exactly the same as a local restore, but it will download and unpack the heavy ZFS data from your S3 bucket first.)*
+
+## Backing Up Your Logins (ZITADEL)
+
+If you are using Terrarium's built-in local login provider (ZITADEL), your entire authentication database is actually running inside a hidden LXD container named `terrarium-idp`. 
+
+This means it is automatically protected by the exact same time machine.
+
+**See the health of your login provider:**
+```bash
+terrariumctl idp status
 ```
 
-Defaults still apply:
+**Force an immediate backup of your login database:**
+```bash
+terrariumctl idp backup
+```
 
-- if `--at` is omitted, Terrarium uses the latest manifest chain
-- if `--as-new` is omitted, Terrarium restores in place
+**Undo a catastrophic change to your users/groups:**
+```bash
+terrariumctl idp restore
+```
 
-## Syncoid
+*(You can even restore your login database from an S3 backup if your entire server goes down.)*
 
-Syncoid is the off-host ZFS-to-ZFS replication path.
+---
 
-Use it when you have:
+## Advanced: Syncoid Replication
 
-- another ZFS host
-- SSH connectivity to that host
-- a target dataset prepared for replication
+If you own a second server running ZFS, Terrarium can constantly stream block-level changes to it over an encrypted SSH connection. 
 
-It is configured through:
+This gives you a near real-time, instantly bootable replica of your entire infrastructure.
 
-- install flags
-- or `terrariumctl set syncoid`
-
-For full CLI details, see [terrariumctl Reference](../reference/terrariumctl.md).
+*(You can set this up during installation, or configure it later using `terrariumctl set syncoid`)*

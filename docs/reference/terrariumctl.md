@@ -1,6 +1,6 @@
 # terrariumctl
 
-`terrariumctl` is the main Terrarium control surface. It handles install, status, reconfiguration, proxy sync, IDP sync, backup export, and restore. Installed hosts also provide `trm` as a shorthand alias for the same command.
+`terrariumctl` (or its shortcut alias `trm`) is the primary command-line tool for managing your Terrarium server. It handles installation, status checks, reconfiguration, proxy syncing, IDP syncing, backup exports, and restores.
 
 ## Top-Level Commands
 

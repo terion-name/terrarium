@@ -1,95 +1,67 @@
 # Management GUIs
 
-Terrarium is not only for terminal-heavy users.
+You shouldn't have to memorize a hundred command-line flags just to see what your server is doing. 
 
-One of its practical advantages is that it gives you several browser-based admin interfaces out of the box, so you can create containers, inspect storage, manage routes, and understand what the host is doing without memorizing every command first.
+One of Terrarium's best features is that it comes with a suite of beautiful, browser-based management dashboards right out of the box. Whether you're checking server health, launching new containers, or troubleshooting network traffic, there is a visual interface ready to help.
 
-By default, the management UIs are:
+By default, these dashboards are located at:
+- **Cockpit (Host Management):** `manage.<your-domain>`
+- **LXD (Container Management):** `lxd.<your-domain>`
+- **Traefik (Network Routing):** `proxy.<your-domain>`
 
-- `manage.<domain>` for Cockpit
-- `proxy.<domain>` for the Traefik dashboard
-- `lxd.<domain>` for the LXD UI
+*Note: All of these dashboards are secured behind Terrarium's Single Sign-On (SSO) gate. Only users in your admin group can access them.*
 
-All three are management surfaces. They are separate from the apps you publish from inside containers.
+---
 
-## Cockpit
+## Cockpit (Host Management)
+**Your server's mission control.**
 
-Cockpit is the main host management UI.
+Cockpit gives you a high-level view of your entire server. It's the perfect place to start when you want to:
+- Check CPU, memory, and network usage.
+- Read system logs without typing `journalctl`.
+- Open a web-based terminal directly to the host.
+- Manage firewall rules.
 
-It is the best place to start if you want a graphical way to:
+Terrarium also pre-installs special ZFS and S3 extensions for Cockpit, making it incredibly easy to visually manage your time-machine storage pools and backups without needing to be a ZFS expert.
 
-- inspect the server
-- watch services and logs
-- use the built-in terminal
-- manage the firewall and networking
-- browse ZFS through the installed Cockpit extensions
+![Cockpit overview](./screenshots/cockpit-overview.webp)  
+*Source: [Cockpit project homepage](https://cockpit-project.org/)*
 
-Terrarium ships Cockpit together with cockpit-zfs and cockpit-S3ObjectBroswer, which makes the storage side much more approachable for non-experts.
+---
 
-Authentication model:
+## The LXD UI (Container Management)
+**Where your environments live.**
 
-- first, you pass Terrarium's OIDC gate
-- then you log into Cockpit with a local host account
+This is likely where you'll spend most of your time. The LXD UI is a sleek dashboard for managing all your isolated workloads. Use it to:
+- Create, start, stop, and delete containers.
+- View real-time resource usage for specific apps.
+- Take and restore snapshots with the click of a button.
+- Manage container profiles, networks, and storage.
 
-Official screenshot:
+![LXD UI instances view](./screenshots/lxd-ui-instances.png)  
+*Source: [Canonical MicroCloud tutorial](https://documentation.ubuntu.com/microcloud/latest/tutorial/multi-member/)*
 
-![Cockpit overview](./screenshots/cockpit-overview.webp)
+---
 
-Source: [Cockpit project homepage](https://cockpit-project.org/)
+## Traefik Dashboard (Network Routing)
+**The traffic cop.**
 
-## LXD UI
+When you publish an app to the web (like `myapp.your-domain.com`), Traefik is the engine that routes the traffic to the correct container and handles the SSL certificate. 
 
-The LXD UI is where you manage containers directly.
+The Traefik dashboard is invaluable when you need to:
+- Verify that a new domain was routed correctly.
+- See which apps are currently exposed to the internet.
+- Debug routing issues or check which SSO middlewares are active on a route.
 
-It is useful for:
+![Traefik dashboard](./screenshots/traefik-dashboard.png)  
+*Source: [Traefik getting started guide](https://doc.traefik.io/traefik/getting-started/docker/)*
 
-- creating and deleting instances
-- inspecting instance state
-- working with profiles, networks, and storage pools
-- managing snapshots and projects
+---
 
-This is the UI Terrarium users will often spend the most time in once the host is up.
+## Summary: Which UI should I use?
 
-Authentication model:
+- **Use Cockpit** when you want to look at the physical server, manage ZFS storage, or read system logs.
+- **Use the LXD UI** when you want to spin up a new app, restart a container, or restore a snapshot.
+- **Use Traefik** when you want to confirm that a web address is properly pointing to your container.
 
-- native LXD OIDC
-- access limited to the Terrarium admin group
-
-Official screenshot:
-
-![LXD UI instances view](./screenshots/lxd-ui-instances.png)
-
-Source: [Canonical MicroCloud tutorial](https://documentation.ubuntu.com/microcloud/latest/tutorial/multi-member/)
-
-## Traefik Dashboard
-
-Terrarium also exposes the Traefik dashboard at:
-
-- `proxy.<domain>`
-
-This is useful when you want to see what the host proxy is doing:
-
-- which routers exist
-- which services and middlewares are active
-- whether published routes are wired the way you expect
-
-That matters a lot once you start publishing apps from inside containers.
-
-Authentication model:
-
-- same Terrarium OIDC gate as the rest of the management surface
-- restricted to the Terrarium admin group
-
-Official screenshot:
-
-![Traefik dashboard](./screenshots/traefik-dashboard.png)
-
-Source: [Traefik getting started guide](https://doc.traefik.io/traefik/getting-started/docker/)
-
-## Which UI To Use For What
-
-- use Cockpit for host-level administration
-- use LXD UI for container lifecycle and LXD resources
-- use the Traefik dashboard when you are debugging or understanding published routes
-
-If you prefer the terminal, all of this is still available through `terrariumctl`, `lxc`, and normal Linux tools. The point of these UIs is that you do not have to start there.
+*(And don't worry—if you're a terminal veteran, everything you see in these GUIs can still be done from the command line using `terrariumctl` and `lxc`.)*

@@ -1,67 +1,55 @@
 # About Terrarium
 
-Terrarium is a way to turn a plain Ubuntu 24.04 VPS into a safer, easier home for isolated environments.
+Terrarium transforms a standard Ubuntu 24.04 VPS into a much friendlier, safer, and incredibly forgiving home for your applications and isolated environments. 
 
-It is built for a very practical problem: modern agents, dev tools, and self-hosted apps often need more freedom than Docker alone feels comfortable giving them, but giving that freedom directly to your host is a bad trade. Terrarium sits in the middle. Each workload gets its own LXC container on ZFS, the host stays hardened, and you still get convenient web UIs and automated publishing when you need them.
+It was built to solve a very modern problem: today's AI agents, development tools, and complex self-hosted apps often need more freedom than standard Docker containers can comfortably provide. But giving them unlimited access to your host operating system is a recipe for disaster. 
 
-## What It Is For
+Terrarium sits perfectly in the middle. It gives every workload its own fully isolated LXC container powered by a robust ZFS file system. Your host machine stays clean and secure, while you get the convenience of built-in web dashboards, automatic SSL routing, and an automated time machine to undo any mistakes.
 
-Terrarium is a strong fit when you want to run things like:
+## What Is It For?
 
-- agent systems such as OpenClaw or Hermes
-- browser-based development environments like VSCodium Web
-- temporary sandboxes for experiments or client work
-- self-hosted apps or Docker Compose stacks that should not interfere with each other
+Terrarium shines when you need to run:
 
-The point is not just “run containers”. The point is to give each workload a real environment with enough freedom to be useful, while keeping the host and the other workloads out of the blast radius.
+- **AI Agents (like OpenClaw or Hermes):** Give them a realistic playground where they can install packages and run shell commands without risking your main server.
+- **Browser-Based Workspaces:** Host cloud IDEs like VSCodium Web for seamless, anywhere access to your code.
+- **Experimental Sandboxes:** Spin up temporary environments for client work or trying out new tech, then easily tear them down.
+- **Complex Docker Compose Stacks:** Run multi-service apps (like a web app, database, and Redis cache) completely isolated from one another.
 
-## Why People Use It
+The goal isn't just to "run containers." It's to give your software the breathing room it needs to be useful, while ensuring your server and other apps stay completely out of the blast radius.
 
-Terrarium gives you a few important properties at the same time:
+## Why You'll Love It
 
-- **Isolation**
-  Each workload lives in its own container, with its own packages, processes, filesystem, and state.
-- **Private-by-default networking**
-  Containers sit behind LXD NAT, so listening inside a container does not automatically make a service public.
-- **A built-in time machine**
-  ZFS snapshots let you step backward through mistakes, failed upgrades, or agent damage instead of rebuilding from scratch.
-- **Disaster recovery**
-  If you enable S3 exports, recovery is not limited to the local disk. You also get an off-host path for losing the whole VPS.
-- **Friendly management**
-  Cockpit, the LXD UI, and the Traefik dashboard give you visual control surfaces when you do not want everything to live in a terminal.
+Terrarium brings enterprise-grade infrastructure features down to earth, combining them into a simple, cohesive experience:
 
-## How To Think About It
+- **True Isolation**
+  Every workload lives in its own container with its own processes, packages, and filesystem. What happens in the container, stays in the container.
+- **Private-by-Default Security**
+  By default, containers sit behind a private network. Just because a database is running doesn't mean it's exposed to the internet. You explicitly choose what to publish.
+- **The Built-In Time Machine**
+  Terrarium takes automated ZFS snapshots of your environments. If an update breaks or an agent deletes something important, you don't have to rebuild. Just rewind.
+- **Disaster Recovery Ready**
+  Go beyond the local machine. With built-in S3 exports, you can back up your snapshots off-site so your data is safe even if the entire VPS is destroyed.
+- **Visual Management**
+  Say goodbye to memorizing endless command-line arguments. Terrarium includes beautiful web UIs (Cockpit, the LXD dashboard, and Traefik) so you can manage your server visually.
 
-The simplest mental model is:
+Terrarium is designed for tech enthusiasts who want the flexibility of a full server without having to become full-time DevOps engineers just to keep things secure and recoverable.
 
-1. Put each meaningful workload in its own container.
-2. Keep that workload private until you are ready to expose it.
-3. Publish only the routes you actually want reachable.
-4. Use snapshots as your day-to-day time machine.
-5. Use S3 exports if you want disaster recovery beyond the machine itself.
+## Where to Go Next
 
-That makes Terrarium especially useful for advanced users who want power and flexibility, but do not want to become full-time infrastructure engineers just to host agents or dev environments safely.
+**If you're ready to get started:**
+1. Head over to [Getting Started](./getting-started/).
+2. Read up on [Storage & Sizing](./getting-started/storage) before you buy a server.
+3. Check our [Provider Guides](./providers/) for tips on launching a VPS on DigitalOcean, Hetzner, and others.
 
-## What To Read Next
+**If you want to understand how it works:**
+1. Dive into the [Security Model](./security).
+2. Read the [Architecture Overview](./architecture).
+3. Check out the [Management GUIs](./getting-started/management-guis) to see the visual control plane.
 
-If you are new here:
+**If you know what you want to build:**
+1. Browse the [Guides](./guides/).
+2. Learn how to deploy [OpenClaw](./guides/openclaw), [Hermes](./guides/hermes), [VSCodium Web](./guides/vscode), or [Compose stacks](./guides/compose).
 
-1. Start with [Getting Started](./getting-started/).
-2. Read [Storage and Sizing](./getting-started/storage) before creating a VPS.
-3. If you are still choosing a provider, use the [Provider Guides](./providers/).
-
-If you want to understand how the system behaves:
-
-1. Read the [Security Model](./security).
-2. Read the [Architecture](./architecture).
-3. Check [Management GUIs](./getting-started/management-guis) if you want the visual control plane.
-
-If you already know what you want to run:
-
-1. Go to [Guides](./guides/).
-2. Pick a workload like [OpenClaw](./guides/openclaw), [Hermes](./guides/hermes), [VSCodium Web](./guides/vscode), or [Compose deployments](./guides/compose).
-
-If you are thinking about operations and recovery:
-
-1. Read [Backups and Restore](./operations/backups-and-restore).
-2. Keep the [terrariumctl Reference](./reference/terrariumctl) nearby.
+**If you're planning for the worst:**
+1. Read up on [Backups and Restore](./operations/backups-and-restore).
+2. Keep the [terrariumctl Reference](./reference/terrariumctl) handy for operational commands.

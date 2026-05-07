@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Terrarium
-  text: Transform any VPS into a secure host with isolated environments for your agents, development, and workloads. Time machine included.
-  tagline: Give each workload its own hardened LXC container, keep it private by default behind NAT, manage it from built-in web UIs, publish only what you mean, and rewind mistakes in small ZFS-backed steps. Lock anything behind single sign-on and user management
+  text: Complex infrastructure made incredibly simple. Turn any VPS into a secure, forgiving home for your apps and AI agents.
+  tagline: Give each workload its own isolated container, keep everything private by default, and publish only what you need. With built-in web dashboards, automated SSL, single sign-on, and a time machine to undo mistakes, managing your server has never been simpler.
   image:
     src: ./banner.webp
     alt: Terrarium
@@ -16,75 +16,72 @@ hero:
       text: See Guides
       link: /guides/
     - theme: alt
-      text: Understand Security
+      text: Security Model
       link: /security
 
 features:
-  - title: 🔐 Harden the host
-    details: Terrarium secures the VPS itself first, with SSH hardening and safer defaults, so your management surface is not a raw fresh-server free-for-all.
-  - title: 🤖 Real agent environments
-    details: Run OpenClaw, Hermes, VSCodium, Compose stacks, and other workloads that need packages, services, shells, and background processes.
-  - title: 🛡️ Private by default
-    details: Containers sit behind LXD NAT, so random scans and inbound internet noise do not hit them directly. A service only becomes public when you expose it.
-  - title: ⏪ Built-in time machine
-    details: ZFS snapshots let you roll environments backward in small steps, and S3 exports give you disaster recovery when the whole VPS is gone.
-  - title: 🌐 Publish only what matters
-    details: Put apps behind Traefik with TLS and optional OIDC, while databases, Redis, admin ports, and internal APIs stay private inside the container.
-  - title: 🖥️ Built-in management UIs
-    details: Cockpit, the LXD UI, and the Traefik dashboard give you a visual control plane instead of forcing everything through the terminal.
+  - title: 🔐 Security Made Simple
+    details: Terrarium hardens your VPS automatically. Your apps sit in a private network, safe from internet noise and random scans. You only expose what you explicitly choose to publish.
+  - title: ⏪ The Built-In Time Machine
+    details: Never fear a broken update again. ZFS snapshots let you roll your environments backward in small steps. Made a mistake? Just rewind. Off-site S3 backups offer total peace of mind.
+  - title: 🌐 Effortless Publishing
+    details: Route your apps to the web through Traefik with automatic SSL certificates. Lock down private dashboards and tools with built-in Single Sign-On (OIDC).
+  - title: 🖥️ Visual Dashboards
+    details: You don't have to live in the terminal. Manage your server, containers, and network traffic through beautiful, built-in web interfaces like Cockpit and the LXD UI.
+  - title: 🤖 Perfect for AI Agents
+    details: Give autonomous agents like OpenClaw or Hermes a real environment to work in. If they make a mess, your host stays safe, and you can instantly reset their sandbox.
+  - title: 🐳 Beyond Basic Docker
+    details: Run multi-service Compose stacks, databases, and background workers in isolated LXC containers instead of tangling everything together on your host OS.
 ---
 
 <div class="terrarium-home-grid">
   <section class="terrarium-panel terrarium-panel-accent">
-    <p class="terrarium-eyebrow">Why people use it</p>
-    <h2>One VPS, many isolated environments, much less regret.</h2>
+    <p class="terrarium-eyebrow">Why you'll love it</p>
+    <h2>One server. Total isolation. Zero stress.</h2>
     <p>
-      Terrarium is for people who want to give agents and development tools room to operate without
-      turning the whole host into a shared blast radius. Each workload gets a real container. The host
-      stays hardened. Recovery gets a built-in time machine.
+      Managing a server shouldn't require a PhD in systems engineering. Terrarium is built for tech enthusiasts who want the power of a dedicated VPS without the anxiety of breaking it. Every app, AI agent, or development environment gets its own isolated container. The host stays pristine, and recovery is as easy as clicking "undo".
     </p>
   </section>
 
   <section class="terrarium-panel">
-    <p class="terrarium-eyebrow">What changes</p>
+    <p class="terrarium-eyebrow">The Terrarium Difference</p>
     <ul class="terrarium-checklist">
-      <li>Agent breaks an environment: step back through snapshots instead of rebuilding from scratch.</li>
-      <li>Compose stack needs Postgres, Redis, workers, and dashboards: keep them inside one private LXC.</li>
-      <li>Browser IDE or internal UI needs public access: publish it through Traefik and protect it with OIDC.</li>
+      <li><strong>Mistake-proof:</strong> If an agent breaks an environment, step back through automated snapshots instead of starting over.</li>
+      <li><strong>Clean organization:</strong> Keep complex databases, Redis caches, and web workers neatly bundled inside a single private container.</li>
+      <li><strong>Secure access:</strong> Host a browser-based IDE or internal dashboard and protect it with enterprise-grade Single Sign-On with just a label.</li>
     </ul>
   </section>
 </div>
 
-## Why Terrarium is safer
+## Safety by Default
 
-The most important part is not flashy, but it changes how comfortable the whole system feels.
+The best part of Terrarium isn't just what it can do—it's how safe it feels to use.
 
-Containers are not exposed directly to the internet. They sit on Terrarium's private LXD network, which means:
+By default, your containers are not exposed to the internet. They live on a private network managed by Terrarium. This means:
+- Random internet bots can't scan or poke at your internal services.
+- A database listening on `0.0.0.0` inside a container is still entirely private.
+- You can run complex, multi-tier applications and only expose the specific web frontend you want people to see.
 
-- random scans and probes do not hit them directly
-- a service listening on `0.0.0.0` inside the container is still not automatically public
-- complex stacks can keep internal services private even when one frontend is exposed
+It's advanced security without the complex configuration. You get to move fast and experiment, knowing your infrastructure is guarding your back.
 
-That is why Terrarium works so well for non-experts. You can run a lot inside a container without accidentally publishing all of it.
-
-## Good fits
+## What Can You Run?
 
 <div class="terrarium-cards">
+  <a class="terrarium-card" href="./guides/vscode">
+    <strong>VSCodium Web IDE</strong>
+    <span>Spin up browser-based coding environments with their own filesystems, completely isolated and protected by SSO.</span>
+  </a>
   <a class="terrarium-card" href="./guides/openclaw">
-    <strong>OpenClaw</strong>
-    <span>Give it a real environment and keep risky experimentation away from the host.</span>
+    <strong>AI Agents (OpenClaw)</strong>
+    <span>Give agents a real, capable sandbox to explore and execute tasks, while keeping your host OS totally off-limits.</span>
+  </a>
+  <a class="terrarium-card" href="./guides/compose">
+    <strong>Docker Compose Stacks</strong>
+    <span>Deploy complex apps with databases and workers inside a single time-machine-enabled container.</span>
   </a>
   <a class="terrarium-card" href="./guides/hermes">
     <strong>Hermes</strong>
-    <span>Run agent services in their own container and expose only the UI or API you actually want public.</span>
-  </a>
-  <a class="terrarium-card" href="./guides/vscode">
-    <strong>VSCodium Web</strong>
-    <span>Spin up browser-accessible coding environments with custom packages, isolated filesystems, and proxy-based access.</span>
-  </a>
-  <a class="terrarium-card" href="./guides/compose">
-    <strong>Compose stacks</strong>
-    <span>Keep multi-service apps together inside one time-machine-enabled LXC instead of tangling them into the host Docker setup.</span>
+    <span>Run background agent services privately and expose only the user interface to the web.</span>
   </a>
 </div>
 
@@ -92,57 +89,54 @@ That is why Terrarium works so well for non-experts. You can run a lot inside a 
 
 <div class="terrarium-home-grid terrarium-home-grid-equal terrarium-home-grid-sections">
   <section class="terrarium-panel">
-    <p class="terrarium-eyebrow">Management without memorizing everything</p>
-    <h2>Use the host visually when you want to.</h2>
+    <p class="terrarium-eyebrow">Visual Management</p>
+    <h2>See everything at a glance.</h2>
     <p>
-      Terrarium is friendly to terminal users, but it is also practical for people who do not want to
-      manage a whole host from raw commands alone.
+      While Terrarium is incredibly friendly to the command line, it's also built for people who prefer a visual approach to server management.
     </p>
     <ul class="terrarium-checklist">
-      <li><strong>Cockpit</strong> for host administration, logs, terminal access, and ZFS-oriented extensions.</li>
-      <li><strong>LXD UI</strong> for creating and managing containers, profiles, networks, and snapshots.</li>
-      <li><strong>Traefik dashboard</strong> for understanding the live routing layer.</li>
+      <li><strong>Cockpit:</strong> Your mission control for host administration, system logs, and storage health.</li>
+      <li><strong>LXD UI:</strong> A sleek interface to create containers, manage networks, and instantly restore snapshots.</li>
+      <li><strong>Traefik Dashboard:</strong> Watch your live network routing and ensure your traffic is flowing exactly where it should.</li>
     </ul>
-    <p>If you want the visual tour, start with <a href="./getting-started/management-guis">Management GUIs</a>.</p>
+    <p>Take the visual tour in our <a href="./getting-started/management-guis">Management GUIs guide</a>.</p>
   </section>
 
   <section class="terrarium-panel">
-    <p class="terrarium-eyebrow">What Terrarium installs</p>
-    <h2>Everything needed to turn a plain VPS into a safer control plane.</h2>
+    <p class="terrarium-eyebrow">What's Under the Hood?</p>
+    <h2>Powerful open-source tools, orchestrated beautifully.</h2>
     <ul class="terrarium-checklist">
-      <li><a href="https://github.com/cockpit-project/cockpit">Cockpit</a> with <a href="https://github.com/45Drives/cockpit-zfs">cockpit-zfs</a> and <a href="https://github.com/45Drives/cockpit-S3ObjectBroswer">cockpit-S3ObjectBroswer</a></li>
-      <li><a href="https://github.com/canonical/lxd">LXD</a> with the built-in web UI</li>
-      <li><a href="https://github.com/openzfs/zfs">OpenZFS</a></li>
-      <li><a href="https://github.com/jimsalterjrs/sanoid">sanoid and syncoid</a></li>
-      <li><a href="https://github.com/traefik/traefik">Traefik</a> with the built-in dashboard</li>
-      <li><a href="https://github.com/oauth2-proxy/oauth2-proxy">oauth2-proxy</a></li>
-      <li>Optional self-hosted <a href="https://github.com/zitadel/zitadel">ZITADEL</a></li>
-      <li><a href="https://github.com/dev-sec/ansible-collection-hardening">devsec.hardening</a></li>
+      <li><a href="https://github.com/canonical/lxd">LXD</a> for lightweight, lightning-fast containers</li>
+      <li><a href="https://github.com/openzfs/zfs">OpenZFS</a> for instant snapshots and data integrity</li>
+      <li><a href="https://github.com/traefik/traefik">Traefik</a> for dynamic routing and automated SSL</li>
+      <li><a href="https://github.com/cockpit-project/cockpit">Cockpit</a> for host-level visual administration</li>
+      <li><a href="https://github.com/oauth2-proxy/oauth2-proxy">OAuth2-Proxy</a> & <a href="https://github.com/zitadel/zitadel">ZITADEL</a> for seamless Single Sign-On</li>
+      <li><a href="https://github.com/jimsalterjrs/sanoid">Sanoid</a> for automated backup retention</li>
     </ul>
   </section>
 </div>
 
-## Start here
+## Ready to Start?
 
 <div class="terrarium-cards terrarium-cards-tight">
   <a class="terrarium-card" href="./getting-started/">
     <strong>Getting Started</strong>
-    <span>Install flow, storage strategy, domains, and identity provider choices.</span>
+    <span>Step-by-step installation, storage setup, and domain configuration.</span>
   </a>
-  <a class="terrarium-card" href="./security">
-    <strong>Security Model</strong>
-    <span>Why private-by-default networking and explicit exposure matter so much here.</span>
-  </a>
-  <a class="terrarium-card" href="./getting-started/management-guis">
-    <strong>Management GUIs</strong>
-    <span>See what Cockpit, the LXD UI, and the Traefik dashboard are each good for.</span>
+  <a class="terrarium-card" href="./getting-started/storage">
+    <strong>Storage Strategy</strong>
+    <span>How to size your VPS and use block storage for the best experience.</span>
   </a>
   <a class="terrarium-card" href="./providers/">
     <strong>Provider Guides</strong>
-    <span>How to create the VPS correctly on DigitalOcean, Vultr, Hetzner, or Hostinger.</span>
+    <span>Launch the perfect VPS on DigitalOcean, Vultr, Hetzner, or Hostinger.</span>
+  </a>
+  <a class="terrarium-card" href="./security">
+    <strong>Security Model</strong>
+    <span>Understand how Terrarium's private-by-default architecture protects you.</span>
   </a>
   <a class="terrarium-card" href="./reference/terrariumctl">
-    <strong>terrariumctl Reference</strong>
-    <span>The full command surface for install, reconfiguration, backup, restore, and proxy sync.</span>
+    <strong>Command Reference</strong>
+    <span>Explore the CLI tool for backups, restores, and system reconfiguration.</span>
   </a>
 </div>

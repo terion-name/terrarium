@@ -1,9 +1,7 @@
 # Reference
 
-Reference material for the Terrarium control plane:
+This section is your quick-reference manual. It's designed for when you already understand how Terrarium works and just need the exact commands, syntax, or network behaviors to get something done.
 
-- [Services and Endpoints](services-and-endpoints.md)
-- [terrariumctl](terrariumctl.md)
-- [Architecture](../architecture.md)
-
-Use this section when you already know what Terrarium does and just need exact behavior, commands, or defaults.
+- **[Services and Endpoints](services-and-endpoints.md):** A detailed breakdown of every service running on the Terrarium host, including what ports they listen on, how they are protected, and which logs to check.
+- **[terrariumctl Reference](terrariumctl.md):** The complete command-line interface documentation for the `terrariumctl` tool, covering installation flags, day-2 reconfiguration, clustering, backups, and more.
+- **[Architecture](../architecture.md):** A deep dive into how Terrarium is built, how the internal dqlite database works, and the exact security boundaries in place.

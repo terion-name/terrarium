@@ -1,6 +1,6 @@
 # Installation
 
-Terrarium installs onto a single Ubuntu 24.04 VPS and turns it into a hardened host for LXD containers on ZFS.
+Ready to turn your plain Ubuntu VPS into a hardened, LXD-powered container host? The Terrarium installer makes it quick and easy.
 
 ## Requirements
 
@@ -23,6 +23,8 @@ Or browse the full [Provider Guides](../providers/README.md) section first.
 
 ## Recommended Install
 
+Most users should use the interactive installer. Just run this single command:
+
 ```bash
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
@@ -37,7 +39,7 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/download/0.0.0-beta
 
 ## Install Modes
 
-Interactive mode is the default and is the best fit for most first installs.
+Interactive mode is the default and is the best fit for most first installs. It guides you through the process, asking a few simple questions.
 
 ```bash
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
@@ -78,36 +80,35 @@ Important notes:
 
 The installer will guide you through:
 
-- contact email and ACME email
-- root password setup for Cockpit when the host does not already have a usable local root password
-- domain setup
+- Contact email and ACME email for SSL certificates.
+- Root password setup for Cockpit when the host does not already have a usable local root password.
+- Domain setup (custom domain or default `traefik.me`).
 - IDP mode:
   - `local` for self-hosted ZITADEL
   - `oidc` for an external OIDC provider
-- storage mode and storage source
-- optional S3 archive backups
-- optional syncoid replication
+- Storage mode and storage source.
+- Optional S3 archive backups.
+- Optional syncoid replication.
 
 Terrarium also verifies the most failure-prone integrations while you configure them:
 
-- password and secret prompts are masked in interactive mode
-- external OIDC settings are probed against the issuer, callback flow, and client credentials before install continues
-- S3 settings are tested with a real write/delete probe against the configured bucket
+- Password and secret prompts are masked in interactive mode.
+- External OIDC settings are probed against the issuer, callback flow, and client credentials before install continues.
+- S3 settings are tested with a real write/delete probe against the configured bucket.
 
 ## Container Image Sources
 
 Terrarium pins the upstream oauth2-proxy and local ZITADEL Postgres image sources by digest. The default source order is:
 
-- upstream Docker Hardened Images from `dhi.io` when Docker registry credentials exist on the host
-- Terrarium's GHCR mirror of those same DHI multi-arch indexes when upstream DHI credentials are not present
-- the pinned public upstream images when `terrarium_docker_hardened_images` or `terrarium_docker_hardened_image_mirrors` is disabled
+- upstream Docker Hardened Images from `dhi.io` when Docker registry credentials exist on the host.
+- Terrarium's GHCR mirror of those same DHI multi-arch indexes when upstream DHI credentials are not present.
+- the pinned public upstream images when `terrarium_docker_hardened_images` or `terrarium_docker_hardened_image_mirrors` is disabled.
 
 The GHCR mirror is refreshed by CI with Docker Hub credentials, copies every platform in the pinned index, and verifies the copied index and required `linux/amd64` and `linux/arm64` manifests before publishing.
 
 In interactive mode, failed verification sends you back to the relevant prompts. In non-interactive mode, install exits with an error instead of persisting broken settings.
 
-For non-interactive automation, use generated or file-based secret inputs so
-secrets do not travel through shell history or process arguments:
+For non-interactive automation, use generated or file-based secret inputs so secrets do not travel through shell history or process arguments:
 
 - `--generate-root-pwd`
 - `--root-pwd-file`

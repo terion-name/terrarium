@@ -1,106 +1,63 @@
 # OpenClaw on Terrarium
 
-OpenClaw is exactly the kind of workload that makes Terrarium useful: it wants a real machine, not a tiny sandbox, and it is powerful enough that you probably do not want it living directly on your host.
+OpenClaw is an incredibly powerful autonomous AI agent. It needs a real Linux machine to execute code, install packages, and manipulate files. 
 
-Terrarium gives OpenClaw a full Ubuntu LXC with its own packages, workspace, and long-lived state. That means OpenClaw can behave like a real agent environment, while the Terrarium host stays hardened and recoverable.
+Running OpenClaw directly on your laptop or your main server is risky. What if it accidentally deletes a critical folder or installs conflicting software?
 
-## Why Terrarium fits OpenClaw
+Terrarium is the perfect home for OpenClaw. It gives the agent a full Ubuntu container to play in. If OpenClaw makes a mess, you can just use Terrarium's time machine to instantly rewind the container to a clean state.
 
-- Security: the OpenClaw runtime is isolated from the host.
-- Isolation: one agent environment does not interfere with another.
-- Time machine: if the workspace drifts or the agent damages the environment, you can step the container back to a recent snapshot.
-- Realism: OpenClaw gets the kind of mutable Linux environment it expects.
+---
 
-## Important networking note
+## 1. Create the Sandbox
 
-OpenClaw is not the same as Hermes or `codium serve-web`.
+First, let's create a fresh LXC container specifically for OpenClaw.
 
-Upstream explicitly recommends keeping the gateway on loopback and accessing it through SSH tunneling or Tailscale for the normal Linux-server case. If you bind it to a non-loopback address, upstream requires explicit gateway auth, and Control UI deployments on non-loopback addresses also need `gateway.controlUi.allowedOrigins` configured.
-
-So there are two real Terrarium patterns:
-
-1. the recommended upstream pattern: private gateway, accessed through SSH tunnel or Tailscale
-2. a public-through-Traefik pattern: possible, but only with explicit auth and origin configuration
-
-## Create the container
-
-You can do this either in the LXD UI or from the CLI.
-
-In the LXD UI:
-
-1. Open `https://lxd.<your-domain>` and log in.
-2. Create a new instance from the `images:ubuntu/24.04` image.
-3. Use the default profile so the container gets Terrarium's storage and isolation settings.
-4. Name it `openclaw`.
-5. Start the container.
-
-From the CLI:
-
+**From the CLI:**
 ```bash
 lxc launch images:ubuntu/24.04 openclaw
 ```
 
-## Recommended setup: enter the container and use OpenClaw the way it expects
+*(You can also do this visually through the **LXD UI** at `lxd.<your-domain>`. Just create an `ubuntu/24.04` instance and name it `openclaw`.)*
 
-For OpenClaw, this is the path I would actually recommend to a human. The onboarding flow is interactive and opinionated, and using it from inside the container is much more comfortable.
+## 2. Install OpenClaw
 
-Open a shell in the container:
+It's much easier to configure OpenClaw from *inside* the container, where its interactive setup script can guide you.
 
+Jump into the container:
 ```bash
 lxc exec openclaw -- bash
 ```
 
-Then run the setup inside that shell:
-
+Now, run the official OpenClaw installer:
 ```bash
 apt-get update
 apt-get install -y curl
 curl -fsSL https://openclaw.ai/install.sh | bash
+```
+
+Finally, run the onboarding script to set up your API keys (like OpenAI or Anthropic) and start the background daemon:
+```bash
 openclaw onboard --install-daemon
 openclaw gateway status
 ```
 
-The onboarding flow is where you should configure:
+At this point, OpenClaw is running on port `18789` inside the container.
 
-- model provider credentials
-- gateway authentication
-- daemon install
-- any other OpenClaw preferences
+---
 
-By default, you should end up with the gateway on port `18789`.
+## 3. How to Access the OpenClaw Web UI
 
-## Recommended access pattern: keep OpenClaw private
+There are two ways to use OpenClaw in Terrarium. 
 
-This is where OpenClaw's normal Linux-server guidance needs one Terrarium-specific adjustment.
+### Method A: The Private Method (Recommended)
+By default, OpenClaw's web gateway only listens on the container's local loopback address (`127.0.0.1`). 
 
-OpenClaw's simple SSH-tunnel example assumes the gateway is running on the SSH target host itself. In Terrarium, OpenClaw is inside a separate LXC, so the host's `127.0.0.1` is not the container's `127.0.0.1`.
+The safest way to use OpenClaw is to leave it private and access it via an SSH tunnel or by installing Tailscale *inside* the container. This ensures the agent is completely invisible to the public internet.
 
-So for a private setup on Terrarium, use one of these patterns instead:
+### Method B: The Public Web UI Method (Advanced)
+If you want to access OpenClaw's web interface from a nice URL (like `https://openclaw.your-domain.com`), you need to tell OpenClaw to listen to external traffic, set a strong password, and then tell Terrarium to publish the route.
 
-- the public-through-Traefik pattern below, with explicit gateway auth
-- OpenClaw's Tailscale pattern inside the container, if you want private remote access without publishing the app through Terrarium
-- the LXD console for local setup, onboarding, and troubleshooting
-
-This works well with Terrarium because:
-
-- OpenClaw stays private inside the LXC
-- the host stays simple
-- you still get ZFS snapshots and container isolation
-
-If you prefer Tailscale, upstream also documents Tailscale Serve and Funnel support for the gateway.
-
-## Public-through-Terrarium setup
-
-If you specifically want OpenClaw published on a public hostname through Terrarium, do not use the default loopback-only setup. Configure non-loopback bind plus explicit auth.
-
-Go back into the container:
-
-```bash
-lxc exec openclaw -- bash
-```
-
-Create or update `~/.openclaw/openclaw.json`:
-
+**Inside the container**, edit the config file:
 ```bash
 cat > ~/.openclaw/openclaw.json <<'EOF'
 {
@@ -109,158 +66,34 @@ cat > ~/.openclaw/openclaw.json <<'EOF'
     "port": 18789,
     "controlUi": {
       "enabled": true,
-      "allowedOrigins": ["https://openclaw.example.com"]
+      "allowedOrigins": ["https://openclaw.your-domain.com"]
     },
     "auth": {
       "mode": "password",
-      "password": "replace-with-a-long-random-secret"
+      "password": "REPLACE_WITH_A_STRONG_PASSWORD"
     }
   }
 }
 EOF
-```
 
-Restart the gateway:
-
-```bash
+# Restart the gateway
 openclaw gateway restart
+exit
 ```
 
-Leave the container shell, then publish it from the host:
-
+**Back on the Terrarium host**, apply the routing label:
 ```bash
-lxc config set openclaw user.proxy "https://openclaw.example.com:18789"
+lxc config set openclaw user.proxy "https://openclaw.your-domain.com:18789"
 terrariumctl proxy sync
 ```
+Terrarium will automatically grab an SSL certificate and route your custom domain directly to the OpenClaw UI.
 
-That gives you:
+---
 
-- OpenClaw listening on the container network instead of loopback only
-- OpenClaw still protected by its own password auth
-- Traefik handling TLS and hostname routing on the host
+## 4. Advanced: External Memory
 
-## Automation version
+OpenClaw stores all of its "memories" and generated artifacts as plain text Markdown files. 
 
-If you want the setup condensed into host-side commands, this is the scriptable path:
+If you want to be able to read and edit those files from your Macbook or Windows PC, you can connect OpenClaw to a Hetzner Storage Box using Terrarium's [External Shared Storage](../getting-started/external-shared-storage.md) feature.
 
-```bash
-lxc launch images:ubuntu/24.04 openclaw
-lxc exec openclaw -- bash -lc 'apt-get update && apt-get install -y curl'
-lxc exec openclaw -- bash -lc 'curl -fsSL https://openclaw.ai/install.sh | bash'
-lxc exec openclaw -- bash -lc 'openclaw onboard --install-daemon'
-lxc exec openclaw -- bash -lc "cat > ~/.openclaw/openclaw.json <<'EOF'
-{
-  \"gateway\": {
-    \"bind\": \"lan\",
-    \"port\": 18789,
-    \"controlUi\": {
-      \"enabled\": true,
-      \"allowedOrigins\": [\"https://openclaw.example.com\"]
-    },
-    \"auth\": {
-      \"mode\": \"password\",
-      \"password\": \"replace-with-a-long-random-secret\"
-    }
-  }
-}
-EOF"
-lxc exec openclaw -- bash -lc 'openclaw gateway restart'
-lxc config set openclaw user.proxy "https://openclaw.example.com:18789"
-terrariumctl proxy sync
-```
-
-Use that only if you already know your OpenClaw answers and do not need to work through the onboarding flow manually.
-
-## When to use trusted-proxy mode
-
-OpenClaw also supports `trusted-proxy` auth for identity-aware reverse proxies. Upstream documents this for setups like Pomerium, nginx + `oauth2-proxy`, Caddy + OAuth, or Traefik + forward auth.
-
-That is useful if you want OpenClaw access controlled by SSO instead of a shared token or password. But it is also easier to misconfigure.
-
-Important upstream rule:
-
-- same-host loopback reverse proxies do not satisfy trusted-proxy auth
-- OpenClaw must see requests coming from a non-loopback trusted proxy source listed in `gateway.trustedProxies`
-
-So if you want to combine OpenClaw with an identity-aware proxy, follow OpenClaw's trusted-proxy documentation carefully and treat that as a deliberate advanced setup, not the default starting point.
-
-## Recommended workflow
-
-1. Install and onboard OpenClaw in its own LXC.
-2. Start with the private loopback pattern first.
-3. Snapshot the container once onboarding and provider auth are working.
-4. Only then decide whether you actually need public access through Traefik.
-
-That keeps the initial setup simpler and safer, while still giving you a clear upgrade path to a public or SSO-gated deployment later.
-
-## Advanced: store memory and artifacts on a Storage Box
-
-OpenClaw's upstream memory model is file-friendly: the agent workspace is the source of truth, and memory is plain Markdown inside that workspace. By default that workspace is `~/.openclaw/workspace`, with long-term memory in `MEMORY.md` and daily notes in `memory/YYYY-MM-DD.md`.
-
-That makes OpenClaw a good fit for external shared storage when you want to:
-
-- keep long-lived memory outside the container root disk
-- browse or edit memory files from your own computer
-- keep generated notes, exports, and working artifacts in a place that survives container replacement
-
-Keep `~/.openclaw/` itself local to the container. It contains config, credentials, provider auth, and session state. The part that is pleasant to share is the workspace, not the private runtime state.
-
-First mount the Storage Box on the Terrarium host. The general workflow is documented in [External Shared Storage](../getting-started/external-shared-storage), but the short version is:
-
-```bash
-terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
-```
-
-If you have not onboarded OpenClaw yet, mount the external directory directly where OpenClaw already expects its workspace:
-
-```bash
-mkdir -p /srv/shared/storage-box/openclaw/workspace
-lxc exec openclaw -- mkdir -p /root/.openclaw
-lxc config device add openclaw openclaw-workspace disk \
-  source=/srv/shared/storage-box/openclaw/workspace \
-  path=/root/.openclaw/workspace
-```
-
-Then continue with `openclaw onboard --install-daemon` normally. There is no extra OpenClaw config to change, because the mounted path is still the default workspace path.
-
-If OpenClaw is already set up, copy the existing workspace to the Storage Box before adding the disk device. Mounting a disk over `/root/.openclaw/workspace` hides the old directory contents, so do the copy first:
-
-```bash
-mkdir -p /srv/shared/storage-box/openclaw/workspace
-lxc exec openclaw -- systemctl stop openclaw 2>/dev/null || true
-lxc exec openclaw -- systemctl stop openclaw-gateway 2>/dev/null || true
-lxc exec openclaw -- tar -C /root/.openclaw/workspace -cf - . | tar -C /srv/shared/storage-box/openclaw/workspace -xf -
-lxc config device add openclaw openclaw-workspace disk \
-  source=/srv/shared/storage-box/openclaw/workspace \
-  path=/root/.openclaw/workspace
-lxc exec openclaw -- openclaw gateway restart
-lxc exec openclaw -- openclaw memory status
-```
-
-A useful Storage Box layout is:
-
-```text
-/srv/shared/storage-box/openclaw/
-  workspace/
-    MEMORY.md
-    memory/
-    AGENTS.md
-    artifacts/
-    exports/
-```
-
-Use `artifacts/` or `exports/` as the place where you ask OpenClaw to write documents, reports, generated files, or other outputs you want to inspect from outside Terrarium. Because the same Storage Box can also be mounted on your laptop or desktop, you can open `MEMORY.md`, `memory/`, `artifacts/`, and `exports/` in a normal editor.
-
-Be careful with concurrent editing. Markdown memory files are easy to inspect, but OpenClaw can also write them while a session is running. For manual edits, stop the gateway or pause active sessions first, then restart and run `openclaw memory index --force` if you use semantic memory search.
-
-## Upstream docs used for this guide
-
-- [OpenClaw getting started](https://docs.openclaw.ai/start/getting-started)
-- [OpenClaw agent workspace](https://docs.openclaw.ai/concepts/agent-workspace)
-- [OpenClaw memory overview](https://docs.openclaw.ai/concepts/memory)
-- [OpenClaw memory configuration reference](https://docs.openclaw.ai/reference/memory-config)
-- [OpenClaw Linux server guide](https://docs.openclaw.ai/vps)
-- [OpenClaw web and Control UI security notes](https://docs.openclaw.ai/web)
-- [OpenClaw remote access](https://docs.openclaw.ai/gateway/remote)
-- [OpenClaw Tailscale guide](https://docs.openclaw.ai/gateway/tailscale)
-- [OpenClaw trusted proxy auth](https://docs.openclaw.ai/gateway/trusted-proxy-auth)
+Simply mount your cloud drive to `/root/.openclaw/workspace` inside the container, and OpenClaw will save all its files directly to the cloud.

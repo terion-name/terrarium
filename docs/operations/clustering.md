@@ -1,172 +1,70 @@
 # Clustering
 
-Terrarium clustering is built on LXD clustering. LXD owns the cluster
-membership, dqlite replication, and instance placement; Terrarium stores its
-own config in LXD's dqlite-backed project metadata and reconciles each node
-from that shared config.
+Terrarium clustering is built directly on LXD clustering. LXD owns the cluster membership, database replication, and instance placement, while Terrarium stores its own configuration inside LXD's database and ensures every node stays perfectly synced.
 
-This gives you one LXD management plane across nodes and one Terrarium config
-document. It does not automatically make every workload highly available. A
-container still runs on one LXD member at a time unless you deliberately move,
-restore, or design that workload around external/shared state.
+This gives you a single management plane across your entire network. However, note that it does not magically make every workload highly available: a container still runs on one specific server's hard drive at a time, unless you design your app around shared external storage.
 
-## Recommended Shape
+## Recommended Architecture
 
-Use at least three members for a real cluster. LXD can form smaller clusters,
-but three members let dqlite keep quorum after one member is lost. OVN central
-members should also be an odd-sized set.
+For a truly resilient cluster, use at least three servers. LXD can form smaller clusters, but three members ensure the internal database maintains "quorum" (consensus) even if one server goes offline. 
 
-Terrarium creates a WireGuard mesh for cluster transport by default. LXD
-cluster traffic, OVN database traffic, and OVN Geneve overlay traffic use the
-WireGuard tunnel addresses, so those control-plane ports are not exposed on the
-provider/public interface. The public or provider-private address is only the
-WireGuard handshake endpoint.
+Terrarium automatically creates a highly secure WireGuard mesh for all cluster communication. LXD traffic, OVN database traffic, and internal container networking all flow through these encrypted tunnels. This means your sensitive control-plane ports are never exposed to the public internet.
 
-Private/VPC networking is still recommended when your provider supports it: it
-keeps WireGuard handshakes off the public internet and usually gives lower
-latency. If you do not have private networking, exact public peer IPs are fine.
-Do not open LXD `8443/tcp`, OVN `6641/tcp`/`6642/tcp`, or Geneve `6081/udp` on
-provider firewalls; Terrarium only needs WireGuard `51820/udp` between invited
-cluster members.
+**Networking Best Practices:**
+If your hosting provider offers Private Networking or VPCs, use them. It keeps your WireGuard handshakes off the public internet and usually offers lower latency. If you don't have private networking, exact public IPs are perfectly fine.
 
-## Bootstrap The First Member
+*Important:* You only need to open WireGuard's UDP port (`51820`) on your firewall between your cluster members. Do not expose LXD (`8443`), OVN (`6641`/`6642`), or Geneve (`6081`) to the internet—Terrarium handles those inside the encrypted tunnel.
 
-Install Terrarium on the first node normally, then enable LXD clustering:
+## 1. Bootstrapping the First Node
+
+Install Terrarium on your first server normally, then initialize the cluster:
 
 ```bash
 terrariumctl cluster init
 ```
 
-What this does:
+Behind the scenes, this command:
+- Sets up a WireGuard mesh network (defaulting to `10.255.54.0/24`).
+- Automatically selects the best IP address for the WireGuard endpoint (preferring a private VPC address if available).
+- Locks down the firewall so cluster ports only accept traffic from the tunnel.
+- Creates secure TLS certificates for the internal network database.
 
-- uses the host shortname as the LXD member name
-- auto-selects a reachable non-container host address as the WireGuard endpoint
-- prefers a private/VPC endpoint when one exists
-- creates `/etc/terrarium/secrets/wireguard/private.key`
-- creates the `terrarium-wg0` mesh, defaulting to `10.255.54.0/24`
-- binds LXD clustering and OVN to this node's tunnel IP, initially `10.255.54.1`
-- opens LXD/OVN firewall rules only for exact WireGuard tunnel peer addresses
-- configures this node as the first OVN central member
-- generates a Terrarium-owned OVN certificate authority for mTLS
-- sets LXD's reachable cluster API listener
-- enables LXD clustering on the local server
-- stores Terrarium cluster/OVN settings in the shared config
-- runs Terrarium reconfiguration so OVN, firewall rules, and profiles converge
-
-If Terrarium picks the wrong endpoint, override only the WireGuard endpoint:
+If Terrarium auto-selects the wrong IP address, you can manually specify it:
 
 ```bash
 terrariumctl cluster init --wireguard-endpoint 203.0.113.11:51820
 ```
 
-All discovery can be overridden when needed:
+## 2. Inviting Additional Nodes
 
-```bash
-terrariumctl cluster init \
-  --member node1 \
-  --wireguard-endpoint 10.0.0.11:51820 \
-  --wireguard-cidr 10.255.54.0/24
-```
-
-`--address`, `--central-addresses`, and `--peer-cidr` remain as advanced
-escape hatches. With the default WireGuard transport, they should be tunnel
-addresses, not provider/public addresses. `--peer-cidr` is the firewall trust
-boundary for LXD `8443/tcp`, OVN database ports `6641/tcp`/`6642/tcp`, and
-OVN Geneve `6081/udp`; normal users should let Terrarium maintain exact
-`10.255.54.x/32` peers.
-
-OVN database access is also mutually authenticated. Terrarium creates an OVN CA
-during cluster initialization, stores it in the root-only shared Terrarium
-config, issues a local node certificate during reconfiguration, and configures
-OVN northbound/southbound database clients to use `ssl:` remotes. The
-WireGuard mesh encrypts the local-network transport; OVN mTLS authenticates the
-database clients inside that mesh.
-
-## Join Additional Members
-
-On an existing cluster member, create an invite:
+On your existing cluster member, generate an invite for the new server:
 
 ```bash
 terrariumctl cluster invite node2
 ```
 
-The command pre-opens WireGuard `51820/udp` for the joining node when `node2`
-resolves to an IP address. If the name is not resolvable, Terrarium asks for
-the joining node's endpoint in interactive terminals. For automation, pass the
-joining node's exact public or provider-private address:
+*(If `node2` isn't a resolvable hostname, Terrarium will ask for its IP address so it can open the firewall securely. For automation, you can pass the IP directly: `terrariumctl cluster invite node2 10.0.0.12`)*
 
-```bash
-terrariumctl cluster invite node2 10.0.0.12
-```
-
-`cluster invite` allocates the new member's tunnel IP, generates a one-time
-WireGuard private key for that node, adds its public key to the shared config,
-and reads the LXD token expiry. It schedules a one-shot systemd cleanup after
-that expiry. If the node joins before the token expires, cleanup sees the new
-LXD member and keeps the WireGuard peer. If the node never joins, cleanup
-removes the temporary tunnel peer, the temporary WireGuard endpoint firewall
-rule, and the LXD/OVN tunnel firewall rule.
-
-The command prints the join command to run on the new node:
+The command will print a copy-paste join command for you:
 
 ```bash
 terrariumctl cluster join --token '<token-from-existing-member>' --wireguard '<join-bundle>'
 ```
 
-Joining an LXD cluster replaces the node's local LXD database. Use fresh nodes
-or nodes whose local instances have already been backed up or moved.
+Log into your **new, fresh Ubuntu server**. Install Terrarium, and then paste that join command. 
 
-The `--wireguard` bundle is intentionally opaque. It contains the joining
-node's generated WireGuard private key, tunnel IP, and the seed member's
-WireGuard endpoint. Treat it like the LXD join token: short-lived and secret.
-`cluster join` writes the local WireGuard key, starts the tunnel, joins LXD
-through the tunnel address, exports the shared config from LXD's dqlite-backed
-store to `/etc/terrarium/config.yaml`, and runs `terrariumctl reconfigure` on
-that node.
+The new server will automatically connect to the WireGuard mesh, download the shared configuration, and become an active cluster member.
 
-When local ZITADEL is enabled, it is a single Terrarium-managed LXD system
-instance named `terrarium-idp`. Joined nodes see that instance through the
-shared LXD cluster state and reconcile against it; they do not bootstrap their
-own independent ZITADEL databases.
+*(Note: Joining a cluster wipes the new node's local LXD database, so make sure the new node is fresh.)*
 
-## OVN Networking
+## Traefik and Published Routes
 
-Terrarium creates an OVN workload network named `terrarium-ovn` and points the
-`default`, `terrarium`, and `strict` profiles at it. The existing managed bridge
-`lxdbr0` remains as the parent/uplink network. OVN central and host traffic use
-the WireGuard tunnel IPs, so Geneve overlay packets are carried inside the
-encrypted mesh.
+One of the best features of Terrarium clustering is how it handles web traffic. 
 
-Default network values:
+Traefik runs on every single node. Thanks to the shared OVN network, every healthy node can serve your published apps. If an app is running on `node2`, but a user connects to `node1`, Traefik on `node1` will automatically route the traffic across the secure internal network to the correct container.
 
-- parent/uplink network: `lxdbr0`
-- workload network: `terrarium-ovn`
-- parent subnet: `10.154.0.1/24`
-- DHCP range: `10.154.0.2-10.154.0.199`
-- OVN router range: `10.154.0.200-10.154.0.254`
-
-Terrarium's reverse proxy runs on the host. For OVN-backed containers,
-`terrariumctl proxy sync` creates host-loopback LXD `proxy` devices for
-published container backends and points Traefik at those localhost listeners.
-This avoids relying on direct host reachability to private OVN instance
-addresses.
-
-## Traefik And Published Routes
-
-Traefik is deployed on every Terrarium node. Each node also runs
-`terrariumctl proxy sync` locally through the Terrarium sync timer. The sync
-reads LXD cluster state, renders that node's local Traefik dynamic config, and
-creates local host-loopback LXD `proxy` devices for published container
-backends.
-
-That means every healthy node can serve the same published routes. If a
-workload is running on `node2`, Traefik on `node1` still points at a local
-listener on `127.0.0.1`; LXD's proxy device and OVN/LXD cluster networking
-carry the traffic to the actual workload member. Operators do not need to
-manually keep Traefik route files in sync between nodes.
-
-For simple ingress distribution, put all node public IPs in the same DNS record
-set:
+**Setting up DNS:**
+For simple load balancing, just point your domain name to the IPs of all your servers using round-robin DNS:
 
 ```text
 app.example.com.  A  203.0.113.10
@@ -174,107 +72,52 @@ app.example.com.  A  203.0.113.11
 app.example.com.  A  203.0.113.12
 ```
 
-This is round-robin DNS, not health-aware failover. If a node is down, some
-clients can still receive or cache that node's IP. For production-grade
-failover, place a health-checked load balancer, health-checked DNS service,
-floating IP automation, anycast/BGP setup, or provider load balancer in front
-of the Terrarium nodes.
+If one node goes down, some clients might experience a brief connection issue until their DNS cache updates. For strict production-grade failover, you can place a dedicated Load Balancer in front of your Terrarium nodes.
 
-To update OVN central members or peer firewall peers after the cluster exists,
-run:
+## OVN Networking (Advanced)
+
+Terrarium creates a virtual workload network called `terrarium-ovn`. Your containers attach to this network, allowing them to talk to each other across different physical servers. 
+
+If you ever add or remove servers and need to manually refresh the internal network configuration, run:
 
 ```bash
 terrariumctl cluster ovn configure
 ```
 
-Without flags, Terrarium reads LXD cluster membership, keeps an odd-sized OVN
-central set, and writes exact tunnel member CIDRs to the shared peer firewall
-list. Use explicit flags only when you want a specific central set or a
-deliberately broader trusted tunnel network:
+This ensures the cluster maintains an odd-numbered set of OVN database managers and updates the firewall rules appropriately.
 
-```bash
-terrariumctl cluster ovn configure \
-  --central-addresses 10.255.54.1,10.255.54.2,10.255.54.3 \
-  --peer-cidr 10.255.54.1/32,10.255.54.2/32,10.255.54.3/32
-```
+## Managing Workloads
 
-Use an odd number of OVN central addresses. Terrarium starts `ovn-central` on
-members whose local address is in that list, runs `ovn-host` everywhere, points
-Open vSwitch at the shared southbound database, and sets LXD's OVN northbound
-connection. OVN database listeners use passive SSL (`pssl`) and Terrarium
-configures LXD/Open vSwitch with the shared CA plus this node's client
-certificate.
-
-`cluster ovn configure` reconciles the node where you run it. Existing members
-read the same shared config, but they still need `terrariumctl reconfigure` if
-you changed the central set after they had already joined.
-
-## Moving Workloads And Removing Members
-
-Move one workload to another member:
-
+### Moving a Container
+Want to shift an app to a different server?
 ```bash
 terrariumctl cluster move app1 node2
 ```
+*(If your app requires zero downtime, you should architect the app itself for high availability. LXD will briefly stop the container to migrate it if live migration isn't possible.)*
 
-This wraps LXD's cluster-aware `lxc move` operation and keeps the workload name
-unchanged. If LXD cannot migrate a running workload in your environment, stop
-the workload first or use the removal flow below, which handles stop/move/start
-for you.
-
-For planned maintenance, evacuate a member instead of removing it:
-
-```bash
-terrariumctl cluster evacuate node2
-# perform maintenance
-terrariumctl cluster restore node2
-```
-
-Evacuation asks LXD to move workloads away according to their configured
-evacuation behavior. Restore makes the member eligible for workloads again; it
-does not promise to move the same workloads back automatically. Both commands
-ask for confirmation; add `--yes` for automation:
-
+### Server Maintenance (Evacuation)
+If you need to reboot a server, tell Terrarium to safely move all its running containers to other nodes:
 ```bash
 terrariumctl cluster evacuate node2 --yes
+```
+When you're done, let the cluster know it can receive workloads again:
+```bash
 terrariumctl cluster restore node2 --yes
 ```
 
-For permanent decommission, remove the member from another healthy member:
-
-```bash
-terrariumctl cluster remove node2
-```
-
-If workloads still exist on `node2`, Terrarium asks whether to move them before
-removing the member. In automation, use:
-
+### Removing a Server
+To permanently decommission a server:
 ```bash
 terrariumctl cluster remove node2 --move --yes
 ```
+This safely moves all remaining containers to healthy servers and removes the node. Terrarium will try to balance the evacuated containers across your least-busy servers.
 
-When `--target` is omitted, Terrarium creates a best-effort distribution plan
-across the remaining online members. It prefers members with fewer existing
-workloads, and uses lower memory pressure as a tie-breaker when LXD reports
-resource data. Add `--target node1` when you intentionally want every workload
-to land on one member.
-
-For this removal flow, running workloads are stopped, moved, and started again
-on the target member. If you need zero-downtime behavior, design that at the
-application layer or use LXD evacuation settings that match the workload.
-
-If a member is dead and cannot be drained, use force removal:
-
+If a server completely dies and cannot be recovered, you can force-remove it from the database:
 ```bash
 terrariumctl cluster remove node2 --force
 ```
 
-Force removal only removes the member from LXD cluster metadata. Workloads that
-only existed on that member's local storage are not recovered automatically;
-restore them from Terrarium backups, replicated storage, or another external
-recovery path.
-
-## Useful Commands
+## Useful Commands Cheat Sheet
 
 ```bash
 terrariumctl cluster status
@@ -283,26 +126,5 @@ terrariumctl cluster move app1 node2
 terrariumctl cluster evacuate node2 --yes
 terrariumctl cluster restore node2 --yes
 terrariumctl cluster remove node2
-terrariumctl cluster token node3
-terrariumctl config export
 terrariumctl reconfigure
 ```
-
-`terrariumctl cluster status` is a thin view over LXD cluster state plus the
-Terrarium OVN network. Use native LXD commands such as `lxc cluster list`,
-`lxc list`, and `lxc launch ... --target <member>` for lower-level placement
-and troubleshooting.
-
-## Limits
-
-Current Terrarium clustering intentionally stops at safe primitives:
-
-- LXD membership is token-based and still follows LXD's fresh-node rules.
-- Terrarium config is replicated through LXD dqlite project metadata.
-- New containers use OVN networking so instances on different members can share
-  the same logical network.
-- ZFS storage is still local to each member unless you separately add shared or
-  replicated storage workflows.
-- Traefik, Cockpit, and backup timers are reconciled locally on each node; the
-  local ZITADEL deployment is one managed LXD instance named `terrarium-idp`.
-  Public entrypoint failover is still a separate load-balancing/DNS decision.
