@@ -272,24 +272,36 @@
       until: terrarium_post_proxy_sync.rc == 0
       changed_when: false
 
-    - name: Remove local auth bootstrap routes before requesting public TLS
+    - name: Retire local auth bootstrap TLS before verifying public TLS
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
         - "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-routes.yml"
-      register: terrarium_bootstrap_routes_removed
+        - "{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"
+        - "{{ terrarium_traefik_config_dir }}/bootstrap-certs"
+        - /usr/local/share/ca-certificates/terrarium-bootstrap.crt
+      register: terrarium_bootstrap_tls_retired
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
 
-    - name: Restart Traefik after removing bootstrap routes
+    - name: Refresh system CA certificates after retiring bootstrap TLS
+      ansible.builtin.command: update-ca-certificates
+      changed_when: terrarium_bootstrap_tls_retired is changed
+      when: terrarium_bootstrap_tls_retired is changed
+
+    - name: Restart LXD after retiring bootstrap TLS trust
+      ansible.builtin.command: systemctl try-restart snap.lxd.daemon.service
+      when: terrarium_bootstrap_tls_retired is changed
+
+    - name: Restart Traefik after retiring bootstrap TLS
       ansible.builtin.systemd:
         name: traefik
         state: restarted
-      when: terrarium_bootstrap_routes_removed is changed
+      when: terrarium_bootstrap_tls_retired is changed
 
-    - name: Wait for local auth domain to serve trusted TLS
+    - name: Wait for local auth domain to serve public TLS
       ansible.builtin.command:
         argv:
           - curl
@@ -303,27 +315,27 @@
           - --max-time
           - "20"
           - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
-      register: terrarium_auth_trusted_tls
+      register: terrarium_auth_public_tls
       retries: 36
       delay: 10
-      until: terrarium_auth_trusted_tls.rc == 0
+      until: terrarium_auth_public_tls.rc == 0
       changed_when: false
       failed_when: false
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
 
-    - name: Restart Traefik to retry local auth TLS after trusted TLS wait failure
+    - name: Restart Traefik to retry local auth ACME after public TLS wait failure
       ansible.builtin.systemd:
         name: traefik
         state: restarted
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
-        - terrarium_auth_trusted_tls is defined
-        - terrarium_auth_trusted_tls.rc | default(0) != 0
+        - terrarium_auth_public_tls is defined
+        - terrarium_auth_public_tls.rc | default(0) != 0
 
-    - name: Wait again for local auth domain to serve trusted TLS after retry
+    - name: Wait again for local auth domain to serve public TLS after ACME retry
       ansible.builtin.command:
         argv:
           - curl
@@ -337,19 +349,19 @@
           - --max-time
           - "20"
           - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
-      register: terrarium_auth_trusted_tls_retry
+      register: terrarium_auth_public_tls_retry
       retries: 36
       delay: 10
-      until: terrarium_auth_trusted_tls_retry.rc == 0
+      until: terrarium_auth_public_tls_retry.rc == 0
       changed_when: false
       failed_when: false
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
-        - terrarium_auth_trusted_tls is defined
-        - terrarium_auth_trusted_tls.rc | default(0) != 0
+        - terrarium_auth_public_tls is defined
+        - terrarium_auth_public_tls.rc | default(0) != 0
 
-    - name: Verify local auth domain serves trusted TLS after waits
+    - name: Verify local auth domain serves public TLS after waits
       ansible.builtin.command:
         argv:
           - curl
@@ -363,14 +375,14 @@
           - --max-time
           - "20"
           - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
-      register: terrarium_auth_trusted_tls_final
+      register: terrarium_auth_public_tls_final
       changed_when: false
       failed_when: false
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
 
-    - name: Show local auth TLS diagnostics after trusted TLS failure
+    - name: Show local auth TLS diagnostics after public TLS failure
       ansible.builtin.shell: |
         set +e
         echo "== presented certificate =="
@@ -389,17 +401,17 @@
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
-        - terrarium_auth_trusted_tls_final is defined
-        - terrarium_auth_trusted_tls_final.rc | default(0) != 0
+        - terrarium_auth_public_tls_final is defined
+        - terrarium_auth_public_tls_final.rc | default(0) != 0
 
-    - name: Fail when local auth domain still does not serve trusted TLS
+    - name: Fail when local auth domain still does not serve public TLS
       ansible.builtin.fail:
-        msg: "Local auth domain {{ terrarium_auth_domain }} still does not serve TLS trusted by the host; see Traefik TLS diagnostics above."
+        msg: "Local auth domain {{ terrarium_auth_domain }} still does not serve public TLS after retiring bootstrap TLS; see Traefik TLS diagnostics above."
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
-        - terrarium_auth_trusted_tls_final is defined
-        - terrarium_auth_trusted_tls_final.rc | default(0) != 0
+        - terrarium_auth_public_tls_final is defined
+        - terrarium_auth_public_tls_final.rc | default(0) != 0
 
     - name: Enable Traefik sync timer after dependent services are configured
       ansible.builtin.systemd:

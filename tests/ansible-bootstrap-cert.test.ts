@@ -49,28 +49,31 @@ describe("Traefik bootstrap certificate template", () => {
     expect(tasks).toContain("Remove Traefik bootstrap certificate config when bootstrap TLS is not required");
     expect(tasks).toContain("Remove temporary Traefik bootstrap routes when bootstrap TLS is not required");
     expect(tasks).toContain("systemctl try-restart snap.lxd.daemon.service");
-    expect(playbook).toContain("Remove local auth bootstrap routes before requesting public TLS");
+    expect(playbook).toContain("Retire local auth bootstrap TLS before verifying public TLS");
     expect(playbook).toContain("dynamic/bootstrap-routes.yml");
-    expect(playbook).not.toContain('"{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"');
-    expect(playbook).not.toContain('"{{ terrarium_traefik_config_dir }}/bootstrap-certs"');
-    expect(playbook).not.toContain("/usr/local/share/ca-certificates/terrarium-bootstrap.crt");
-    expect(playbook).toContain("Wait for local auth domain to serve trusted TLS");
-    expect(playbook).toContain("Restart Traefik to retry local auth TLS after trusted TLS wait failure");
-    expect(playbook).toContain("Wait again for local auth domain to serve trusted TLS after retry");
-    expect(playbook).toContain("Verify local auth domain serves trusted TLS after waits");
-    expect(playbook).toContain("Show local auth TLS diagnostics after trusted TLS failure");
+    expect(playbook).toContain('"{{ terrarium_traefik_config_dir }}/dynamic/bootstrap-cert.yml"');
+    expect(playbook).toContain('"{{ terrarium_traefik_config_dir }}/bootstrap-certs"');
+    expect(playbook).toContain("/usr/local/share/ca-certificates/terrarium-bootstrap.crt");
+    expect(playbook).toContain("Refresh system CA certificates after retiring bootstrap TLS");
+    expect(playbook).toContain("Restart LXD after retiring bootstrap TLS trust");
+    expect(playbook).toContain("Restart Traefik after retiring bootstrap TLS");
+    expect(playbook).toContain("Wait for local auth domain to serve public TLS");
+    expect(playbook).toContain("Restart Traefik to retry local auth ACME after public TLS wait failure");
+    expect(playbook).toContain("Wait again for local auth domain to serve public TLS after ACME retry");
+    expect(playbook).toContain("Verify local auth domain serves public TLS after waits");
+    expect(playbook).toContain("Show local auth TLS diagnostics after public TLS failure");
     expect(playbook).toContain('TERRARIUM_AUTH_DOMAIN: "{{ terrarium_auth_domain }}"');
     expect(playbook).toContain('TERRARIUM_TRAEFIK_CONFIG_DIR: "{{ terrarium_traefik_config_dir }}"');
     expect(playbook).toContain('-servername "$TERRARIUM_AUTH_DOMAIN"');
     expect(playbook).toContain('"$TERRARIUM_TRAEFIK_CONFIG_DIR/traefik.yml"');
     expect(playbook).not.toContain('-servername "{{ terrarium_auth_domain }}"');
     expect(playbook).not.toContain('"{{ terrarium_traefik_config_dir }}/traefik.yml"');
-    expect(playbook).toContain("Fail when local auth domain still does not serve trusted TLS");
-    expect(playbook).toContain("terrarium_auth_trusted_tls_final.rc");
+    expect(playbook).toContain("Fail when local auth domain still does not serve public TLS");
+    expect(playbook).toContain("terrarium_auth_public_tls_final.rc");
     expect(playbook).toContain("journalctl -u traefik");
-    expect(playbook).toContain("terrarium_bootstrap_routes_removed is changed");
-    expect(playbook.indexOf("Remove local auth bootstrap routes before requesting public TLS")).toBeLessThan(
-      playbook.indexOf("Wait for local auth domain to serve trusted TLS")
+    expect(playbook).toContain("terrarium_bootstrap_tls_retired is changed");
+    expect(playbook.indexOf("Retire local auth bootstrap TLS before verifying public TLS")).toBeLessThan(
+      playbook.indexOf("Wait for local auth domain to serve public TLS")
     );
   });
 
