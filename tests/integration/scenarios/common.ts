@@ -336,18 +336,28 @@ export async function verifyLxdApi(host: ManagedHost, context?: IntegrationConte
   });
 }
 
-async function waitForLxdApiRootResponse(host: ManagedHost): Promise<HttpsResponse> {
-  const deadline = Date.now() + LXD_API_POLL_TIMEOUT_MS;
+type LxdApiRootWaitOptions = {
+  readResponse?: typeof readHttpsResponse;
+  sleep?: typeof Bun.sleep;
+  timeoutMs?: number;
+};
+
+export async function waitForLxdApiRootResponse(host: ManagedHost, options: LxdApiRootWaitOptions = {}): Promise<HttpsResponse> {
+  const readResponse = options.readResponse ?? readHttpsResponse;
+  const sleep = options.sleep ?? Bun.sleep;
+  const deadline = Date.now() + (options.timeoutMs ?? LXD_API_POLL_TIMEOUT_MS);
   let lastError = "";
   while (Date.now() < deadline) {
     try {
-      return await readHttpsResponse(`https://${host.domains.lxd}/1.0`, {
+      const response = await readResponse(`https://${host.domains.lxd}/1.0`, {
         resolveIp: host.server.ipv4,
         headers: ["Accept: application/json"]
       });
+      assertSafeLxdApiRootResponse(response, host.domains.lxd, host.domains.auth);
+      return response;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
-      await Bun.sleep(5000);
+      await sleep(5000);
     }
   }
 

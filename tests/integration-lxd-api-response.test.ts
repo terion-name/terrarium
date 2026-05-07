@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assertSafeLxdApiRootResponse } from "./integration/scenarios/common";
+import { assertSafeLxdApiRootResponse, waitForLxdApiRootResponse } from "./integration/scenarios/common";
 import type { HttpsResponse } from "./integration/assertions/http";
 
 function response(status: number, body = "", headers = ""): HttpsResponse {
@@ -42,5 +42,37 @@ describe("LXD API public probe", () => {
     expect(() =>
       assertSafeLxdApiRootResponse(response(302, "", "location: https://evil.example.test/login\r\n"), "lxd.example.test", "auth.example.test")
     ).toThrow("unexpected location");
+  });
+
+  test("polls through transient HTTP responses until the LXD API is safe", async () => {
+    const responses = [response(503, "service unavailable"), response(403)];
+    const seenUrls: string[] = [];
+
+    const result = await waitForLxdApiRootResponse(
+      {
+        domains: {
+          lxd: "lxd.example.test",
+          auth: "auth.example.test"
+        },
+        server: {
+          ipv4: "203.0.113.10"
+        }
+      } as never,
+      {
+        timeoutMs: 1000,
+        sleep: async () => undefined,
+        readResponse: async (url) => {
+          seenUrls.push(url);
+          const nextResponse = responses.shift();
+          if (!nextResponse) {
+            throw new Error("unexpected extra poll");
+          }
+          return nextResponse;
+        }
+      }
+    );
+
+    expect(result.status).toBe(403);
+    expect(seenUrls).toEqual(["https://lxd.example.test/1.0", "https://lxd.example.test/1.0"]);
   });
 });
