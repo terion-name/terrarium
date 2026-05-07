@@ -1,5 +1,8 @@
 # Terrarium
 
+> [!IMPORTANT]
+> Turn any VPS into a secure, forgiving home for your AI agents and apps. Full freedom for them. Convenience, security and a time machine for you.
+
 <p align="center">
     <picture>
         <img src="https://raw.githubusercontent.com/terion-name/terrarium/main/assets/banner.webp" alt="Terrarium" width="100%" style="max-width: 800px">
