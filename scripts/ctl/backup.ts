@@ -75,6 +75,20 @@ async function stopInstanceForRestore(instance: string): Promise<void> {
   throw new Error(`timed out waiting for ${instance} to stop before restore`);
 }
 
+type CommandRunner = typeof runAllowFailure;
+
+export async function assertNewRestoreTargetIsUnused(instance: string, targetDataset: string, runCommand: CommandRunner = runAllowFailure): Promise<void> {
+  const instanceCheck = await runCommand(["lxc", "info", instance]);
+  if (instanceCheck.exitCode === 0) {
+    throw new Error(`restore target instance '${instance}' already exists; choose a different --as-new name`);
+  }
+
+  const datasetCheck = await runCommand(["zfs", "list", "-H", targetDataset]);
+  if (datasetCheck.exitCode === 0) {
+    throw new Error(`restore target dataset '${targetDataset}' already exists; choose a different --as-new name`);
+  }
+}
+
 /**
  * Prints the explicit operator handoff for restore-as-new flows.
  *
@@ -449,6 +463,7 @@ async function restoreLocal(
   }
 
   const targetDataset = `${pool}/containers/${newName}`;
+  await assertNewRestoreTargetIsUnused(newName, targetDataset);
   const targetMountPath = join(lxdStorageRoot(pool), "containers", newName);
   await runText(["mkdir", "-p", targetMountPath], PREFIX);
   await runText(["zfs", "clone", "-o", `mountpoint=${targetMountPath}`, snapshot, targetDataset], PREFIX);
@@ -471,6 +486,10 @@ async function restoreS3(
     await stopInstanceForRestore(instance);
   } else if (!newName) {
     throw new Error("--as-new requires a target name");
+  }
+
+  if (mode === "as-new") {
+    await assertNewRestoreTargetIsUnused(newName, target);
   }
 
   await reconstructFromS3(instance, at, target);

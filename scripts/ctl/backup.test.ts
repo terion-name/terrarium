@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { rewriteRecoveredBackupMetadata } from "./backup";
+import { assertNewRestoreTargetIsUnused, rewriteRecoveredBackupMetadata } from "./backup";
 import { chooseLatestExportSnapshot, isRetriableS3ExportError } from "../terrarium-s3-export";
 
 describe("backup restore metadata", () => {
@@ -108,5 +108,34 @@ describe("backup restore metadata", () => {
         devices: {}
       }
     ]);
+  });
+});
+
+describe("backup restore target safety", () => {
+  test("rejects restore-as-new when the target LXD instance already exists", async () => {
+    await expect(
+      assertNewRestoreTargetIsUnused("victim", "terrarium/containers/victim", async (cmd) => {
+        if (cmd.join(" ") === "lxc info victim") {
+          return { exitCode: 0, stdout: "Name: victim\n", stderr: "" };
+        }
+        return { exitCode: 1, stdout: "", stderr: "not found" };
+      })
+    ).rejects.toThrow("target instance 'victim' already exists");
+  });
+
+  test("rejects restore-as-new when the target ZFS dataset already exists", async () => {
+    const commands: string[] = [];
+
+    await expect(
+      assertNewRestoreTargetIsUnused("victim", "terrarium/containers/victim", async (cmd) => {
+        commands.push(cmd.join(" "));
+        if (cmd.join(" ") === "zfs list -H terrarium/containers/victim") {
+          return { exitCode: 0, stdout: "terrarium/containers/victim\n", stderr: "" };
+        }
+        return { exitCode: 1, stdout: "", stderr: "not found" };
+      })
+    ).rejects.toThrow("target dataset 'terrarium/containers/victim' already exists");
+
+    expect(commands).toEqual(["lxc info victim", "zfs list -H terrarium/containers/victim"]);
   });
 });
