@@ -19,26 +19,29 @@ Terrarium is designed for this. By default, the `ubuntu/24.04` image is pre-conf
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 my-stack
+lxc launch images:ubuntu/24.04 my-stack --profile default --profile dev
 ```
 
-*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new instance named `my-stack`.)*
+*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new instance named `my-stack` with both the `default` and `dev` profiles.)*
+
+The default profile keeps Docker-in-LXC support enabled. Adding the `dev` profile gives the normal `terrarium` user passwordless sudo for installing Docker and managing the stack without working directly as root.
 
 ## 2. Install Docker Inside the Container
 
 Jump into your new container:
 ```bash
-lxc exec my-stack -- bash
+trm exec my-stack
 ```
 
 Now, run the official Docker installer script. This only installs Docker *inside the container*, not on your host:
 ```bash
-apt-get update
-apt-get install -y curl
-curl -fsSL https://get.docker.com | sh
+sudo apt-get update
+sudo apt-get install -y curl
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker terrarium
 ```
 
-You now have a fully functional, isolated Docker daemon running inside your LXC container.
+Exit and re-enter the container so the new `docker` group membership is active. You now have a fully functional, isolated Docker daemon running inside your LXC container.
 
 ## 3. Deploy Your App
 

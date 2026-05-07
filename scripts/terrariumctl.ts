@@ -37,6 +37,7 @@ import {
   mountListCmd,
   mountRemoveCmd
 } from "./ctl/mount";
+import { execCmd } from "./ctl/exec";
 import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
@@ -93,6 +94,21 @@ cli
 cli.command("reconfigure", "Re-run the Ansible reconciliation with the installed binary").action(async () => {
   await reconfigureCmd();
 });
+
+cli
+  .command("exec <instance> [...command]", "Run a command or shell inside a Terrarium container as the terrarium user")
+  .option("--root", "Run as root inside the container")
+  .option("--user <user>", "Container user for the command", STRING_OPTION)
+  .allowUnknownOptions()
+  .usage("exec CONTAINER [-- COMMAND...]\n  terrariumctl exec CONTAINER\n  terrariumctl exec CONTAINER -- bash -lc 'echo hello'\n  terrariumctl exec CONTAINER --root")
+  .action(async (instance, command, options) => {
+    const rawOptions = options as Record<string, unknown>;
+    const passthrough = Array.isArray(rawOptions["--"]) ? (rawOptions["--"] as string[]) : [];
+    await execCmd(instance as string, passthrough.length > 0 ? passthrough : ((command as string[]) ?? []), {
+      root: Boolean(rawOptions.root),
+      user: cliOption(rawOptions, "user")
+    });
+  });
 
 cli
   .command("config <action>", "Config storage operations")

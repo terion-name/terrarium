@@ -1591,12 +1591,12 @@ async function prepareLocalLxdForClusterJoin(storage: JoinStorageConfig): Promis
   // clear only Terrarium-managed empty LXD entities before importing cluster
   // state from the seed. Recreate the underlying zpool afterwards and leave it
   // imported; file-backed pools are not discoverable by plain `zpool import`.
-  for (const profile of ["default", "terrarium", "strict", "kvm"]) {
+  for (const profile of ["default", "terrarium", "strict", "dev", "kvm"]) {
     await removeProfileDeviceIfPresent(profile, "root");
     await removeProfileDeviceIfPresent(profile, "eth0");
   }
 
-  for (const profile of ["terrarium", "strict", "kvm"]) {
+  for (const profile of ["terrarium", "strict", "dev", "kvm"]) {
     await deleteProfileIfPresent(profile);
   }
 

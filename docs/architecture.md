@@ -53,6 +53,7 @@ Terrarium doesn't just isolate your apps; it hardens the host itself.
 - **SSH:** Locked down to key-based access only.
 - **Firewall:** Blocks all incoming traffic by default.
 - **Unprivileged Containers:** Even if an attacker breaks out of a Docker instance inside your container, they are still trapped in an unprivileged LXC namespace, completely separated from the host's actual root user.
+- **Non-root Container Workflow:** New cloud-init based containers get a normal `terrarium` user. The base profiles do not grant passwordless sudo; opt into that only for development and agent sandboxes by layering the `dev` profile.
 
 ### Authentication (IDP)
 Terrarium secures all of your management dashboards (Cockpit, LXD, Traefik). It either:

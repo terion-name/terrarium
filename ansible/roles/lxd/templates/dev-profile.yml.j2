@@ -1,0 +1,12 @@
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    write_files:
+      - path: /etc/sudoers.d/90-terrarium-dev
+        owner: root:root
+        permissions: "0440"
+        content: |
+          terrarium ALL=(ALL) NOPASSWD:ALL
+description: Terrarium layered profile for passwordless sudo development containers
+devices: {}
+name: dev

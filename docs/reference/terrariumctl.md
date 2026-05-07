@@ -8,6 +8,7 @@
 | --- | --- | --- | --- |
 | `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host, including preflight verification for external OIDC and S3 when enabled. |
 | `terrariumctl status` | none | n/a | Shows Terrarium service status, management endpoints, IDP mode, admin group, and the oauth2-proxy state. |
+| `terrariumctl exec` | required: instance name; optional command after `--`, `--root`, `--user` | `terrarium` login shell | Opens a shell or runs a command inside a container as the non-root `terrarium` user by default. |
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
 | `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
@@ -102,6 +103,35 @@ Terrarium keeps its canonical day-2 config in LXD's dqlite-backed project metada
 Use `terrariumctl config import` to copy the local export into the dqlite-backed store. Terrarium runs this automatically after LXD has been initialized during install and reconfigure.
 
 Use `terrariumctl config export` to recreate the local export from the dqlite-backed store. `terrariumctl reconfigure` does this automatically before invoking Ansible when the dqlite-backed store exists.
+
+## exec
+
+`terrariumctl exec` is Terrarium's safer wrapper around `lxc exec`.
+
+By default it opens a login shell as the `terrarium` user inside the container:
+
+```bash
+trm exec my-stack
+```
+
+To run a command, put the container command after `--` so flags are passed to the container command instead of Terrarium:
+
+```bash
+trm exec my-stack -- bash -lc 'docker compose ps'
+```
+
+For recovery or system administration, use root explicitly:
+
+```bash
+trm exec my-stack --root
+trm exec my-stack --root -- systemctl status ssh
+```
+
+You can also choose another container user:
+
+```bash
+trm exec my-stack --user ubuntu
+```
 
 ## cluster
 

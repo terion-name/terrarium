@@ -44,6 +44,26 @@ When you install Docker inside one of these containers, that Docker daemon and a
 
 *(Want strict isolation without Docker support? Terrarium provides a `strict` profile you can apply to containers that don't need nested virtualization.)*
 
+## 👤 Container Users and Dev Mode
+
+Terrarium's managed LXD profiles create a normal `terrarium` user inside new cloud-init based containers. That user is locked by default and does **not** receive passwordless sudo in the base `default`, `terrarium`, or `strict` profiles.
+
+For development containers and AI-agent sandboxes that need to install packages, layer the `dev` profile on top of the base profile:
+
+```bash
+lxc launch images:ubuntu/24.04 devbox --profile default --profile dev
+trm exec devbox
+```
+
+The `dev` profile adds passwordless sudo for the `terrarium` user, so package installation is explicit:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl
+```
+
+Root is still available through LXD for recovery and system administration, but day-to-day work should happen under `/home/terrarium`.
+
 ## ⏪ The Time Machine As Security
 
 Security isn't just about blocking hackers. It's also about recovering from mistakes.

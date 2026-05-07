@@ -18,15 +18,17 @@ First, we need a container for the Dokploy control panel.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 dokploy
+lxc launch images:ubuntu/24.04 dokploy --profile default --profile dev
 ```
+
+The `dev` profile lets the `terrarium` user run the installer with sudo without using root as the normal working account.
 
 Jump inside and run the official installer:
 ```bash
-lxc exec dokploy -- bash
-apt-get update
-apt-get install -y curl
-curl -sSL https://dokploy.com/install.sh | sh
+trm exec dokploy
+sudo apt-get update
+sudo apt-get install -y curl
+curl -sSL https://dokploy.com/install.sh | sudo sh
 exit
 ```
 
@@ -49,17 +51,19 @@ Now we need a separate container for your actual apps to run on. We'll call this
 lxc launch images:ubuntu/24.04 apps-a
 ```
 
+Dokploy currently requires root access for remote deployment servers, so this guide keeps root SSH enabled inside the app-server container with key-only authentication. This is still isolated from the host by Terrarium's unprivileged LXD boundary.
+
 Dokploy manages these servers over SSH, so we need to prepare the container to accept SSH connections from the Dokploy UI.
 
 ```bash
-lxc exec apps-a -- bash
+trm exec apps-a --root
 apt-get update
 apt-get install -y bash curl openssh-server
-systemctl enable --now ssh
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
 sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+systemctl enable --now ssh
 systemctl restart ssh
 exit
 ```
@@ -69,7 +73,7 @@ exit
 1. In your Dokploy UI, go to **Settings** -> **SSH Keys**. Create a new key and copy the Public Key.
 2. Back on your host terminal, paste that Public Key into the app server's authorized keys file:
    ```bash
-   lxc exec apps-a -- bash -lc 'cat >> /root/.ssh/authorized_keys'
+   trm exec apps-a --root -- bash -lc 'cat >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys'
    # Paste the key, press Enter, then press Ctrl-D
    ```
 3. Find the private IP address of your app server:

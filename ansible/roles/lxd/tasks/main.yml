@@ -727,6 +727,7 @@
     - { name: "default", template: "default-profile.yml.j2", path: "{{ terrarium_state_dir }}/default-profile.yml" }
     - { name: "terrarium", template: "terrarium-profile.yml.j2", path: "{{ terrarium_state_dir }}/terrarium-profile.yml" }
     - { name: "strict", template: "strict-profile.yml.j2", path: "{{ terrarium_state_dir }}/strict-profile.yml" }
+    - { name: "dev", template: "dev-profile.yml.j2", path: "{{ terrarium_state_dir }}/dev-profile.yml" }
   register: terrarium_lxd_profiles
   failed_when: false
   changed_when: false
@@ -740,6 +741,7 @@
     - { name: "default", template: "default-profile.yml.j2", path: "{{ terrarium_state_dir }}/default-profile.yml" }
     - { name: "terrarium", template: "terrarium-profile.yml.j2", path: "{{ terrarium_state_dir }}/terrarium-profile.yml" }
     - { name: "strict", template: "strict-profile.yml.j2", path: "{{ terrarium_state_dir }}/strict-profile.yml" }
+    - { name: "dev", template: "dev-profile.yml.j2", path: "{{ terrarium_state_dir }}/dev-profile.yml" }
 
 - name: Create missing Terrarium-managed LXD profiles
   ansible.builtin.command: "/snap/bin/lxc profile create {{ item.item.name }}"
@@ -754,6 +756,7 @@
     - { name: "default", template: "default-profile.yml.j2", path: "{{ terrarium_state_dir }}/default-profile.yml" }
     - { name: "terrarium", template: "terrarium-profile.yml.j2", path: "{{ terrarium_state_dir }}/terrarium-profile.yml" }
     - { name: "strict", template: "strict-profile.yml.j2", path: "{{ terrarium_state_dir }}/strict-profile.yml" }
+    - { name: "dev", template: "dev-profile.yml.j2", path: "{{ terrarium_state_dir }}/dev-profile.yml" }
 
 - name: Check whether host exposes KVM
   ansible.builtin.stat:

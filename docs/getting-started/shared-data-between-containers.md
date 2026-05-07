@@ -62,9 +62,9 @@ Instead of authenticating three separate times, you can just share the folder wh
 lxc storage volume create terrarium codex-auth
 
 # Attach it exactly where the CLI expects the auth file to live
-lxc storage volume attach terrarium codex-auth openclaw codex-auth /root/.codex
-lxc storage volume attach terrarium codex-auth hermes codex-auth /root/.codex
-lxc storage volume attach terrarium codex-auth research codex-auth /root/.codex
+lxc storage volume attach terrarium codex-auth openclaw codex-auth /home/terrarium/.codex
+lxc storage volume attach terrarium codex-auth hermes codex-auth /home/terrarium/.codex
+lxc storage volume attach terrarium codex-auth research codex-auth /home/terrarium/.codex
 ```
 
 Now, just log into one of those containers, run the login command, and *boom*—all three containers are authenticated instantly.

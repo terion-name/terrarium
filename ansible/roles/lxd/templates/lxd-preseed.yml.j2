@@ -18,6 +18,15 @@ profiles:
   - name: default
     description: Terrarium default container profile
     config:
+      cloud-init.vendor-data: |
+        #cloud-config
+        users:
+          - name: terrarium
+            gecos: Terrarium Container User
+            groups: users
+            lock_passwd: true
+            shell: /bin/bash
+            sudo: []
       security.idmap.isolated: "true"
       security.nesting: "true"
       security.syscalls.intercept.mknod: "true"

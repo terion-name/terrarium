@@ -17,15 +17,17 @@ This gives Coolify the SSH-managed server architecture it expects, while Terrari
 First, let's create a container just for the Coolify dashboard.
 
 ```bash
-lxc launch images:ubuntu/24.04 coolify
+lxc launch images:ubuntu/24.04 coolify --profile default --profile dev
 ```
+
+The `dev` profile lets the `terrarium` user run the installer with sudo without using root as the normal working account.
 
 Jump into the container and install Coolify:
 ```bash
-lxc exec coolify -- bash
-apt-get update
-apt-get install -y curl
-curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
+trm exec coolify
+sudo apt-get update
+sudo apt-get install -y curl
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
 exit
 ```
 *(Note: Coolify automatically installs its own Docker engine inside this container.)*
@@ -56,21 +58,22 @@ terrariumctl proxy sync
 Now we need a place for your actual apps to run. Let's create a new "deployment server" container.
 
 ```bash
-lxc launch images:ubuntu/24.04 apps-server-1
+lxc launch images:ubuntu/24.04 apps-server-1 --profile default --profile dev
 ```
+
+Coolify supports non-root server users when the user has SSH key access and passwordless sudo. Its docs currently mark this as experimental, which fits Terrarium's `dev` profile model: Coolify connects as `terrarium`, and `terrarium` can use sudo while preparing deployments.
 
 Coolify manages its servers via SSH. We need to prep this container to accept SSH connections from the control plane.
 
 ```bash
-lxc exec apps-server-1 -- bash
-apt-get update
-apt-get install -y bash curl ca-certificates openssh-server
-systemctl enable --now ssh
-mkdir -p /root/.ssh
-chmod 700 /root/.ssh
-sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-systemctl restart ssh
+trm exec apps-server-1
+sudo apt-get update
+sudo apt-get install -y bash curl ca-certificates openssh-server
+install -d -m 0700 ~/.ssh
+sudo sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo systemctl enable --now ssh
+sudo systemctl restart ssh
 exit
 ```
 
@@ -80,14 +83,14 @@ exit
 2. Go to **Keys & Tokens** and create a new Private Key. Copy the associated Public Key.
 3. Back on your host terminal, paste that Public Key into the app server's authorized keys file:
    ```bash
-   lxc exec apps-server-1 -- bash -lc 'cat >> /root/.ssh/authorized_keys'
+   trm exec apps-server-1 -- bash -lc 'cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
    # Paste the key, press Enter, then press Ctrl-D
    ```
 4. Find the private IP address of your app server:
    ```bash
    lxc list apps-server-1 -c n4
    ```
-5. In Coolify, go to **Servers** -> **Add New Server**. Enter the private IP address you just found, use the user `root`, and select the Private Key you created.
+5. In Coolify, go to **Servers** -> **Add New Server**. Enter the private IP address you just found, use the user `terrarium`, and select the Private Key you created.
 
 Coolify will connect to the container over Terrarium's secure internal network, install Docker, and prepare it for deployments.
 

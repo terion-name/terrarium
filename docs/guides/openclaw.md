@@ -14,10 +14,12 @@ First, let's create a fresh LXC container specifically for OpenClaw.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 openclaw
+lxc launch images:ubuntu/24.04 openclaw --profile default --profile dev
 ```
 
-*(You can also do this visually through the **LXD UI** at `lxd.<your-domain>`. Just create an `ubuntu/24.04` instance and name it `openclaw`.)*
+*(You can also do this visually through the **LXD UI** at `lxd.<your-domain>`. Create an `ubuntu/24.04` instance named `openclaw` and include both the `default` and `dev` profiles.)*
+
+The `dev` profile gives the normal `terrarium` user passwordless sudo inside this sandbox, which is useful for agents that need to install tools.
 
 ## 2. Install OpenClaw
 
@@ -25,13 +27,13 @@ It's much easier to configure OpenClaw from *inside* the container, where its in
 
 Jump into the container:
 ```bash
-lxc exec openclaw -- bash
+trm exec openclaw
 ```
 
 Now, run the official OpenClaw installer:
 ```bash
-apt-get update
-apt-get install -y curl
+sudo apt-get update
+sudo apt-get install -y curl
 curl -fsSL https://openclaw.ai/install.sh | bash
 ```
 
@@ -96,4 +98,4 @@ OpenClaw stores all of its "memories" and generated artifacts as plain text Mark
 
 If you want to be able to read and edit those files from your Macbook or Windows PC, you can connect OpenClaw to a Hetzner Storage Box using Terrarium's [External Shared Storage](../getting-started/external-shared-storage.md) feature.
 
-Simply mount your cloud drive to `/root/.openclaw/workspace` inside the container, and OpenClaw will save all its files directly to the cloud.
+Simply mount your cloud drive to `/home/terrarium/.openclaw/workspace` inside the container, and OpenClaw will save all its files directly to the cloud.

@@ -12,10 +12,12 @@ You can do this visually in the LXD UI or from the CLI.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 hermes
+lxc launch images:ubuntu/24.04 hermes --profile default --profile dev
 ```
 
-*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new `ubuntu/24.04` instance named `hermes`.)*
+*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new `ubuntu/24.04` instance named `hermes` with both the `default` and `dev` profiles.)*
+
+The `dev` profile lets the normal `terrarium` user use passwordless sudo inside the container, which is handy for agent runtimes that install packages over time.
 
 ## 2. Install Hermes
 
@@ -23,13 +25,13 @@ Hermes has a great interactive setup script, so the easiest way to install it is
 
 Enter the container:
 ```bash
-lxc exec hermes -- bash
+trm exec hermes
 ```
 
 Update the system and install the required tools:
 ```bash
-apt-get update
-apt-get install -y git curl
+sudo apt-get update
+sudo apt-get install -y git curl
 ```
 
 Download and run the official installer:
@@ -91,12 +93,12 @@ If your server reboots, you want Hermes to start back up automatically.
 
 Go back inside the container:
 ```bash
-lxc exec hermes -- bash
+trm exec hermes
 ```
 
 Create a systemd service:
 ```bash
-cat > /etc/systemd/system/hermes-gateway.service <<'EOF'
+sudo tee /etc/systemd/system/hermes-gateway.service > /dev/null <<'EOF'
 [Unit]
 Description=Hermes API gateway
 After=network-online.target
@@ -104,8 +106,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Environment=HOME=/root
+User=terrarium
+Environment=HOME=/home/terrarium
+WorkingDirectory=/home/terrarium
 ExecStart=/bin/bash -lc 'source ~/.bashrc && hermes gateway'
 Restart=on-failure
 RestartSec=5
@@ -114,8 +117,8 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now hermes-gateway.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now hermes-gateway.service
 ```
 
 ## Advanced: Store Memories externally
@@ -124,4 +127,4 @@ Hermes keeps its memories as plain Markdown files. By default, these live at `~/
 
 If you want to read and edit those memories from your own laptop or another server, you can use Terrarium's [External Shared Storage](../getting-started/external-shared-storage.md) feature to mount an external cloud drive directly into the container. 
 
-Map your external Hetzner Storage Box to `/root/.hermes/memories` to create a cloud-backed memory bank for your AI agents.
+Map your external Hetzner Storage Box to `/home/terrarium/.hermes/memories` to create a cloud-backed memory bank for your AI agents.
