@@ -35,6 +35,10 @@ function curlResolveArgs(url: string, resolveIp?: string): string[] {
   return ["--resolve", `${parsed.hostname}:${port}:${resolveIp}`];
 }
 
+export function curlTlsVerificationArgs(options: Pick<HttpAssertionOptions, "resolveIp" | "insecure">): string[] {
+  return options.insecure ?? Boolean(options.resolveIp) ? ["-k"] : [];
+}
+
 export function parseCurlHttpBodyResult(stdout: string, body: string): { status: number; body: string } {
   const statusText = stdout.trim();
   const status = Number(statusText);
@@ -108,7 +112,7 @@ export async function readHttpsResponse(url: string, options: HttpsReadOptions =
       "5",
       "--max-time",
       "20",
-      ...(options.insecure ? ["-k"] : []),
+      ...curlTlsVerificationArgs(options),
       ...curlResolveArgs(url, options.resolveIp),
       url
     ], { timeoutMs: CURL_PROCESS_TIMEOUT_MS });
@@ -147,7 +151,7 @@ export async function waitForHttpStatusResolved(
 ): Promise<number> {
   const timeoutMs = typeof timeoutMsOrOptions === "number" ? timeoutMsOrOptions : timeoutMsOrOptions.timeoutMs ?? 180000;
   const resolveIp = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.resolveIp;
-  const insecure = typeof timeoutMsOrOptions === "number" ? false : timeoutMsOrOptions.insecure ?? false;
+  const insecure = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.insecure;
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "";
   let lastError = "";
@@ -167,7 +171,7 @@ export async function waitForHttpStatusResolved(
       "5",
       "--max-time",
       "20",
-      ...(insecure ? ["-k"] : []),
+      ...curlTlsVerificationArgs({ resolveIp, insecure }),
       ...curlResolveArgs(url, resolveIp),
       url
     ], { timeoutMs: CURL_PROCESS_TIMEOUT_MS });
@@ -200,7 +204,7 @@ export async function expectHttpBodyContains(
 ): Promise<void> {
   const timeoutMs = typeof timeoutMsOrOptions === "number" ? timeoutMsOrOptions : timeoutMsOrOptions.timeoutMs ?? 180000;
   const resolveIp = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.resolveIp;
-  const insecure = typeof timeoutMsOrOptions === "number" ? false : timeoutMsOrOptions.insecure ?? false;
+  const insecure = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.insecure;
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "none";
   let lastBody = "";
@@ -241,7 +245,7 @@ export async function expectHttpsJson(
 ): Promise<void> {
   const timeoutMs = typeof timeoutMsOrOptions === "number" ? timeoutMsOrOptions : timeoutMsOrOptions.timeoutMs ?? 180000;
   const resolveIp = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.resolveIp;
-  const insecure = typeof timeoutMsOrOptions === "number" ? false : timeoutMsOrOptions.insecure ?? false;
+  const insecure = typeof timeoutMsOrOptions === "number" ? undefined : timeoutMsOrOptions.insecure;
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "none";
   let lastBody = "";

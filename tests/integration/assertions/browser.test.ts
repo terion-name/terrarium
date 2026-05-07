@@ -11,7 +11,8 @@ import {
   isLoginOrOauthCallbackPlumbingPath,
   isTargetApplicationPage,
   isTargetLoginOrOauthPlumbingPage,
-  lxdOidcLoginUrlForSsoPage
+  lxdOidcLoginUrlForSsoPage,
+  shouldIgnoreHttpsErrors
 } from "./browser";
 
 describe("browser assertion helpers", () => {
@@ -79,6 +80,13 @@ describe("browser assertion helpers", () => {
     expect(new Set([allowPath, denyPath, denyFailurePath]).size).toBe(3);
   });
 
+  test("ignores HTTPS errors for host-pinned browser flows unless explicitly disabled", () => {
+    expect(shouldIgnoreHttpsErrors({ resolveHosts: { "app.example.test": "203.0.113.10" } })).toBe(true);
+    expect(shouldIgnoreHttpsErrors({ resolveHosts: { "app.example.test": "203.0.113.10" }, ignoreHTTPSErrors: false })).toBe(false);
+    expect(shouldIgnoreHttpsErrors({ ignoreHTTPSErrors: true })).toBe(true);
+    expect(shouldIgnoreHttpsErrors({})).toBe(false);
+  });
+
   test("formats denied-route target failures with final URL and body snippet", () => {
     const message = formatDeniedTargetRouteFailure("https://app.example.test/protected", "terrarium-proxy-ok\nfixture reached");
 
@@ -111,6 +119,18 @@ describe("browser assertion helpers", () => {
         )
       )
     ).toBe(false);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "none of the identity selectors were visible: input[name=\"loginName\"]",
+            "current URL: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123",
+            "body:\n<empty>"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
 
     expect(
       isRetryableBlankNavigationError(
