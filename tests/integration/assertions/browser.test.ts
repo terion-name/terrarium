@@ -4,6 +4,7 @@ import {
   bodyContainsAnyMarker,
   bodyContainsDenialText,
   bodyContainsHttpErrorText,
+  browserLifecycleTimeoutForLoginTargets,
   browserScreenshotPath,
   formatDeniedTargetRouteFailure,
   isIdentityLoginInputPage,
@@ -85,6 +86,11 @@ describe("browser assertion helpers", () => {
     expect(shouldIgnoreHttpsErrors({ resolveHosts: { "app.example.test": "203.0.113.10" }, ignoreHTTPSErrors: false })).toBe(false);
     expect(shouldIgnoreHttpsErrors({ ignoreHTTPSErrors: true })).toBe(true);
     expect(shouldIgnoreHttpsErrors({})).toBe(false);
+  });
+
+  test("sizes composite browser lifecycles to cover nested login retry budgets", () => {
+    expect(browserLifecycleTimeoutForLoginTargets(2)).toBeGreaterThan(15 * 60 * 1000);
+    expect(browserLifecycleTimeoutForLoginTargets(3)).toBeGreaterThan(browserLifecycleTimeoutForLoginTargets(2));
   });
 
   test("formats denied-route target failures with final URL and body snippet", () => {

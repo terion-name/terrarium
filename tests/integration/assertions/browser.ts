@@ -18,6 +18,7 @@ type LoginOptions = {
 const BROWSER_WAIT_TIMEOUT_MS = 120000;
 const BROWSER_FLOW_TIMEOUT_MS = 180000;
 const BROWSER_LIFECYCLE_TIMEOUT_MS = 15 * 60 * 1000;
+const BROWSER_LOGIN_ATTEMPTS = 3;
 const BROWSER_CLOSE_TIMEOUT_MS = 10000;
 const BROWSER_CLICK_TIMEOUT_MS = 10000;
 const BROWSER_POLL_TIMEOUT_MS = 1000;
@@ -71,6 +72,10 @@ const PASSWORD_SUBMIT_SELECTORS = submitControlSelectors(["Sign in", "Login", "C
 
 export function shouldIgnoreHttpsErrors(options: { resolveHosts?: Record<string, string>; ignoreHTTPSErrors?: boolean }): boolean {
   return options.ignoreHTTPSErrors ?? Object.keys(options.resolveHosts ?? {}).length > 0;
+}
+
+export function browserLifecycleTimeoutForLoginTargets(targetCount: number): number {
+  return BROWSER_FLOW_TIMEOUT_MS * BROWSER_LOGIN_ATTEMPTS * targetCount + BROWSER_WAIT_TIMEOUT_MS;
 }
 const CONSENT_SUBMIT_SELECTORS = ["Allow", "Authorize", "Approve", "Accept", "Continue", "Grant access"].flatMap((label) => [
   `button:has-text("${label}")`,
@@ -779,7 +784,7 @@ async function accountSelectionClickPoint(page: Page, userEmail: string): Promis
 export async function withBrowser<T>(
   outputDir: string,
   runFlow: (browser: Browser) => Promise<T>,
-  options: { resolveHosts?: Record<string, string>; ignoreHTTPSErrors?: boolean } = {}
+  options: { resolveHosts?: Record<string, string>; ignoreHTTPSErrors?: boolean; lifecycleTimeoutMs?: number } = {}
 ): Promise<T> {
   mkdirSync(outputDir, { recursive: true });
   const browser = await withTimeout(
@@ -792,7 +797,7 @@ export async function withBrowser<T>(
     "browser launch"
   );
   try {
-    return await withTimeout(runFlow(browser), BROWSER_LIFECYCLE_TIMEOUT_MS, "browser lifecycle");
+    return await withTimeout(runFlow(browser), options.lifecycleTimeoutMs ?? BROWSER_LIFECYCLE_TIMEOUT_MS, "browser lifecycle");
   } catch (error) {
     const diagnostics = await captureBrowserLifecycleDiagnostics(browser, outputDir);
     throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostics}`);
@@ -970,12 +975,12 @@ async function loginThroughZitadelWithBrowserRetry(
   options: LoginOptions
 ): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= BROWSER_LOGIN_ATTEMPTS; attempt += 1) {
     try {
       return await loginThroughZitadelWithBrowser(browser, url, user, options);
     } catch (error) {
       lastError = error;
-      if (attempt >= 3 || !isRetryableBlankNavigationError(error)) {
+      if (attempt >= BROWSER_LOGIN_ATTEMPTS || !isRetryableBlankNavigationError(error)) {
         throw error;
       }
     }
@@ -1074,31 +1079,38 @@ export async function expectManagementUi(
       : {})
   };
   const ignoreHTTPSErrors = shouldIgnoreHttpsErrors({ resolveHosts });
-  await withBrowser(outputDir, async (browser) => {
-    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, {
-      outputDir,
-      postLoginBodyMarkers: COCKPIT_TEXT_MARKERS,
-      postLoginLabel: "Cockpit",
-      ignoreHTTPSErrors
-    });
-    const cockpitFinal = new URL(cockpit.finalUrl);
-    const cockpitTarget = new URL(manageUrl);
-    if (cockpitFinal.host !== cockpitTarget.host) {
-      throw new Error(`unexpected post-login cockpit host: ${cockpit.finalUrl}`);
-    }
-    assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
+  await withBrowser(
+    outputDir,
+    async (browser) => {
+      const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, {
+        outputDir,
+        postLoginBodyMarkers: COCKPIT_TEXT_MARKERS,
+        postLoginLabel: "Cockpit",
+        ignoreHTTPSErrors
+      });
+      const cockpitFinal = new URL(cockpit.finalUrl);
+      const cockpitTarget = new URL(manageUrl);
+      if (cockpitFinal.host !== cockpitTarget.host) {
+        throw new Error(`unexpected post-login cockpit host: ${cockpit.finalUrl}`);
+      }
+      assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
-    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, {
-      outputDir,
-      postLoginBodyMarkers: TRAEFIK_TEXT_MARKERS,
-      postLoginLabel: "Traefik dashboard",
-      ignoreHTTPSErrors
-    });
-    if (!proxy.finalUrl.includes("/dashboard")) {
-      throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
+      const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, {
+        outputDir,
+        postLoginBodyMarkers: TRAEFIK_TEXT_MARKERS,
+        postLoginLabel: "Traefik dashboard",
+        ignoreHTTPSErrors
+      });
+      if (!proxy.finalUrl.includes("/dashboard")) {
+        throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
+      }
+      assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
+    },
+    {
+      lifecycleTimeoutMs: browserLifecycleTimeoutForLoginTargets(2),
+      resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined
     }
-    assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
-  }, { resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined });
+  );
 }
 
 /** Verifies the Cockpit, Traefik, and LXD management surfaces in one browser lifecycle. */
@@ -1121,44 +1133,51 @@ export async function expectManagementSurfaces(
       : {})
   };
   const ignoreHTTPSErrors = shouldIgnoreHttpsErrors({ resolveHosts });
-  await withBrowser(outputDir, async (browser) => {
-    const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, {
-      outputDir,
-      postLoginBodyMarkers: COCKPIT_TEXT_MARKERS,
-      postLoginLabel: "Cockpit",
-      ignoreHTTPSErrors
-    });
-    const cockpitFinal = new URL(cockpit.finalUrl);
-    const cockpitTarget = new URL(manageUrl);
-    if (cockpitFinal.host !== cockpitTarget.host) {
-      throw new Error(`unexpected post-login cockpit host: ${cockpit.finalUrl}`);
-    }
-    assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
+  await withBrowser(
+    outputDir,
+    async (browser) => {
+      const cockpit = await loginThroughZitadelWithBrowserRetry(browser, manageUrl, user, {
+        outputDir,
+        postLoginBodyMarkers: COCKPIT_TEXT_MARKERS,
+        postLoginLabel: "Cockpit",
+        ignoreHTTPSErrors
+      });
+      const cockpitFinal = new URL(cockpit.finalUrl);
+      const cockpitTarget = new URL(manageUrl);
+      if (cockpitFinal.host !== cockpitTarget.host) {
+        throw new Error(`unexpected post-login cockpit host: ${cockpit.finalUrl}`);
+      }
+      assertUserFacingPageBody(`${cockpit.title}\n${cockpit.bodyText}`, COCKPIT_TEXT_MARKERS, "Cockpit");
 
-    const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, {
-      outputDir,
-      postLoginBodyMarkers: TRAEFIK_TEXT_MARKERS,
-      postLoginLabel: "Traefik dashboard",
-      ignoreHTTPSErrors
-    });
-    if (!proxy.finalUrl.includes("/dashboard")) {
-      throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
-    }
-    assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
+      const proxy = await loginThroughZitadelWithBrowserRetry(browser, proxyUrl, user, {
+        outputDir,
+        postLoginBodyMarkers: TRAEFIK_TEXT_MARKERS,
+        postLoginLabel: "Traefik dashboard",
+        ignoreHTTPSErrors
+      });
+      if (!proxy.finalUrl.includes("/dashboard")) {
+        throw new Error(`unexpected Traefik dashboard URL: ${proxy.finalUrl}`);
+      }
+      assertUserFacingPageBody(`${proxy.title}\n${proxy.bodyText}`, TRAEFIK_TEXT_MARKERS, "Traefik dashboard");
 
-    const lxd = await loginThroughZitadelWithBrowserRetry(browser, lxdUrl, user, {
-      outputDir,
-      postLoginBodyMarkers: LXD_TEXT_MARKERS,
-      postLoginLabel: "LXD UI",
-      ignoreHTTPSErrors
-    });
-    const lxdFinal = new URL(lxd.finalUrl);
-    const lxdTarget = new URL(lxdUrl);
-    if (lxdFinal.host !== lxdTarget.host) {
-      throw new Error(`unexpected post-login LXD host: ${lxd.finalUrl}`);
+      const lxd = await loginThroughZitadelWithBrowserRetry(browser, lxdUrl, user, {
+        outputDir,
+        postLoginBodyMarkers: LXD_TEXT_MARKERS,
+        postLoginLabel: "LXD UI",
+        ignoreHTTPSErrors
+      });
+      const lxdFinal = new URL(lxd.finalUrl);
+      const lxdTarget = new URL(lxdUrl);
+      if (lxdFinal.host !== lxdTarget.host) {
+        throw new Error(`unexpected post-login LXD host: ${lxd.finalUrl}`);
+      }
+      assertUserFacingPageBody(`${lxd.title}\n${lxd.bodyText}`, LXD_TEXT_MARKERS, "LXD UI");
+    },
+    {
+      lifecycleTimeoutMs: browserLifecycleTimeoutForLoginTargets(3),
+      resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined
     }
-    assertUserFacingPageBody(`${lxd.title}\n${lxd.bodyText}`, LXD_TEXT_MARKERS, "LXD UI");
-  }, { resolveHosts: Object.keys(resolveHosts).length > 0 ? resolveHosts : undefined });
+  );
 }
 
 /** Verifies that the public LXD UI completes OIDC login and renders an authenticated management view. */
