@@ -198,7 +198,8 @@ async function resubmitUsernameIfStillOnUsernameStep(page: Page, userEmail: stri
 }
 
 export const __browserTestHooks = {
-  resubmitUsernameIfStillOnUsernameStep
+  resubmitUsernameIfStillOnUsernameStep,
+  waitForPasswordInputAfterUsernameSubmit
 };
 
 function isUsernameLoginStep(currentUrl: string): boolean {

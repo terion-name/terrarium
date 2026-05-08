@@ -239,4 +239,48 @@ describe("browser assertion helpers", () => {
       await browser.close();
     }
   });
+
+  test("waits through ZITADEL username to password transition without stale username typing", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.route("**/*", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: [
+            "<form>",
+            '<input data-testid="username-text-input" value="">',
+            '<button type="submit">Continue</button>',
+            "</form>",
+            "<script>",
+            "window.submits = 0;",
+            "document.querySelector('form').addEventListener('submit', (event) => {",
+            "  event.preventDefault();",
+            "  window.submits += 1;",
+            "  setTimeout(() => {",
+            "    history.pushState(null, '', '/ui/v2/login/password?requestId=oidc_123');",
+            "    document.body.innerHTML = '<form><input data-testid=\"password-text-input\" name=\"password\" type=\"password\"><button type=\"submit\">Continue</button></form>';",
+            "  }, 10);",
+            "});",
+            "</script>"
+          ].join("")
+        })
+      );
+
+      await page.goto("http://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123");
+      const selector = await __browserTestHooks.waitForPasswordInputAfterUsernameSubmit(
+        page,
+        '[data-testid="username-text-input"]',
+        "agent@example.test",
+        "app.example.test"
+      );
+
+      expect(selector).toBe('[data-testid="password-text-input"]');
+      expect(page.url()).toContain("/ui/v2/login/password");
+      expect(await page.locator('[data-testid="password-text-input"]').isVisible()).toBe(true);
+      expect(await page.evaluate(() => (window as unknown as { submits: number }).submits)).toBe(1);
+    } finally {
+      await browser.close();
+    }
+  });
 });
