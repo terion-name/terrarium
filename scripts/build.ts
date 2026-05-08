@@ -44,4 +44,4 @@ writeFileSync(
 
 mkdirSync("dist", { recursive: true });
 
-await $`${bun} build --compile scripts/terrariumctl.ts --outfile dist/terrariumctl`;
+await $`${bun} build  scripts/terrariumctl.ts --compile --bytecode --minify --outfile dist/terrariumctl`;
