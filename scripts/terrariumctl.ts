@@ -417,10 +417,14 @@ cli
 
 cli.help();
 
-try {
-  cli.parse(normalizedArgv(process.argv), { run: false });
-  await cli.runMatchedCommand();
-} catch (error) {
-  console.error(chalk.red(`${PREFIX}: ${String(error).replace(/^Error: /, "")}`));
-  process.exit(1);
+async function main(): Promise<void> {
+  try {
+    cli.parse(normalizedArgv(process.argv), { run: false });
+    await cli.runMatchedCommand();
+  } catch (error) {
+    console.error(chalk.red(`${PREFIX}: ${String(error).replace(/^Error: /, "")}`));
+    process.exit(1);
+  }
 }
+
+void main();
