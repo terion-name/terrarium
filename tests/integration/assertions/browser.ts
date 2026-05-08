@@ -90,6 +90,13 @@ async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelec
   let lastBody = "";
 
   while (Date.now() < deadline) {
+    if (isPasswordLoginStep(page.url())) {
+      const selector = await visiblePasswordInputSelector(page, 5000);
+      if (selector) {
+        return selector;
+      }
+    }
+
     for (const selector of PASSWORD_INPUT_SELECTORS) {
       const locator = page.locator(selector).first();
       if (await locatorVisible(locator)) {
@@ -108,14 +115,17 @@ async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelec
       throw new Error(`ZITADEL username step failed before password input\nbody:\n${bodySnippetForError(lastBody)}`);
     }
 
-    const parsedUrl = parseBrowserUrl(currentUrl);
-    const onUsernameStep = parsedUrl?.pathname.toLowerCase().startsWith("/ui/v2/login/loginname") ?? false;
-    if (onUsernameStep && isIdentityLoginInputPage(currentUrl, targetHost)) {
-      const usernameInputVisible = await inputVisible(page, USERNAME_INPUT_SELECTORS);
+    if (isUsernameLoginStep(currentUrl) && isIdentityLoginInputPage(currentUrl, targetHost)) {
       const now = Date.now();
-      if (usernameInputVisible && now - lastResubmit > 5000) {
+      if (now - lastResubmit > 5000 && await canResubmitUsername(page, usernameSelector)) {
         lastResubmit = now;
+        if (isPasswordLoginStep(page.url())) {
+          continue;
+        }
         await typeInto(page, usernameSelector, userEmail);
+        if (isPasswordLoginStep(page.url())) {
+          continue;
+        }
         await submitIdentityForm(page, usernameSelector, USERNAME_SUBMIT_SELECTORS);
         await page.waitForTimeout(1000);
         continue;
@@ -132,6 +142,41 @@ async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelec
       `body:\n${bodySnippetForError(lastBody) || "<empty>"}`
     ].join("\n")
   );
+}
+
+async function visiblePasswordInputSelector(page: Page, timeoutMs: number): Promise<string | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const selector of PASSWORD_INPUT_SELECTORS) {
+      const locator = page.locator(selector).first();
+      if (await locatorVisible(locator)) {
+        return selector;
+      }
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  return undefined;
+}
+
+async function canResubmitUsername(page: Page, usernameSelector: string): Promise<boolean> {
+  if (!isUsernameLoginStep(page.url())) {
+    return false;
+  }
+
+  const locator = page.locator(usernameSelector).first();
+  return (await locatorVisible(locator)) && (await waitForEditableInput(locator)) && isUsernameLoginStep(page.url());
+}
+
+function isUsernameLoginStep(currentUrl: string): boolean {
+  const parsedUrl = parseBrowserUrl(currentUrl);
+  return parsedUrl?.pathname.toLowerCase().startsWith("/ui/v2/login/loginname") ?? false;
+}
+
+function isPasswordLoginStep(currentUrl: string): boolean {
+  const parsedUrl = parseBrowserUrl(currentUrl);
+  return parsedUrl?.pathname.toLowerCase().startsWith("/ui/v2/login/password") ?? false;
 }
 
 async function reloadBlankLoginDocumentIfNeeded(page: Page): Promise<boolean> {
