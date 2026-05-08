@@ -84,33 +84,52 @@ const CONSENT_SUBMIT_SELECTORS = ["Allow", "Authorize", "Approve", "Accept", "Co
   `input[type="button"][value="${label}"]`
 ]);
 
-async function firstVisible(page: Page, selectors: string[]): Promise<string> {
+async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelector: string, userEmail: string, targetHost: string): Promise<string> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
-  let reloadedBlankLoginPage = false;
+  let lastResubmit = 0;
+  let lastBody = "";
 
   while (Date.now() < deadline) {
-    for (const selector of selectors) {
+    for (const selector of PASSWORD_INPUT_SELECTORS) {
       const locator = page.locator(selector).first();
       if (await locatorVisible(locator)) {
         return selector;
       }
     }
 
-    if (!reloadedBlankLoginPage && await reloadBlankLoginDocumentIfNeeded(page)) {
-      reloadedBlankLoginPage = true;
-      await page.waitForTimeout(1000);
-      continue;
+    const currentUrl = page.url();
+    lastBody = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
+    const normalizedBody = lastBody.toLowerCase();
+    if (
+      normalizedBody.includes("user not found") ||
+      normalizedBody.includes("invalid login") ||
+      normalizedBody.includes("login failed")
+    ) {
+      throw new Error(`ZITADEL username step failed before password input\nbody:\n${bodySnippetForError(lastBody)}`);
+    }
+
+    const parsedUrl = parseBrowserUrl(currentUrl);
+    const onUsernameStep = parsedUrl?.pathname.toLowerCase().startsWith("/ui/v2/login/loginname") ?? false;
+    if (onUsernameStep && isIdentityLoginInputPage(currentUrl, targetHost)) {
+      const usernameInputVisible = await inputVisible(page, USERNAME_INPUT_SELECTORS);
+      const now = Date.now();
+      if (usernameInputVisible && now - lastResubmit > 5000) {
+        lastResubmit = now;
+        await typeInto(page, usernameSelector, userEmail);
+        await submitIdentityForm(page, usernameSelector, USERNAME_SUBMIT_SELECTORS);
+        await page.waitForTimeout(1000);
+        continue;
+      }
     }
 
     await page.waitForTimeout(500);
   }
 
-  const body = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
   throw new Error(
     [
-      `none of the selectors were visible: ${selectors.join(", ")}`,
+      `none of the password selectors were visible after username submit: ${PASSWORD_INPUT_SELECTORS.join(", ")}`,
       `current URL: ${page.url()}`,
-      `body:\n${bodySnippetForError(body) || "<empty>"}`
+      `body:\n${bodySnippetForError(lastBody) || "<empty>"}`
     ].join("\n")
   );
 }
@@ -900,8 +919,8 @@ async function loginThroughZitadelWithBrowser(
         stage = "submitting username";
         await submitIdentityForm(page, emailSelector, USERNAME_SUBMIT_SELECTORS);
 
-        stage = "waiting for password input";
-        const passwordSelector = await firstVisible(page, [...PASSWORD_INPUT_SELECTORS]);
+        stage = "waiting for password input after username submit";
+        const passwordSelector = await waitForPasswordInputAfterUsernameSubmit(page, emailSelector, user.email, targetHost);
         stage = "entering password";
         await typeInto(page, passwordSelector, user.password);
         stage = "submitting password";
