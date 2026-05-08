@@ -34,12 +34,19 @@ describe("integration workflows", () => {
 
     expect(fullSmoke.env.TERRARIUM_INTEGRATION_SLUG).toBe("gha-${{ github.run_id }}-${{ github.run_attempt }}-smoke");
     expect(postSmoke.env.TERRARIUM_INTEGRATION_SLUG).toBe("gha-${{ github.run_id }}-${{ github.run_attempt }}-post-smoke");
+    expect(fullSmoke.env.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN).toBe(
+      "${{ vars.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN || 'nip.io' }}"
+    );
+    expect(postSmoke.env.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN).toBe(
+      "${{ vars.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN || 'nip.io' }}"
+    );
     expect(fullSmoke.env.TERRARIUM_INTEGRATION_OUTPUT_DIR).toBe("${{ github.workspace }}/tests/integration/output/smoke");
     expect(postSmoke.env.TERRARIUM_INTEGRATION_OUTPUT_DIR).toBe("${{ github.workspace }}/tests/integration/output/post-smoke");
     expect(fullSmoke.concurrency.group).toBe("terrarium-integration-${{ github.workflow }}-${{ github.ref }}-smoke");
     expect(postSmoke.concurrency.group).toBe("terrarium-integration-${{ github.workflow }}-${{ github.ref }}-post-smoke");
 
     expect(smoke.env.TERRARIUM_INTEGRATION_SLUG).toBe("gha-${{ github.run_id }}-${{ github.run_attempt }}-smoke");
+    expect(smoke.env.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN).toBe("${{ vars.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN || 'nip.io' }}");
     expect(smoke.concurrency.group).toBe("terrarium-integration-${{ github.workflow }}-${{ github.ref }}-smoke");
 
     for (const job of [fullSmoke, postSmoke, smoke]) {

@@ -357,26 +357,21 @@
         - terrarium_auth_public_tls is defined
         - terrarium_auth_public_tls.rc | default(0) != 0
 
-    - name: Verify local auth domain serves public TLS after waits
-      ansible.builtin.command:
-        argv:
-          - curl
-          - -fsS
-          - --noproxy
-          - "*"
-          - --resolve
-          - "{{ terrarium_auth_domain }}:443:127.0.0.1"
-          - --connect-timeout
-          - "10"
-          - --max-time
-          - "20"
-          - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
-      register: terrarium_auth_public_tls_final
-      changed_when: false
-      failed_when: false
+    - name: Select local auth public TLS wait result
+      ansible.builtin.set_fact:
+        terrarium_auth_public_tls_effective: >-
+          {{
+            terrarium_auth_public_tls_retry
+            if (
+              (terrarium_auth_public_tls.rc | default(1)) != 0
+              and terrarium_auth_public_tls_retry is defined
+            )
+            else terrarium_auth_public_tls
+          }}
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
+        - terrarium_auth_public_tls is defined
 
     - name: Show local auth TLS diagnostics after public TLS failure
       ansible.builtin.shell: |
@@ -397,8 +392,8 @@
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
-        - terrarium_auth_public_tls_final is defined
-        - terrarium_auth_public_tls_final.rc | default(0) != 0
+        - terrarium_auth_public_tls_effective is defined
+        - terrarium_auth_public_tls_effective.rc | default(0) != 0
 
     - name: Fail when local auth domain still does not serve public TLS
       ansible.builtin.fail:
@@ -406,8 +401,8 @@
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
-        - terrarium_auth_public_tls_final is defined
-        - terrarium_auth_public_tls_final.rc | default(0) != 0
+        - terrarium_auth_public_tls_effective is defined
+        - terrarium_auth_public_tls_effective.rc | default(0) != 0
 
     - name: Enable Traefik sync timer after dependent services are configured
       ansible.builtin.systemd:

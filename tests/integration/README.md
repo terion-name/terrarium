@@ -103,7 +103,10 @@ Optional:
 - `HCLOUD_SSH_USER` defaults to `root`.
 - `HCLOUD_SSH_PRIVATE_KEY_FILE` and `HCLOUD_SSH_PUBLIC_KEY_FILE` can replace
   the inline SSH key variables.
-- `TERRARIUM_INTEGRATION_IP_DNS_DOMAIN` defaults to `sslip.io`.
+- `TERRARIUM_INTEGRATION_IP_DNS_DOMAIN` defaults to `nip.io`. GitHub
+  workflows read `vars.TERRARIUM_INTEGRATION_IP_DNS_DOMAIN` when it is set, so
+  CI can move to another IP-encoded DNS provider if a shared domain hits ACME
+  rate limits.
 - `ZITADEL_CLOUD_ORG_ID` can be omitted when the PAT has enough scope without it.
 - `TERRARIUM_INTEGRATION_SLUG` overrides the generated run slug.
 - `TERRARIUM_INTEGRATION_OUTPUT_DIR` overrides the artifact directory.

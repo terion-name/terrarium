@@ -111,7 +111,7 @@ export function loadIntegrationConfig(options: IntegrationCliOptions): Integrati
     sshPrivateKey: normalizedPrivateKey,
     sshPublicKey: publicKey,
     sshUser: optionalEnv("HCLOUD_SSH_USER", "root"),
-    ipDnsDomain: optionalEnv("TERRARIUM_INTEGRATION_IP_DNS_DOMAIN", "sslip.io"),
+    ipDnsDomain: optionalEnv("TERRARIUM_INTEGRATION_IP_DNS_DOMAIN", "nip.io"),
     zitadelCloudIssuer: requiredEnv("ZITADEL_CLOUD_ISSUER"),
     zitadelCloudPat: requiredEnv("ZITADEL_CLOUD_PAT"),
     zitadelCloudOrgId: optionalEnv("ZITADEL_CLOUD_ORG_ID"),
