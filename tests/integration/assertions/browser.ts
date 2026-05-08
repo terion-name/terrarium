@@ -157,12 +157,12 @@ async function resubmitUsernameIfStillOnUsernameStep(page: Page, userEmail: stri
   await maybeWithTimeout(
     page
       .evaluate(
-        ({ selectors, value }) => {
+        ({ inputSelectors, submitSelectors, value }) => {
           if (!location.pathname.toLowerCase().startsWith("/ui/v2/login/loginname")) {
             return;
           }
 
-          const input = selectors
+          const input = inputSelectors
             .map((selector) => document.querySelector(selector))
             .find((element): element is HTMLInputElement => element instanceof HTMLInputElement && !element.disabled && !element.readOnly);
           if (!input) {
@@ -170,17 +170,31 @@ async function resubmitUsernameIfStillOnUsernameStep(page: Page, userEmail: stri
           }
 
           input.focus();
-          input.value = value;
+          const valueSetter = Object.getOwnPropertyDescriptor(input, "value")?.set;
+          const prototypeValueSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+          (prototypeValueSetter ?? valueSetter)?.call(input, value);
           input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
           input.dispatchEvent(new Event("change", { bubbles: true }));
 
-          const form = input.closest("form");
-          if (form && typeof form.requestSubmit === "function") {
-            form.requestSubmit();
-            return;
-          }
-
-          const submit = Array.from(document.querySelectorAll("button,input"))
+          const submitFromKnownSelector = submitSelectors
+            .filter((selector) => !selector.startsWith("text="))
+            .map((selector) => {
+              try {
+                return document.querySelector(selector);
+              } catch {
+                return undefined;
+              }
+            })
+            .find((element): element is HTMLButtonElement | HTMLInputElement => {
+              if (!(element instanceof HTMLButtonElement || element instanceof HTMLInputElement) || element.disabled) {
+                return false;
+              }
+              const style = getComputedStyle(element);
+              return style.visibility !== "hidden" && style.display !== "none";
+            });
+          const submit =
+            submitFromKnownSelector ??
+            Array.from(document.querySelectorAll("button,input"))
             .find((element): element is HTMLButtonElement | HTMLInputElement => {
               if (!(element instanceof HTMLButtonElement || element instanceof HTMLInputElement) || element.disabled) {
                 return false;
@@ -188,9 +202,17 @@ async function resubmitUsernameIfStillOnUsernameStep(page: Page, userEmail: stri
               const text = `${element.textContent ?? ""} ${element.value ?? ""}`.toLowerCase();
               return element.type === "submit" || text.includes("continue") || text.includes("next") || text.includes("sign in");
             });
-          submit?.click();
+          if (submit) {
+            submit.click();
+            return;
+          }
+
+          const form = input.closest("form");
+          if (form && typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+          }
         },
-        { selectors: USERNAME_INPUT_SELECTORS, value: userEmail }
+        { inputSelectors: USERNAME_INPUT_SELECTORS, submitSelectors: USERNAME_SUBMIT_SELECTORS, value: userEmail }
       )
       .catch(() => undefined),
     3000
