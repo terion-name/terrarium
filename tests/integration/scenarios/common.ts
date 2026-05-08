@@ -518,7 +518,7 @@ export async function verifyLocalBackupRestore(host: SshHost, containerName: str
   await host.exec(`lxc exec ${shellArg(containerName)} -- bash -lc "echo v2 > /srv/www/state.txt"`);
   await host.exec(`printf 'y\\n' | ${remoteCtl(`backup restore --instance ${shellArg(containerName)} --at ${shellArg(snapshotName)}`)}`);
   await host.exec(`lxc start ${shellArg(containerName)} || true`);
-  await expectRemoteContains(host, `lxc exec ${shellArg(containerName)} -- cat /srv/www/state.txt`, "v1");
+  await expectRemoteContains(host, readContainerFileCommand(containerName, "/srv/www/state.txt"), "v1");
 }
 
 /** Verifies the S3 export and restore path against the configured real bucket. */
@@ -527,7 +527,16 @@ export async function verifyS3BackupRestore(host: SshHost, containerName: string
   await host.exec(`lxc exec ${shellArg(containerName)} -- bash -lc "echo v3 > /srv/www/state.txt"`);
   await host.exec(`printf 'y\\n' | ${remoteCtl(`backup restore --source s3 --instance ${shellArg(containerName)}`)}`);
   await host.exec(`lxc start ${shellArg(containerName)} || true`);
-  await expectRemoteContains(host, `lxc exec ${shellArg(containerName)} -- cat /srv/www/state.txt`, "v1");
+  await expectRemoteContains(host, readContainerFileCommand(containerName, "/srv/www/state.txt"), "v1");
+}
+
+function readContainerFileCommand(containerName: string, path: string): string {
+  return [
+    "tmp=$(mktemp)",
+    `timeout 60s lxc file pull ${shellArg(`${containerName}${path}`)} "$tmp"`,
+    "cat \"$tmp\"",
+    "rm -f \"$tmp\""
+  ].join(" && ");
 }
 
 /** Verifies syncoid pushed the Terrarium dataset to the replica host. */
