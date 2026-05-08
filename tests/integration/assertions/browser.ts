@@ -117,16 +117,9 @@ async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelec
 
     if (isUsernameLoginStep(currentUrl) && isIdentityLoginInputPage(currentUrl, targetHost)) {
       const now = Date.now();
-      if (now - lastResubmit > 5000 && await canResubmitUsername(page, usernameSelector)) {
+      if (now - lastResubmit > 5000) {
         lastResubmit = now;
-        if (isPasswordLoginStep(page.url())) {
-          continue;
-        }
-        await typeInto(page, usernameSelector, userEmail);
-        if (isPasswordLoginStep(page.url())) {
-          continue;
-        }
-        await submitIdentityForm(page, usernameSelector, USERNAME_SUBMIT_SELECTORS);
+        await resubmitUsernameIfStillOnUsernameStep(page, userEmail);
         await page.waitForTimeout(1000);
         continue;
       }
@@ -160,14 +153,53 @@ async function visiblePasswordInputSelector(page: Page, timeoutMs: number): Prom
   return undefined;
 }
 
-async function canResubmitUsername(page: Page, usernameSelector: string): Promise<boolean> {
-  if (!isUsernameLoginStep(page.url())) {
-    return false;
-  }
+async function resubmitUsernameIfStillOnUsernameStep(page: Page, userEmail: string): Promise<void> {
+  await maybeWithTimeout(
+    page
+      .evaluate(
+        ({ selectors, value }) => {
+          if (!location.pathname.toLowerCase().startsWith("/ui/v2/login/loginname")) {
+            return;
+          }
 
-  const locator = page.locator(usernameSelector).first();
-  return (await locatorVisible(locator)) && (await waitForEditableInput(locator)) && isUsernameLoginStep(page.url());
+          const input = selectors
+            .map((selector) => document.querySelector(selector))
+            .find((element): element is HTMLInputElement => element instanceof HTMLInputElement && !element.disabled && !element.readOnly);
+          if (!input) {
+            return;
+          }
+
+          input.focus();
+          input.value = value;
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+
+          const form = input.closest("form");
+          if (form && typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+            return;
+          }
+
+          const submit = Array.from(document.querySelectorAll("button,input"))
+            .find((element): element is HTMLButtonElement | HTMLInputElement => {
+              if (!(element instanceof HTMLButtonElement || element instanceof HTMLInputElement) || element.disabled) {
+                return false;
+              }
+              const text = `${element.textContent ?? ""} ${element.value ?? ""}`.toLowerCase();
+              return element.type === "submit" || text.includes("continue") || text.includes("next") || text.includes("sign in");
+            });
+          submit?.click();
+        },
+        { selectors: USERNAME_INPUT_SELECTORS, value: userEmail }
+      )
+      .catch(() => undefined),
+    3000
+  );
 }
+
+export const __browserTestHooks = {
+  resubmitUsernameIfStillOnUsernameStep
+};
 
 function isUsernameLoginStep(currentUrl: string): boolean {
   const parsedUrl = parseBrowserUrl(currentUrl);

@@ -1,6 +1,8 @@
 import { basename } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { chromium } from "playwright";
 import {
+  __browserTestHooks,
   bodyContainsAnyMarker,
   bodyContainsDenialText,
   bodyContainsHttpErrorText,
@@ -198,5 +200,43 @@ describe("browser assertion helpers", () => {
         )
       )
     ).toBe(false);
+  });
+
+  test("resubmits username only while still on the ZITADEL username route", async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.route("**/*", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: [
+            "<form>",
+            '<input data-testid="username-text-input" value="">',
+            '<button type="submit">Continue</button>',
+            "</form>",
+            "<script>",
+            "window.submits = 0;",
+            "document.querySelector('form').addEventListener('submit', (event) => { event.preventDefault(); window.submits += 1; });",
+            "</script>"
+          ].join("")
+        })
+      );
+
+      await page.goto("http://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123");
+      await __browserTestHooks.resubmitUsernameIfStillOnUsernameStep(page, "agent@example.test");
+      expect(await page.locator('[data-testid="username-text-input"]').inputValue()).toBe("agent@example.test");
+      expect(await page.evaluate(() => (window as unknown as { submits: number }).submits)).toBe(1);
+
+      await page.goto("http://issuer.example.test/ui/v2/login/password?requestId=oidc_123");
+      await page.locator('[data-testid="username-text-input"]').fill("");
+      await page.evaluate(() => {
+        (window as unknown as { submits: number }).submits = 0;
+      });
+      await __browserTestHooks.resubmitUsernameIfStillOnUsernameStep(page, "agent@example.test");
+      expect(await page.locator('[data-testid="username-text-input"]').inputValue()).toBe("");
+      expect(await page.evaluate(() => (window as unknown as { submits: number }).submits)).toBe(0);
+    } finally {
+      await browser.close();
+    }
   });
 });
