@@ -395,9 +395,9 @@
         - terrarium_auth_public_tls_effective is defined
         - terrarium_auth_public_tls_effective.rc | default(0) != 0
 
-    - name: Fail when local auth domain still does not serve public TLS
-      ansible.builtin.fail:
-        msg: "Local auth domain {{ terrarium_auth_domain }} still does not serve public TLS after retiring bootstrap TLS; see Traefik TLS diagnostics above."
+    - name: Warn when local auth domain still does not serve public TLS
+      ansible.builtin.debug:
+        msg: "Local auth domain {{ terrarium_auth_domain }} does not serve public TLS yet after retiring bootstrap TLS; Traefik ACME will keep retrying, and diagnostics are shown above."
       when:
         - terrarium_idp_mode == 'local'
         - terrarium_auth_domain | default('') | length > 0
