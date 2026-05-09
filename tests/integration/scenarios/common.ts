@@ -6,7 +6,7 @@ import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
 import { expectHttpBodyContains, readHttpsResponse, waitForHttpStatusResolved, type HttpsResponse } from "../assertions/http";
-import { expectLxdUi, expectManagementSurfaces, expectManagementUi, expectProtectedRoute } from "../assertions/browser";
+import { expectLxdUi, expectManagementSurfaces, expectManagementUi, expectProtectedRouteMatrix } from "../assertions/browser";
 import { expectRemoteContains, expectSystemdActive } from "../assertions/host";
 import { collectHostArtifacts } from "../cleanup";
 
@@ -603,11 +603,17 @@ export async function verifyProtectedRoutes(
   context.logger.info(`verify ${host.label} plain route body`);
   await withStepTimeout(`plain route body for ${plainHost}`, 6 * 60 * 1000, () => expectHttpBodyContains(`https://${plainHost}`, bodyText, readiness));
   context.logger.info(`verify ${host.label} auth route allows ${fixture.routeUser.email}`);
-  await expectProtectedRoute(`https://${authHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
   context.logger.info(`verify ${host.label} grouped route allows ${fixture.routeUser.email}`);
-  await expectProtectedRoute(`https://${groupedHost}`, fixture.routeUser, "allow", outputDir, bodyText, { resolveIp: host.server.ipv4 });
   context.logger.info(`verify ${host.label} grouped route denies ${fixture.deniedUser.email}`);
-  await expectProtectedRoute(`https://${groupedHost}`, fixture.deniedUser, "deny", outputDir, "", { resolveIp: host.server.ipv4 });
+  await expectProtectedRouteMatrix(
+    [
+      { url: `https://${authHost}`, user: fixture.routeUser, expected: "allow", bodyNeedle: bodyText },
+      { url: `https://${groupedHost}`, user: fixture.routeUser, expected: "allow", bodyNeedle: bodyText },
+      { url: `https://${groupedHost}`, user: fixture.deniedUser, expected: "deny" }
+    ],
+    outputDir,
+    { resolveIp: host.server.ipv4 }
+  );
   context.logger.info(`verified ${host.label} route matrix`);
 }
 

@@ -3,21 +3,38 @@
   block:
     - name: Install oauth2-proxy runtime packages
       ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
         name:
           - docker.io
         state: present
+      register: terrarium_oauth2_proxy_runtime_install
+      until: terrarium_oauth2_proxy_runtime_install is succeeded
+      retries: 3
+      delay: 10
 
     - name: Install Docker Compose v2 package for oauth2-proxy
       ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
         name: docker-compose-v2
         state: present
       register: terrarium_oauth2_proxy_compose_v2_install
+      until: terrarium_oauth2_proxy_compose_v2_install is succeeded
+      retries: 3
+      delay: 10
       ignore_errors: true
 
     - name: Install Docker Compose plugin fallback for oauth2-proxy
       ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
         name: docker-compose-plugin
         state: present
+      register: terrarium_oauth2_proxy_compose_plugin_install
+      until: terrarium_oauth2_proxy_compose_plugin_install is succeeded
+      retries: 3
+      delay: 10
       when: terrarium_oauth2_proxy_compose_v2_install is failed
 
     - name: Enable Docker for oauth2-proxy

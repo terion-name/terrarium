@@ -471,6 +471,7 @@ async function locatorDisabled(locator: ReturnType<Page["locator"]>): Promise<bo
 
 async function typeInto(page: Page, selector: string, value: string): Promise<void> {
   let actual = "";
+  let sawExpectedValue = false;
   const deadline = Date.now() + BROWSER_INPUT_TOTAL_TIMEOUT_MS;
   for (let attempt = 1; Date.now() < deadline && attempt <= 5; attempt += 1) {
     const locator = page.locator(selector).first();
@@ -502,11 +503,27 @@ async function typeInto(page: Page, selector: string, value: string): Promise<vo
     await locator.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => undefined);
     await locator.press("Backspace").catch(() => undefined);
     await locator.type(value, { delay: 5, timeout: BROWSER_INPUT_ATTEMPT_TIMEOUT_MS }).catch(() => undefined);
-    actual = await locator.inputValue().catch(() => "");
+    const typedValue = await inputValueIfAvailable(locator);
+    if (typedValue === undefined) {
+      if (sawExpectedValue) {
+        return;
+      }
+      await page.waitForTimeout(500);
+      continue;
+    }
+    actual = typedValue;
 
     if (actual !== value) {
       await locator.fill(value, { timeout: BROWSER_INPUT_ATTEMPT_TIMEOUT_MS }).catch(() => undefined);
-      actual = await locator.inputValue().catch(() => "");
+      const filledValue = await inputValueIfAvailable(locator);
+      if (filledValue === undefined) {
+        if (sawExpectedValue) {
+          return;
+        }
+        await page.waitForTimeout(500);
+        continue;
+      }
+      actual = filledValue;
     }
 
     await locator
@@ -517,14 +534,24 @@ async function typeInto(page: Page, selector: string, value: string): Promise<vo
       .catch(() => undefined);
 
     if (actual === value) {
+      sawExpectedValue = true;
       await page.waitForTimeout(300);
-      actual = await locator.inputValue().catch(() => "");
+      const settledValue = await inputValueIfAvailable(locator);
+      if (settledValue === undefined) {
+        return;
+      }
+      actual = settledValue;
     }
 
     if (actual === value) {
+      sawExpectedValue = true;
       await locator.press("Tab").catch(() => undefined);
       await page.waitForTimeout(300);
-      actual = await locator.inputValue().catch(() => "");
+      const blurredValue = await inputValueIfAvailable(locator);
+      if (blurredValue === undefined) {
+        return;
+      }
+      actual = blurredValue;
     }
 
     if (actual === value) {
@@ -542,6 +569,10 @@ async function typeInto(page: Page, selector: string, value: string): Promise<vo
       `body:\n${bodySnippetForError(body) || "<empty>"}`
     ].join("\n")
   );
+}
+
+async function inputValueIfAvailable(locator: ReturnType<Page["locator"]>): Promise<string | undefined> {
+  return await maybeWithTimeout(locator.inputValue().catch(() => undefined), BROWSER_POLL_TIMEOUT_MS);
 }
 
 async function waitForEditableInput(locator: ReturnType<Page["locator"]>): Promise<boolean> {
@@ -607,40 +638,105 @@ async function submitForm(page: Page, buttonSelectors: string[]): Promise<void> 
 }
 
 async function submitIdentityForm(page: Page, inputSelector: string, buttonSelectors: string[]): Promise<void> {
-  if (await waitForEnabledWithin(page, buttonSelectors, BROWSER_CLICK_TIMEOUT_MS)) {
-    await submitForm(page, buttonSelectors);
+  const beforeUrl = page.url();
+  const input = page.locator(inputSelector).first();
+
+  await input.focus().catch(() => undefined);
+  await input.press("Enter").catch(() => undefined);
+  await page.waitForTimeout(750);
+  if (await identitySubmissionAdvanced(page, beforeUrl, inputSelector)) {
     return;
   }
 
-  const input = page.locator(inputSelector).first();
-  await input.press("Enter").catch(() => undefined);
-  await page.waitForTimeout(1500);
   if (await waitForEnabledWithin(page, buttonSelectors, 1000)) {
     await submitForm(page, buttonSelectors);
+    await page.waitForTimeout(750);
+    if (await identitySubmissionAdvanced(page, beforeUrl, inputSelector)) {
+      return;
+    }
+  }
+
+  await domSubmitIdentityForm(page, inputSelector, buttonSelectors);
+  await page.waitForTimeout(1000);
+  if (await identitySubmissionAdvanced(page, beforeUrl, inputSelector)) {
     return;
   }
 
-  await input
-    .evaluate((element) => {
-      const form = element.closest("form");
-      if (!form) {
-        return;
-      }
-      if (typeof form.requestSubmit === "function") {
-        form.requestSubmit();
-        return;
-      }
-      form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
-    })
+  await input.press("Enter").catch(() => undefined);
+}
+
+async function identitySubmissionAdvanced(page: Page, beforeUrl: string, inputSelector: string): Promise<boolean> {
+  if (page.url() !== beforeUrl) {
+    return true;
+  }
+
+  return !(await locatorVisible(page.locator(inputSelector).first()));
+}
+
+async function domSubmitIdentityForm(page: Page, inputSelector: string, buttonSelectors: string[]): Promise<void> {
+  await page
+    .locator(inputSelector)
+    .first()
+    .evaluate(
+      (element, selectors) => {
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+          return;
+        }
+
+        element.focus();
+        const submitFromKnownSelector = selectors
+          .filter((selector) => !selector.startsWith("text=") && !selector.includes(":has-text("))
+          .map((selector) => {
+            try {
+              return document.querySelector(selector);
+            } catch {
+              return undefined;
+            }
+          })
+          .find((candidate): candidate is HTMLButtonElement | HTMLInputElement => {
+            if (!(candidate instanceof HTMLButtonElement || candidate instanceof HTMLInputElement) || candidate.disabled) {
+              return false;
+            }
+            const style = getComputedStyle(candidate);
+            return style.visibility !== "hidden" && style.display !== "none";
+          });
+        const submit =
+          submitFromKnownSelector ??
+          Array.from(document.querySelectorAll("button,input"))
+            .find((candidate): candidate is HTMLButtonElement | HTMLInputElement => {
+              if (!(candidate instanceof HTMLButtonElement || candidate instanceof HTMLInputElement) || candidate.disabled) {
+                return false;
+              }
+              const text = `${candidate.textContent ?? ""} ${candidate.value ?? ""}`.toLowerCase();
+              return candidate.type === "submit" || text.includes("continue") || text.includes("next") || text.includes("sign in");
+            });
+        if (submit) {
+          submit.click();
+          return;
+        }
+
+        const form = element.closest("form");
+        if (form && typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+          return;
+        }
+        form?.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+      },
+      buttonSelectors
+    )
     .catch(() => undefined);
 }
 
 async function waitForUserFacingBody(page: Page, markers: readonly string[], label: string): Promise<void> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
   let lastBody = "";
+  let blankSince = 0;
+  let lastBlankReload = 0;
+  let blankReloads = 0;
 
   while (Date.now() < deadline) {
-    const body = await page.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+    await maybeWithTimeout(page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => undefined), 4000);
+    const body = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
     lastBody = body;
     if (bodyContainsHttpErrorText(body)) {
       throw new Error(`${label} rendered an HTTP error page:\n${bodySnippetForError(body)}`);
@@ -648,10 +744,61 @@ async function waitForUserFacingBody(page: Page, markers: readonly string[], lab
     if (bodyContainsAnyMarker(body, markers)) {
       return;
     }
+
+    const now = Date.now();
+    if (body.trim()) {
+      blankSince = 0;
+    } else {
+      blankSince ||= now;
+      if (blankReloads < 3 && now - blankSince > 5000 && now - lastBlankReload > 5000) {
+        blankReloads += 1;
+        lastBlankReload = now;
+        await maybeWithTimeout(page.reload({ waitUntil: "commit", timeout: 10000 }).catch(() => undefined), 12000);
+        await page.waitForTimeout(1000);
+        continue;
+      }
+    }
+
     await page.waitForTimeout(500);
   }
 
   throw new Error(`${label} did not render expected UI markers; body:\n${bodySnippetForError(lastBody) || "<empty>"}`);
+}
+
+async function readPageBody(page: Page, timeoutMs = BROWSER_METADATA_TIMEOUT_MS): Promise<string> {
+  return (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), timeoutMs)) ?? "";
+}
+
+async function expectedTargetAlreadyReached(page: Page, targetHost: string, expected: LoginExpectation): Promise<boolean> {
+  const body = await readPageBody(page, BROWSER_POLL_TIMEOUT_MS);
+  if (expected === "deny" && bodyContainsDenialText(body)) {
+    return true;
+  }
+  if (!isTargetApplicationPage(page.url(), targetHost)) {
+    return false;
+  }
+  if (expected === "allow") {
+    return true;
+  }
+  throw new Error(formatDeniedTargetRouteFailure(page.url(), body));
+}
+
+async function finishBrowserLogin(
+  page: Page,
+  screenshotPath: string,
+  options: LoginOptions
+): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
+  await page.waitForLoadState("domcontentloaded", { timeout: BROWSER_WAIT_TIMEOUT_MS }).catch(() => undefined);
+  if (options.postLoginBodyMarkers) {
+    await waitForUserFacingBody(page, options.postLoginBodyMarkers, options.postLoginLabel || "target");
+  }
+  await maybeWithTimeout(page.screenshot({ path: screenshotPath, fullPage: false }).then(() => undefined), BROWSER_SCREENSHOT_TIMEOUT_MS).catch(
+    () => undefined
+  );
+  const finalUrl = page.url();
+  const title = (await maybeWithTimeout(page.title().catch(() => ""), BROWSER_METADATA_TIMEOUT_MS)) ?? "";
+  const bodyText = await readPageBody(page);
+  return { finalUrl, screenshotPath, bodyText, title };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string | (() => string)): Promise<T> {
@@ -925,6 +1072,10 @@ export async function withBrowser<T>(
   }
 }
 
+async function newBrowserContext(browser: Browser, options: LoginOptions): Promise<BrowserContext> {
+  return await browser.newContext({ ignoreHTTPSErrors: shouldIgnoreHttpsErrors(options) });
+}
+
 async function withCloseTimeout(close: Promise<unknown>): Promise<void> {
   await maybeWithTimeout(close.then(() => undefined).catch(() => undefined), BROWSER_CLOSE_TIMEOUT_MS);
 }
@@ -970,16 +1121,28 @@ async function loginThroughZitadelWithBrowser(
   user: OidcTestUser,
   options: LoginOptions
 ): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
+  const context = await newBrowserContext(browser, options);
+  try {
+    return await loginThroughZitadelWithContext(context, url, user, options);
+  } finally {
+    await withCloseTimeout(context.close());
+  }
+}
+
+async function loginThroughZitadelWithContext(
+  context: BrowserContext,
+  url: string,
+  user: OidcTestUser,
+  options: LoginOptions
+): Promise<{ finalUrl: string; screenshotPath: string; bodyText: string; title: string }> {
   const expected = options.expected ?? "allow";
   const screenshotPath = browserScreenshotPath(options.outputDir, url, user.email, expected, "success");
   const targetHost = new URL(url).host;
-  let context: BrowserContext | undefined;
   let page: Page | undefined;
   let stage = "creating browser context";
   const browserEvents: string[] = [];
 
   try {
-    context = await browser.newContext({ ignoreHTTPSErrors: shouldIgnoreHttpsErrors(options) });
     stage = "opening browser page";
     page = await context.newPage();
     page.setDefaultTimeout(BROWSER_WAIT_TIMEOUT_MS);
@@ -1010,6 +1173,10 @@ async function loginThroughZitadelWithBrowser(
 
         stage = "starting OIDC login if the target shows a login screen";
         await clickOidcStartIfNeeded(page, targetHost);
+        if (await expectedTargetAlreadyReached(page, targetHost, expected)) {
+          stage = "capturing already-authenticated target page";
+          return await finishBrowserLogin(page, screenshotPath, options);
+        }
         stage = "waiting for identity login document";
         await waitForIdentityLoginDocument(page, targetHost);
         stage = "waiting for username input";
@@ -1028,24 +1195,8 @@ async function loginThroughZitadelWithBrowser(
 
         stage = `waiting for ${expected} return to target host`;
         await waitForReturnToTargetHost(page, targetHost, user.email, expected);
-        stage = "waiting for post-login document";
-        await page.waitForLoadState("domcontentloaded", { timeout: BROWSER_WAIT_TIMEOUT_MS }).catch(() => undefined);
-        if (options.postLoginBodyMarkers) {
-          stage = `waiting for ${options.postLoginLabel || "target"} UI markers`;
-          await waitForUserFacingBody(page, options.postLoginBodyMarkers, options.postLoginLabel || "target");
-        }
-        stage = "capturing success screenshot";
-        await maybeWithTimeout(page.screenshot({ path: screenshotPath, fullPage: false }).then(() => undefined), BROWSER_SCREENSHOT_TIMEOUT_MS).catch(
-          () => undefined
-        );
-        stage = "reading success page metadata";
-        const finalUrl = page.url();
-        const title = (await maybeWithTimeout(page.title().catch(() => ""), BROWSER_METADATA_TIMEOUT_MS)) ?? "";
-        const bodyText = (await maybeWithTimeout(
-          page.locator("body").innerText({ timeout: 1000 }).catch(() => ""),
-          BROWSER_METADATA_TIMEOUT_MS
-        )) ?? "";
-        return { finalUrl, screenshotPath, bodyText, title };
+        stage = "capturing success page";
+        return await finishBrowserLogin(page, screenshotPath, options);
       })(),
       BROWSER_FLOW_TIMEOUT_MS,
       () => `browser login flow (${stage})`
@@ -1081,8 +1232,8 @@ async function loginThroughZitadelWithBrowser(
     }
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n${detail.join("\n\n")}`);
   } finally {
-    if (context) {
-      await withCloseTimeout(context.close());
+    if (page && !page.isClosed()) {
+      await withCloseTimeout(page.close());
     }
   }
 }
@@ -1334,10 +1485,22 @@ export async function expectProtectedRoute(
   options: { resolveIp?: string } = {}
 ): Promise<string> {
   const resolveHosts = options.resolveIp ? { [new URL(url).hostname]: options.resolveIp } : undefined;
-  const result = await loginThroughZitadel(url, user, { outputDir, resolveHosts, expected });
+  const result = await loginThroughZitadel(url, user, {
+    outputDir,
+    resolveHosts,
+    expected,
+    postLoginBodyMarkers: expected === "allow" && bodyNeedle ? [bodyNeedle] : undefined,
+    postLoginLabel: "protected route"
+  });
   if (expected === "allow") {
     if (bodyNeedle && !result.bodyText.includes(bodyNeedle)) {
-      throw new Error(`expected protected route body to include "${bodyNeedle}"`);
+      throw new Error(
+        [
+          `expected protected route body to include "${bodyNeedle}"`,
+          `final URL: ${result.finalUrl}`,
+          `body:\n${bodySnippetForError(result.bodyText) || "<empty>"}`
+        ].join("\n")
+      );
     }
     return result.screenshotPath;
   }
@@ -1346,6 +1509,83 @@ export async function expectProtectedRoute(
     throw new Error("expected denied protected route to show a forbidden/denied page");
   }
   return result.screenshotPath;
+}
+
+type ProtectedRouteCheck = {
+  url: string;
+  user: OidcTestUser;
+  expected: LoginExpectation;
+  bodyNeedle?: string;
+};
+
+/** Verifies a protected route matrix while reusing the IdP browser session for the same user. */
+export async function expectProtectedRouteMatrix(
+  checks: ProtectedRouteCheck[],
+  outputDir: string,
+  options: { resolveIp?: string } = {}
+): Promise<void> {
+  if (checks.length === 0) {
+    return;
+  }
+
+  const resolveIp = options.resolveIp;
+  const resolveHosts: Record<string, string> | undefined = resolveIp
+    ? Object.fromEntries(checks.map((check) => [new URL(check.url).hostname, resolveIp]))
+    : undefined;
+  const ignoreHTTPSErrors = shouldIgnoreHttpsErrors({ resolveHosts });
+
+  await withBrowser(
+    outputDir,
+    async (browser) => {
+      let context: BrowserContext | undefined;
+      let contextUserEmail = "";
+      try {
+        for (const check of checks) {
+          if (!context || contextUserEmail !== check.user.email) {
+            if (context) {
+              await withCloseTimeout(context.close());
+            }
+            context = await newBrowserContext(browser, { outputDir, resolveHosts, ignoreHTTPSErrors });
+            contextUserEmail = check.user.email;
+          }
+
+          const result = await loginThroughZitadelWithContext(context, check.url, check.user, {
+            outputDir,
+            resolveHosts,
+            expected: check.expected,
+            ignoreHTTPSErrors,
+            postLoginBodyMarkers: check.expected === "allow" && check.bodyNeedle ? [check.bodyNeedle] : undefined,
+            postLoginLabel: "protected route"
+          });
+
+          if (check.expected === "allow") {
+            if (check.bodyNeedle && !result.bodyText.includes(check.bodyNeedle)) {
+              throw new Error(
+                [
+                  `expected protected route body to include "${check.bodyNeedle}"`,
+                  `final URL: ${result.finalUrl}`,
+                  `body:\n${bodySnippetForError(result.bodyText) || "<empty>"}`
+                ].join("\n")
+              );
+            }
+            continue;
+          }
+
+          if (!bodyContainsDenialText(result.bodyText)) {
+            throw new Error("expected denied protected route to show a forbidden/denied page");
+          }
+        }
+      } finally {
+        if (context) {
+          await withCloseTimeout(context.close());
+        }
+      }
+    },
+    {
+      lifecycleTimeoutMs: browserLifecycleTimeoutForLoginTargets(checks.length),
+      resolveHosts
+    }
+  );
 }
 
 function slugForPath(value: string): string {
