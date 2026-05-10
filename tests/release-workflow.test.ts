@@ -20,10 +20,12 @@ describe("release workflow", () => {
   test("validate workflow retries transient Ansible Galaxy collection failures", () => {
     const source = readFileSync(join(repoRoot, ".github/workflows/validate.yml"), "utf8");
 
+    expect(source).toContain("cd ansible");
     expect(source).toContain("for attempt in 1 2 3 4; do");
     expect(source).toContain("ansible-galaxy collection install -r requirements.yml");
     expect(source).toContain('if [ "$attempt" -eq 4 ]; then');
     expect(source).toContain("sleep $((attempt * 5))");
+    expect(source).toContain("ansible-playbook -i inventory.ini site.yml --syntax-check");
   });
 
   test("validates release tags before preflight and publishing", () => {
@@ -39,6 +41,9 @@ describe("release workflow", () => {
     expect(workflow.jobs.publish.needs).toContain("release_tag");
     expect(source).toContain("TERRARIUM_VERSION: ${{ needs.release_tag.outputs.value }}");
     expect(source).toContain("bun scripts/build.ts");
+    expect(source).toContain("cp -a ansible release/ansible");
+    expect(source).toContain("rm -rf release/ansible/.ansible");
+    expect(source).toContain('zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible');
     expect(source).toContain("tag_name: ${{ needs.release_tag.outputs.value }}");
   });
 
@@ -103,5 +108,25 @@ describe("release workflow", () => {
     expect(installer).toContain("releases?per_page=50");
     expect(installer).toContain('TERRARIUM_ASSET="terrarium-linux-${arch}.zip"');
     expect(installer).toContain('any(item.get("name") == asset for item in release.get("assets", []))');
+  });
+
+  test("piped interactive installs reconnect terrariumctl to the controlling TTY", () => {
+    const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
+
+    expect(installer).toContain("run_terrariumctl_install");
+    expect(installer).toContain("[[ -r /dev/tty ]]");
+    expect(installer).toContain('install --ref "${ref}" "$@" </dev/tty');
+    expect(installer).toContain("interactive install requires a TTY");
+    expect(installer).toContain("--non-interactive|--help|-h");
+  });
+
+  test("release installs avoid git unless building from source", () => {
+    const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
+
+    expect(installer).toContain("ensure_git()");
+    expect(installer).toContain("apt-get install -y ca-certificates curl unzip python3");
+    expect(installer).toContain("apt-get install -y git");
+    expect(installer).not.toContain("apt-get install -y ca-certificates curl unzip git python3");
+    expect(installer).toContain('ensure_git\n    git clone --depth 1 --branch "${source_ref}"');
   });
 });

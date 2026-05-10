@@ -283,10 +283,23 @@ function syncLocalSourceRepo(sourcePath: string, repoDir: string): void {
   });
 }
 
+function syncInstallBundle(bundleDir: string, repoDir: string): void {
+  rmSync(repoDir, { recursive: true, force: true });
+  mkdirSync(repoDir, { recursive: true });
+  cpSync(bundleDir, repoDir, {
+    recursive: true,
+    force: true,
+    filter: (source) => {
+      const base = source.split("/").at(-1) ?? "";
+      return ![".git", "node_modules"].includes(base);
+    }
+  });
+}
+
 async function installAnsibleCollections(): Promise<void> {
   let lastOutput = "";
   for (let attempt = 1; attempt <= ANSIBLE_GALAXY_ATTEMPTS; attempt += 1) {
-    const result = await $`cd ${REPO_DIR}; ansible-galaxy collection install -r requirements.yml`.nothrow();
+    const result = await $`cd ${join(REPO_DIR, "ansible")}; ansible-galaxy collection install -r requirements.yml`.nothrow();
     if (result.exitCode === 0) {
       return;
     }
@@ -303,7 +316,10 @@ async function installAnsibleCollections(): Promise<void> {
 
 async function prepareRepo(ref: string): Promise<void> {
   const sourcePath = localSourcePath(REPO_URL);
-  if (sourcePath && existsSync(join(sourcePath, "ansible", "site.yml"))) {
+  if (BUNDLE_DIR && existsSync(join(BUNDLE_DIR, "ansible", "site.yml"))) {
+    info(`installing Terrarium release bundle into ${REPO_DIR}`);
+    syncInstallBundle(BUNDLE_DIR, REPO_DIR);
+  } else if (sourcePath && existsSync(join(sourcePath, "ansible", "site.yml"))) {
     info(`syncing local Terrarium source from ${sourcePath}`);
     syncLocalSourceRepo(sourcePath, REPO_DIR);
   } else if (existsSync(join(REPO_DIR, ".git"))) {
@@ -321,7 +337,7 @@ async function prepareRepo(ref: string): Promise<void> {
     stageRunningBinary(REPO_DIR);
   }
   if (!existsSync(join(REPO_DIR, "dist", "terrariumctl"))) {
-    fail("compiled Terrarium binaries are missing from the repository checkout");
+    fail("compiled Terrarium binaries are missing from the installed bundle");
   }
 
   await installAnsibleCollections();
@@ -1025,7 +1041,7 @@ function buildSecretConfig(options: InstallOptions): string {
 }
 
 async function runPlaybook(configPath: string, secretConfigPath: string): Promise<void> {
-  await $`cd ${REPO_DIR}; ansible-playbook -i ansible/inventory.ini ansible/site.yml -e @${configPath} -e @${secretConfigPath}`;
+  await $`cd ${join(REPO_DIR, "ansible")}; ansible-playbook -i inventory.ini site.yml -e @${configPath} -e @${secretConfigPath}`;
 }
 
 function printDnsGuidance(options: InstallOptions): void {

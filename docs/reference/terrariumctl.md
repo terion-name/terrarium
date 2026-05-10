@@ -39,6 +39,7 @@
 | `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, verifies external OIDC settings when applicable, and reconfigures oauth2-proxy plus LXD management auth together. |
 | `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings, verifies the target with a real test operation, and can enable or disable S3 exports. |
 | `terrariumctl set syncoid` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates syncoid replication settings and can enable or disable syncoid. |
+| `terrariumctl completion` | `bash`, `zsh`, or `fish` | n/a | Prints a shell completion script. Installed hosts register completion for both `terrariumctl` and `trm` automatically. |
 
 ## install
 
@@ -46,7 +47,7 @@
 | --- | --- | --- | --- | --- |
 | `--non-interactive` | none | no | interactive mode if omitted | Disables prompts and requires all needed config through flags. |
 | `--yes` | none | no | prompt before destructive actions | Auto-confirms destructive or confirmation prompts. |
-| `--ref` | git branch or tag | no | `main` | Checks out a specific Terrarium ref in `/opt/terrarium`. |
+| `--ref` | git branch or tag | no | `main` when invoking `terrariumctl` directly; release-selected tag when run through `install.sh` | Installs a specific Terrarium release tag, or builds from a branch-like source ref such as `main`. |
 | `--email` | email address | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Sets the Terrarium contact/admin email and default ZITADEL bootstrap admin email. |
 | `--acme-email` | email address | no | falls back to `--email` | Sets the ACME account identity for Traefik and LXD certificate automation. |
 | `--domain` | root domain | no | service domains default to `<service>.<dashed-public-ip>.traefik.me` when omitted | Sets the root domain used to derive service subdomains. |

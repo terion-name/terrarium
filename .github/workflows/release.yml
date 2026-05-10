@@ -74,8 +74,10 @@ jobs:
 
       - name: Package release bundle
         run: |
+          cp -a ansible release/ansible
+          rm -rf release/ansible/.ansible
           cd release
-          zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist
+          zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible
 
       - uses: actions/upload-artifact@v4
         with:

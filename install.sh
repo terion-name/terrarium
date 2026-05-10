@@ -53,7 +53,16 @@ ensure_os() {
 ensure_bootstrap_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y ca-certificates curl unzip git python3
+  apt-get install -y ca-certificates curl unzip python3
+}
+
+ensure_git() {
+  if command -v git >/dev/null 2>&1; then
+    return
+  fi
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y
+  apt-get install -y git
 }
 
 ensure_bun() {
@@ -138,7 +147,7 @@ download_release_bundle() {
   curl -fsSL "${asset_url}" -o "${bundle_dir}/terrarium.zip" || return 1
   unzip -q "${bundle_dir}/terrarium.zip" -d "${bundle_dir}"
   [[ -x "${bundle_dir}/dist/terrariumctl" ]] || return 1
-  TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${bundle_dir}/dist/terrariumctl" install --ref "${resolved_ref}" "${FORWARD_ARGS[@]}"
+  run_terrariumctl_install "${bundle_dir}" "${bundle_dir}/dist/terrariumctl" "${resolved_ref}" "${FORWARD_ARGS[@]}"
 }
 
 build_from_source() {
@@ -152,6 +161,7 @@ build_from_source() {
     mkdir -p "${build_dir}/repo"
     cp -a "${source_path}/." "${build_dir}/repo/"
   else
+    ensure_git
     git clone --depth 1 --branch "${source_ref}" "${REPO_URL}" "${build_dir}/repo"
   fi
   ensure_bun
@@ -160,7 +170,37 @@ build_from_source() {
     /opt/bun/bin/bun install --frozen-lockfile || /opt/bun/bin/bun install --no-progress
     /opt/bun/bin/bun scripts/build.ts
   )
-  TERRARIUM_BUNDLE_DIR="${build_dir}/repo" TERRARIUM_REPO_URL="${REPO_URL}" "${build_dir}/repo/dist/terrariumctl" install --ref "${source_ref}" "${FORWARD_ARGS[@]}"
+  run_terrariumctl_install "${build_dir}/repo" "${build_dir}/repo/dist/terrariumctl" "${source_ref}" "${FORWARD_ARGS[@]}"
+}
+
+is_non_interactive_install() {
+  local arg
+  for arg in "${FORWARD_ARGS[@]}"; do
+    case "${arg}" in
+      --non-interactive|--help|-h)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+run_terrariumctl_install() {
+  local bundle_dir="$1"
+  local terrariumctl="$2"
+  local ref="$3"
+  shift 3
+
+  if [[ -r /dev/tty ]]; then
+    TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@" </dev/tty
+    return
+  fi
+
+  if ! is_non_interactive_install; then
+    die "interactive install requires a TTY; run this from an interactive shell or pass --non-interactive with full configuration"
+  fi
+
+  TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@"
 }
 
 main() {

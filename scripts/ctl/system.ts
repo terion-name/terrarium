@@ -22,7 +22,7 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
 
   exportClusterStoreToConfigFile(CONFIG_PATH, PREFIX);
 
-  const args = ["ansible-playbook", "-i", "/opt/terrarium/ansible/inventory.ini", "/opt/terrarium/ansible/site.yml", "-e", `@${CONFIG_PATH}`];
+  const args = ["ansible-playbook", "-i", "inventory.ini", "site.yml", "-e", `@${CONFIG_PATH}`];
   if (options.applyHardening === false) {
     args.push("-e", "terrarium_apply_hardening=false");
   }
@@ -30,6 +30,6 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
   await runText(
     args,
     PREFIX,
-    { cwd: "/opt/terrarium" }
+    { cwd: "/opt/terrarium/ansible" }
   );
 }

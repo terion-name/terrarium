@@ -52,7 +52,7 @@ If you ever need to dig into the server's internals, here is where everything li
 | `/etc/terrarium/config.yaml` | Your human-readable configuration backup. |
 | `/etc/terrarium/secrets/` | Generated passwords (like your Cockpit root login). |
 | `/var/lib/terrarium/` | General state files, S3 backup manifests, and OAuth proxy configs. |
-| `/opt/terrarium/` | The Terrarium source code repository. |
+| `/opt/terrarium/` | The installed Terrarium bundle: compiled `terrariumctl` and Ansible provisioning assets. |
 
 *Note: The **canonical** configuration is actually stored inside LXD's `dqlite` database. Do not edit `/etc/terrarium/config.yaml` by hand; always use `terrariumctl set` commands.*
 

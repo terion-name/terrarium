@@ -29,7 +29,7 @@ Most users should use the interactive installer. Just run this single command:
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | bash
 ```
 
-The published `install.sh` is intentionally thin. It downloads the matching compiled `terrariumctl` bundle from GitHub Releases, stages it into `/opt/terrarium`, and runs the real installer there. Default and tag-like release installs fail closed if the release cannot be resolved or downloaded; source builds require an explicit branch-like `--ref`, for example `main`.
+The published `install.sh` is intentionally thin. It downloads the matching release bundle from GitHub Releases, unpacks the compiled `terrariumctl` binary plus the Ansible provisioning assets into `/opt/terrarium`, and runs the real installer there. Default and tag-like release installs fail closed if the release cannot be resolved or downloaded; source builds require an explicit branch-like `--ref`, for example `main`.
 
 If you want to pin a specific release instead of `latest`, use the tagged asset directly:
 
@@ -120,7 +120,7 @@ For non-interactive automation, use generated or file-based secret inputs so sec
 
 Terrarium keeps:
 
-- the repo checkout at `/opt/terrarium`
+- the installed Terrarium bundle at `/opt/terrarium`
 - the canonical config in LXD's dqlite-backed `terrarium-system` project after LXD is initialized
 - a local config export at `/etc/terrarium/config.yaml`
 

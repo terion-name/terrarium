@@ -28,7 +28,7 @@
     - "{{ terrarium_state_dir }}/restore"
     - /usr/local/lib/terrarium
 
-- name: Assert Terrarium compiled binaries are staged in the repo checkout
+- name: Assert Terrarium compiled binaries are staged in the install bundle
   ansible.builtin.stat:
     path: "{{ terrarium_repo_dir }}/dist/terrariumctl"
   register: terrarium_compiled_cli
@@ -71,6 +71,88 @@
   when: >-
     terrarium_trm_alias.stat.exists
     and not (
+      terrarium_trm_alias.stat.islnk | default(false)
+      and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
+    )
+
+- name: Create shell completion directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /usr/share/bash-completion/completions
+    - /usr/local/share/zsh/site-functions
+    - /usr/share/fish/vendor_completions.d
+
+- name: Generate terrariumctl bash completion
+  ansible.builtin.command: /usr/local/bin/terrariumctl completion bash
+  register: terrariumctl_completion_bash
+  changed_when: false
+
+- name: Generate terrariumctl zsh completion
+  ansible.builtin.command: /usr/local/bin/terrariumctl completion zsh
+  register: terrariumctl_completion_zsh
+  changed_when: false
+
+- name: Generate terrariumctl fish completion
+  ansible.builtin.command: /usr/local/bin/terrariumctl completion fish
+  register: terrariumctl_completion_fish
+  changed_when: false
+
+- name: Install terrariumctl bash completion
+  ansible.builtin.copy:
+    content: "{{ terrariumctl_completion_bash.stdout }}\n"
+    dest: /usr/share/bash-completion/completions/terrariumctl
+    mode: "0644"
+
+- name: Install terrariumctl zsh completion
+  ansible.builtin.copy:
+    content: "{{ terrariumctl_completion_zsh.stdout }}\n"
+    dest: /usr/local/share/zsh/site-functions/_terrariumctl
+    mode: "0644"
+
+- name: Install terrariumctl fish completion
+  ansible.builtin.copy:
+    content: "{{ terrariumctl_completion_fish.stdout }}\n"
+    dest: /usr/share/fish/vendor_completions.d/terrariumctl.fish
+    mode: "0644"
+
+- name: Install trm bash completion alias
+  ansible.builtin.file:
+    src: /usr/share/bash-completion/completions/terrariumctl
+    dest: /usr/share/bash-completion/completions/trm
+    state: link
+    force: true
+  when: >-
+    not terrarium_trm_alias.stat.exists
+    or (
+      terrarium_trm_alias.stat.islnk | default(false)
+      and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
+    )
+
+- name: Install trm zsh completion alias
+  ansible.builtin.file:
+    src: /usr/local/share/zsh/site-functions/_terrariumctl
+    dest: /usr/local/share/zsh/site-functions/_trm
+    state: link
+    force: true
+  when: >-
+    not terrarium_trm_alias.stat.exists
+    or (
+      terrarium_trm_alias.stat.islnk | default(false)
+      and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
+    )
+
+- name: Install trm fish completion alias
+  ansible.builtin.file:
+    src: /usr/share/fish/vendor_completions.d/terrariumctl.fish
+    dest: /usr/share/fish/vendor_completions.d/trm.fish
+    state: link
+    force: true
+  when: >-
+    not terrarium_trm_alias.stat.exists
+    or (
       terrarium_trm_alias.stat.islnk | default(false)
       and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
     )

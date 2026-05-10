@@ -1,0 +1,28 @@
+import { describe, expect, test } from "bun:test";
+import { completionScript } from "./completion";
+
+describe("terrariumctl completion", () => {
+  test("generates bash completion for terrariumctl and trm", () => {
+    const script = completionScript("bash");
+
+    expect(script).toContain("complete -F _terrariumctl_complete terrariumctl");
+    expect(script).toContain("complete -F _terrariumctl_complete trm");
+    expect(script).toContain("backup) COMPREPLY");
+    expect(script).toContain("list export restore");
+    expect(script).toContain("--storage-source");
+    expect(script).toContain("--skip-reconfigure");
+    expect(script).toContain("local oidc");
+  });
+
+  test("generates zsh and fish completion for the installed aliases", () => {
+    const zsh = completionScript("zsh");
+    const fish = completionScript("fish");
+
+    expect(zsh).toContain("#compdef terrariumctl trm");
+    expect(zsh).toContain("compadd local oidc");
+    expect(fish).toContain("complete -c terrariumctl");
+    expect(fish).toContain("complete -c trm");
+    expect(fish).toContain("-l oidc-client");
+    expect(fish).toContain("-s p");
+  });
+});

@@ -78,6 +78,22 @@ describe("terrariumctl install alias", () => {
     expect(tasks).toContain("state: link");
     expect(tasks).toContain("leaving it untouched");
   });
+
+  test("registers shell completions for terrariumctl and trm", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("Create shell completion directories");
+    expect(tasks).toContain("/usr/local/bin/terrariumctl completion bash");
+    expect(tasks).toContain("/usr/local/bin/terrariumctl completion zsh");
+    expect(tasks).toContain("/usr/local/bin/terrariumctl completion fish");
+    expect(tasks).toContain("/usr/share/bash-completion/completions/terrariumctl");
+    expect(tasks).toContain("/usr/share/bash-completion/completions/trm");
+    expect(tasks).toContain("/usr/local/share/zsh/site-functions/_terrariumctl");
+    expect(tasks).toContain("/usr/local/share/zsh/site-functions/_trm");
+    expect(tasks).toContain("/usr/share/fish/vendor_completions.d/terrariumctl.fish");
+    expect(tasks).toContain("/usr/share/fish/vendor_completions.d/trm.fish");
+    expect(tasks).toContain("and terrarium_trm_alias.stat.lnk_source == \"/usr/local/bin/terrariumctl\"");
+  });
 });
 
 describe("terrariumctl mount defaults", () => {

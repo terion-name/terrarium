@@ -19,6 +19,7 @@ jobs:
           bun install
           bun run build
           bun run docs:build
+          cd ansible
           for attempt in 1 2 3 4; do
             if ansible-galaxy collection install -r requirements.yml; then
               break
@@ -34,4 +35,6 @@ jobs:
           test -x dist/terrariumctl
           bun run tests/integration/index.ts --help
       - name: Ansible syntax
-        run: ansible-playbook -i ansible/inventory.ini ansible/site.yml --syntax-check
+        run: |
+          cd ansible
+          ansible-playbook -i inventory.ini site.yml --syntax-check

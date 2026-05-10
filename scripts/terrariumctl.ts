@@ -41,6 +41,7 @@ import { execCmd } from "./ctl/exec";
 import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
+import { completionScript, type CompletionShell } from "./ctl/completion";
 
 /**
  * Prompts before destructive operations that alter persisted or mounted state.
@@ -94,6 +95,16 @@ cli
 cli.command("reconfigure", "Re-run the Ansible reconciliation with the installed binary").action(async () => {
   await reconfigureCmd();
 });
+
+cli
+  .command("completion <shell>", "Print shell completion script: bash, zsh, or fish")
+  .usage("completion bash|zsh|fish")
+  .action((shell) => {
+    if (!["bash", "zsh", "fish"].includes(shell)) {
+      throw new Error(`unsupported completion shell: ${shell}`);
+    }
+    process.stdout.write(completionScript(shell as CompletionShell));
+  });
 
 cli
   .command("exec <instance> [...command]", "Run a command or shell inside a Terrarium container as the terrarium user")
