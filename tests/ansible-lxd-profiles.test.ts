@@ -67,9 +67,14 @@ describe("LXD profiles", () => {
     expect(devProfile).toContain("path: /etc/sudoers.d/90-terrarium-dev");
     expect(devProfile).toContain("permissions: \"0440\"");
     expect(devProfile).toContain("terrarium ALL=(ALL) NOPASSWD:ALL");
-    expect(devProfile).toContain("devices: {}");
-    expect(devProfile).not.toContain("  root:");
-    expect(devProfile).not.toContain("  eth0:");
+    expect(devProfile).toContain('security.idmap.isolated: "true"');
+    expect(devProfile).toContain('security.nesting: "true"');
+    expect(devProfile).toContain('security.syscalls.intercept.mknod: "true"');
+    expect(devProfile).toContain('security.syscalls.intercept.setxattr: "true"');
+    expect(devProfile).toContain("network: {{ terrarium_lxd_network_name }}");
+    expect(devProfile).toContain("pool: {{ terrarium_lxd_pool_name }}");
+    expect(devProfile).toContain("  root:");
+    expect(devProfile).toContain("  eth0:");
 
     expect(kvmProfile).toContain("name: kvm");
     expect(kvmProfile).toContain('security.nesting: "true"');

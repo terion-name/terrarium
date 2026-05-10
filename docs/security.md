@@ -48,14 +48,14 @@ When you install Docker inside one of these containers, that Docker daemon and a
 
 Terrarium's managed LXD profiles create a normal `terrarium` user inside new cloud-init based containers. That user is locked by default and does **not** receive passwordless sudo in the base `default`, `terrarium`, or `strict` profiles.
 
-For development containers and AI-agent sandboxes that need to install packages, layer the `dev` profile on top of the base profile:
+For development containers and AI-agent sandboxes that need to install packages, use the standalone `dev` profile:
 
 ```bash
-lxc launch images:ubuntu/24.04 devbox --profile default --profile dev
+lxc launch images:ubuntu/24.04 devbox --profile dev
 trm exec devbox
 ```
 
-The `dev` profile adds passwordless sudo for the `terrarium` user, so package installation is explicit:
+The `dev` profile includes Terrarium's Docker-friendly defaults and adds passwordless sudo for the `terrarium` user, so package installation is explicit:
 
 ```bash
 sudo apt-get update

@@ -12,10 +12,10 @@ You can do this visually in the LXD UI or from the CLI.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 hermes --profile default --profile dev
+lxc launch images:ubuntu/24.04 hermes --profile dev
 ```
 
-*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new `ubuntu/24.04` instance named `hermes` with both the `default` and `dev` profiles.)*
+*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new `ubuntu/24.04` instance named `hermes` with the `dev` profile.)*
 
 The `dev` profile lets the normal `terrarium` user use passwordless sudo inside the container, which is handy for agent runtimes that install packages over time.
 

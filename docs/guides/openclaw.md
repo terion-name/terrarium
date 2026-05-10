@@ -14,10 +14,10 @@ First, let's create a fresh LXC container specifically for OpenClaw.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 openclaw --profile default --profile dev
+lxc launch images:ubuntu/24.04 openclaw --profile dev
 ```
 
-*(You can also do this visually through the **LXD UI** at `lxd.<your-domain>`. Create an `ubuntu/24.04` instance named `openclaw` and include both the `default` and `dev` profiles.)*
+*(You can also do this visually through the **LXD UI** at `lxd.<your-domain>`. Create an `ubuntu/24.04` instance named `openclaw` and choose the `dev` profile.)*
 
 The `dev` profile gives the normal `terrarium` user passwordless sudo inside this sandbox, which is useful for agents that need to install tools.
 

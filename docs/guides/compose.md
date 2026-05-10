@@ -19,12 +19,12 @@ Terrarium is designed for this. By default, the `ubuntu/24.04` image is pre-conf
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 my-stack --profile default --profile dev
+lxc launch images:ubuntu/24.04 my-stack --profile dev
 ```
 
-*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new instance named `my-stack` with both the `default` and `dev` profiles.)*
+*(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new instance named `my-stack` with the `dev` profile.)*
 
-The default profile keeps Docker-in-LXC support enabled. Adding the `dev` profile gives the normal `terrarium` user passwordless sudo for installing Docker and managing the stack without working directly as root.
+The `dev` profile includes Terrarium's Docker-in-LXC defaults and gives the normal `terrarium` user passwordless sudo for installing Docker and managing the stack without working directly as root.
 
 ## 2. Install Docker Inside the Container
 

@@ -30,7 +30,7 @@ describe("docs config", () => {
     const sharedData = readRepoFile("docs/getting-started/shared-data-between-containers.md");
 
     expect(security).toContain("base `default`, `terrarium`, or `strict` profiles");
-    expect(security).toContain("lxc launch images:ubuntu/24.04 devbox --profile default --profile dev");
+    expect(security).toContain("lxc launch images:ubuntu/24.04 devbox --profile dev");
     expect(security).toContain("trm exec devbox");
     expect(security).toContain("day-to-day work should happen under `/home/terrarium`");
 
@@ -38,7 +38,7 @@ describe("docs config", () => {
     expect(reference).toContain("trm exec my-stack");
     expect(reference).toContain("trm exec my-stack --root");
 
-    expect(guides).toContain("--profile default --profile dev");
+    expect(guides).toContain("--profile dev");
     expect(guides).toContain("trm exec");
     expect(guides).not.toContain("lxc exec openclaw --user 1000");
     expect(guides).not.toContain("lxc exec hermes --user 1000");
@@ -60,7 +60,7 @@ describe("docs config", () => {
 
     expect(coolify).toContain("Coolify supports non-root server users");
     expect(coolify).toContain("mark this as experimental");
-    expect(coolify).toContain("lxc launch images:ubuntu/24.04 apps-server-1 --profile default --profile dev");
+    expect(coolify).toContain("lxc launch images:ubuntu/24.04 apps-server-1 --profile dev");
     expect(coolify).toContain("user `terrarium`");
     expect(coolify).toContain("PermitRootLogin .*/PermitRootLogin no");
   });

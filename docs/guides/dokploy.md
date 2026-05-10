@@ -18,7 +18,7 @@ First, we need a container for the Dokploy control panel.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 dokploy --profile default --profile dev
+lxc launch images:ubuntu/24.04 dokploy --profile dev
 ```
 
 The `dev` profile lets the `terrarium` user run the installer with sudo without using root as the normal working account.

@@ -1,4 +1,13 @@
 config:
+  cloud-init.vendor-data: |
+    #cloud-config
+    users:
+      - name: terrarium
+        gecos: Terrarium Container User
+        groups: users
+        lock_passwd: true
+        shell: /bin/bash
+        sudo: []
   cloud-init.user-data: |
     #cloud-config
     write_files:
@@ -7,6 +16,18 @@ config:
         permissions: "0440"
         content: |
           terrarium ALL=(ALL) NOPASSWD:ALL
-description: Terrarium layered profile for passwordless sudo development containers
-devices: {}
+  security.idmap.isolated: "true"
+  security.nesting: "true"
+  security.syscalls.intercept.mknod: "true"
+  security.syscalls.intercept.setxattr: "true"
+description: Terrarium development container profile with Docker-friendly defaults and passwordless sudo
+devices:
+  eth0:
+    name: eth0
+    network: {{ terrarium_lxd_network_name }}
+    type: nic
+  root:
+    path: /
+    pool: {{ terrarium_lxd_pool_name }}
+    type: disk
 name: dev

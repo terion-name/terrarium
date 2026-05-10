@@ -17,10 +17,10 @@ Let's spin up a fresh container just for coding.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 devbox --profile default --profile dev
+lxc launch images:ubuntu/24.04 devbox --profile dev
 ```
 
-*(You can also use the **LXD UI** at `lxd.<your-domain>`; include both the `default` and `dev` profiles.)*
+*(You can also use the **LXD UI** at `lxd.<your-domain>`; choose the `dev` profile.)*
 
 The `dev` profile gives the normal `terrarium` user passwordless sudo, so the editor terminal can install packages without working directly as root.
 
