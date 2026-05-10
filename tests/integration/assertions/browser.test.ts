@@ -266,17 +266,93 @@ describe("browser assertion helpers", () => {
       }
     } as unknown as Page;
 
-    const selector = await __browserTestHooks.waitForPasswordInputAfterUsernameSubmit(
+    const result = await __browserTestHooks.waitForPasswordInputAfterUsernameSubmit(
       page,
       '[data-testid="username-text-input"]',
       "agent@example.test",
       "app.example.test"
     );
 
-    expect(selector).toBe('[data-testid="password-text-input"]');
+    expect(result).toEqual({ state: "password", selector: '[data-testid="password-text-input"]' });
     expect(currentUrl).toContain("/ui/v2/login/password");
     expect(passwordVisible).toBe(true);
     expect(submits).toBe(1);
     expect(evaluatedAt).toEqual(["http://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123"]);
+  });
+
+  test("does not treat the target app password field as a ZITADEL password step", async () => {
+    const page = {
+      url: () => "https://app.example.test/",
+      locator: (selector: string) => ({
+        first() {
+          return this;
+        },
+        isVisible: async () => selector === 'input[type="password"]',
+        innerText: async () => "Ubuntu 24.04.3 LTS\nUser name\nPassword\nLog in"
+      }),
+      waitForTimeout: async () => undefined
+    } as unknown as Page;
+
+    const result = await __browserTestHooks.waitForPasswordInputAfterUsernameSubmit(
+      page,
+      '[data-testid="username-text-input"]',
+      "agent@example.test",
+      "app.example.test"
+    );
+
+    expect(result).toEqual({ state: "target" });
+  });
+
+  test("does not click a stale ZITADEL submit button after password Enter reaches the target", async () => {
+    let currentUrl = "https://issuer.example.test/ui/v2/login/password?requestId=oidc_123";
+    let clickedStaleSubmit = false;
+    const passwordInput = {
+      first() {
+        return this;
+      },
+      focus: async () => undefined,
+      press: async () => {
+        currentUrl = "https://app.example.test/";
+      },
+      isVisible: async () => currentUrl.includes("/ui/v2/login/password"),
+      isDisabled: async () => false
+    };
+    const submitButton = {
+      first() {
+        return this;
+      },
+      isVisible: async () => false,
+      isDisabled: async () => false,
+      click: async () => {
+        clickedStaleSubmit = true;
+      }
+    };
+    const page = {
+      url: () => currentUrl,
+      locator: (selector: string) => {
+        if (selector === '[data-testid="password-text-input"]') {
+          return passwordInput;
+        }
+        if (selector === '[data-testid="submit-button"]') {
+          return submitButton;
+        }
+        return {
+          first() {
+            return this;
+          },
+          isVisible: async () => false,
+          isDisabled: async () => false,
+          click: async () => {
+            clickedStaleSubmit = true;
+          }
+        };
+      },
+      waitForTimeout: async () => undefined
+    } as unknown as Page;
+
+    await __browserTestHooks.submitIdentityForm(page, '[data-testid="password-text-input"]', ['[data-testid="submit-button"]']);
+
+    expect(currentUrl).toBe("https://app.example.test/");
+    expect(clickedStaleSubmit).toBe(false);
   });
 });

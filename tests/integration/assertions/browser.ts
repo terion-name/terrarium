@@ -5,6 +5,7 @@ import type { OidcTestUser } from "../types";
 
 type LoginExpectation = "allow" | "deny";
 type BrowserArtifactKind = "success" | "failure";
+type PasswordWaitResult = { state: "password"; selector: string } | { state: "target" };
 
 type LoginOptions = {
   outputDir: string;
@@ -84,27 +85,33 @@ const CONSENT_SUBMIT_SELECTORS = ["Allow", "Authorize", "Approve", "Accept", "Co
   `input[type="button"][value="${label}"]`
 ]);
 
-async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelector: string, userEmail: string, targetHost: string): Promise<string> {
+async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelector: string, userEmail: string, targetHost: string): Promise<PasswordWaitResult> {
   const deadline = Date.now() + BROWSER_WAIT_TIMEOUT_MS;
   let lastResubmit = 0;
   let lastBody = "";
 
   while (Date.now() < deadline) {
-    if (isPasswordLoginStep(page.url())) {
+    const currentUrl = page.url();
+    if (isTargetApplicationPage(currentUrl, targetHost)) {
+      return { state: "target" };
+    }
+
+    if (isPasswordLoginStep(currentUrl)) {
       const selector = await visiblePasswordInputSelector(page, 5000);
       if (selector) {
-        return selector;
+        return { state: "password", selector };
       }
     }
 
-    for (const selector of PASSWORD_INPUT_SELECTORS) {
-      const locator = page.locator(selector).first();
-      if (await locatorVisible(locator)) {
-        return selector;
+    if (isIdentityLoginInputPage(currentUrl, targetHost)) {
+      for (const selector of PASSWORD_INPUT_SELECTORS) {
+        const locator = page.locator(selector).first();
+        if (await locatorVisible(locator)) {
+          return { state: "password", selector };
+        }
       }
     }
 
-    const currentUrl = page.url();
     lastBody = (await maybeWithTimeout(page.locator("body").innerText({ timeout: 1000 }).catch(() => ""), 2000)) ?? "";
     const normalizedBody = lastBody.toLowerCase();
     if (
@@ -221,6 +228,7 @@ async function resubmitUsernameIfStillOnUsernameStep(page: Page, userEmail: stri
 
 export const __browserTestHooks = {
   resubmitUsernameIfStillOnUsernameStep,
+  submitIdentityForm,
   waitForPasswordInputAfterUsernameSubmit
 };
 
@@ -270,8 +278,13 @@ async function clickFirstVisible(page: Page, selectors: string[]): Promise<boole
       (await locatorVisible(locator)) &&
       !(await locatorDisabled(locator))
     ) {
-      await locator.click({ noWaitAfter: true, timeout: BROWSER_CLICK_TIMEOUT_MS });
-      return true;
+      const clicked = await maybeWithTimeout(
+        locator.click({ noWaitAfter: true, timeout: BROWSER_CLICK_TIMEOUT_MS }).then(() => true).catch(() => false),
+        BROWSER_CLICK_TIMEOUT_MS + 1000
+      );
+      if (clicked) {
+        return true;
+      }
     }
   }
   return false;
@@ -649,7 +662,7 @@ async function submitIdentityForm(page: Page, inputSelector: string, buttonSelec
   }
 
   if (await waitForEnabledWithin(page, buttonSelectors, 1000)) {
-    await submitForm(page, buttonSelectors);
+    await clickFirstVisible(page, buttonSelectors).catch(() => false);
     await page.waitForTimeout(750);
     if (await identitySubmissionAdvanced(page, beforeUrl, inputSelector)) {
       return;
@@ -1187,11 +1200,17 @@ async function loginThroughZitadelWithContext(
         await submitIdentityForm(page, emailSelector, USERNAME_SUBMIT_SELECTORS);
 
         stage = "waiting for password input after username submit";
-        const passwordSelector = await waitForPasswordInputAfterUsernameSubmit(page, emailSelector, user.email, targetHost);
+        const passwordWait = await waitForPasswordInputAfterUsernameSubmit(page, emailSelector, user.email, targetHost);
+        if (passwordWait.state === "target") {
+          stage = `waiting for ${expected} return to target host`;
+          await waitForReturnToTargetHost(page, targetHost, user.email, expected);
+          stage = "capturing success page";
+          return await finishBrowserLogin(page, screenshotPath, options);
+        }
         stage = "entering password";
-        await typeInto(page, passwordSelector, user.password);
+        await typeInto(page, passwordWait.selector, user.password);
         stage = "submitting password";
-        await submitIdentityForm(page, passwordSelector, PASSWORD_SUBMIT_SELECTORS);
+        await submitIdentityForm(page, passwordWait.selector, PASSWORD_SUBMIT_SELECTORS);
 
         stage = `waiting for ${expected} return to target host`;
         await waitForReturnToTargetHost(page, targetHost, user.email, expected);
