@@ -2,6 +2,9 @@
   hosts: terrarium
   become: true
   gather_facts: true
+  module_defaults:
+    ansible.builtin.apt:
+      lock_timeout: 900
   vars:
     terrarium_repo_dir: /opt/terrarium
     terrarium_config_path: /etc/terrarium/config.yaml

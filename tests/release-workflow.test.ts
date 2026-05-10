@@ -124,8 +124,8 @@ describe("release workflow", () => {
     const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
     expect(installer).toContain("ensure_git()");
-    expect(installer).toContain("apt-get install -y ca-certificates curl unzip python3");
-    expect(installer).toContain("apt-get install -y git");
+    expect(installer).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl unzip python3");
+    expect(installer).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y git");
     expect(installer).not.toContain("apt-get install -y ca-certificates curl unzip git python3");
     expect(installer).toContain('ensure_git\n    git clone --depth 1 --branch "${source_ref}"');
   });

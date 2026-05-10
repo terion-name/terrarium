@@ -52,8 +52,8 @@ ensure_os() {
 
 ensure_bootstrap_deps() {
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y ca-certificates curl unzip python3
+  apt-get -o DPkg::Lock::Timeout=900 update -y
+  apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl unzip python3
 }
 
 ensure_git() {
@@ -61,8 +61,8 @@ ensure_git() {
     return
   fi
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y git
+  apt-get -o DPkg::Lock::Timeout=900 update -y
+  apt-get -o DPkg::Lock::Timeout=900 install -y git
 }
 
 ensure_bun() {
@@ -147,6 +147,14 @@ download_release_bundle() {
   curl -fsSL "${asset_url}" -o "${bundle_dir}/terrarium.zip" || return 1
   unzip -q "${bundle_dir}/terrarium.zip" -d "${bundle_dir}"
   [[ -x "${bundle_dir}/dist/terrariumctl" ]] || return 1
+}
+
+install_release_bundle() {
+  local bundle_dir="$1"
+  local arch="$2"
+  local resolved_ref="$3"
+
+  download_release_bundle "${bundle_dir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"
   run_terrariumctl_install "${bundle_dir}" "${bundle_dir}/dist/terrariumctl" "${resolved_ref}" "${FORWARD_ARGS[@]}"
 }
 
@@ -220,17 +228,17 @@ main() {
 
   if [[ -z "${REF}" ]]; then
     if [[ -n "${BOOTSTRAP_REF}" ]]; then
-      download_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}" || die "failed to download Terrarium release bundle ${BOOTSTRAP_REF}"
+      install_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}" || die "Terrarium install failed for release bundle ${BOOTSTRAP_REF}"
       exit 0
     fi
     resolved_ref="$(resolve_latest_tag "${arch}")" || die "failed to resolve latest Terrarium release tag"
     [[ -n "${resolved_ref}" ]] || die "failed to resolve latest Terrarium release tag"
-    download_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"
+    install_release_bundle "${tmpdir}" "${arch}" "${resolved_ref}" || die "Terrarium install failed for release bundle ${resolved_ref}"
     exit 0
   fi
 
   if is_release_ref "${REF}"; then
-    download_release_bundle "${tmpdir}" "${arch}" "${REF}" || die "failed to download Terrarium release bundle ${REF}"
+    install_release_bundle "${tmpdir}" "${arch}" "${REF}" || die "Terrarium install failed for release bundle ${REF}"
     exit 0
   fi
 
