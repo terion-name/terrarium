@@ -96,7 +96,41 @@ You must configure your provider to allow the following callback URLs:
 - `https://<lxd-domain>/oidc/callback`
 - If you plan to protect published app routes with `@auth`, you must also allow each generated app callback: `https://<route-host>/oauth2/route/<generated-route-id>/callback`
 
-Additionally, the external provider must emit a `groups` claim as a JSON string array containing the configured admin group.
+Additionally, the external provider must emit a `groups` claim as a JSON string array containing the configured admin group. A provider-side role assignment is not enough unless the issued ID token or userinfo response actually contains that value in `groups`. Check your IDP documentation to set this up properly.
+
+---
+
+> [!WARNING]
+> ZITADEL Cloud is probably most unintuitive and weird in this regard, and as we use it as default idp provider, here are the quirks
+
+For ZITADEL Cloud there is no direct concept of groups, they operate with project roles. And project roles are not emitted as a flat `groups` claim by default, they are emited in their own claims. So do the following:
+
+1. In Project the app is added in, in settings (first screen at project) enable "Return user roles during authentication"
+2. In the app go to "Token settings" and enable "User roles inside ID Token" and "Include user's profile info in the ID Token"
+3. Go to "Actions" (in top menu), add new script named "groupsClaim", place there:
+```js
+function groupsClaim(ctx, api) {
+  var groups = [];
+  if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
+    api.v1.claims.setClaim("groups", groups);
+    return;
+  }
+  for (var i = 0; i < ctx.v1.user.grants.grants.length; i++) {
+    var grant = ctx.v1.user.grants.grants[i];
+    if (!grant || !grant.roles) continue;
+    for (var j = 0; j < grant.roles.length; j++) {
+      var role = grant.roles[j];
+      if (groups.indexOf(role) === -1) groups.push(role);
+    }
+  }
+  api.v1.claims.setClaim("groups", groups);
+}
+```
+4. In "Flows" below select "Complement Token" flow type, add trigger "Pre access token creation" and set action "groupsClaim". Then the same for trigger "Pre Userinfo creation"
+
+This will add required claim to token. We hope that Zitadel team will make it easier in future, but for now it is how it is.
+
+---
 
 Terrarium reuses the exact same external OIDC client for:
 - Cockpit's oauth2-proxy

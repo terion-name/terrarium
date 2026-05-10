@@ -10,7 +10,7 @@ import {
   lookupUserId,
   mergedRoleKeys,
   parseZitadelHttpOutput,
-  terrariumGroupsActionScript
+  groupsClaimActionScript
 } from "../scripts/terrarium-zitadel-sync";
 
 const repoRoot = join(import.meta.dir, "..");
@@ -101,8 +101,9 @@ describe("terrarium local ZITADEL sync", () => {
   });
 
   test("emits only Terrarium project roles into the groups claim", () => {
-    const script = terrariumGroupsActionScript("project-terrarium");
+    const script = groupsClaimActionScript("project-terrarium");
 
+    expect(script).toContain("function groupsClaim(ctx, api)");
     expect(script).toContain('var terrariumProjectId = "project-terrarium"');
     expect(script).toContain("grant.projectId || grant.projectID || grant.project_id");
     expect(script).toContain("grantProjectId !== terrariumProjectId");

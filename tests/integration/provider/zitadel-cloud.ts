@@ -39,9 +39,9 @@ export type ZitadelFixtureProgress =
     };
 export type ZitadelFixtureProgressHandler = (progress: ZitadelFixtureProgress) => void | Promise<void>;
 
-const GROUPS_ACTION_NAME = "terrariumGroups";
+const GROUPS_ACTION_NAME = "groupsClaim";
 const DENIED_ROUTE_ROLE = "bystanders";
-const GROUPS_ACTION_SCRIPT = `function terrariumGroups(ctx, api) {
+const GROUPS_ACTION_SCRIPT = `function groupsClaim(ctx, api) {
   var groups = [];
   if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
     api.v1.claims.setClaim('groups', groups);

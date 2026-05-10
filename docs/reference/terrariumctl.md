@@ -492,7 +492,7 @@ External OIDC notes:
   - `https://<proxy-domain>/oauth2/callback`
   - `https://<lxd-domain>/oidc/callback`
 - Published-route auth with `@auth` also requires the external client to allow each generated route callback, rendered as `https://<route-host>/oauth2/route/<generated-route-id>/callback`.
-- The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array.
+- The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array. For ZITADEL Cloud, a project role assignment is not enough by itself; add a Complement Token Action that copies granted role keys into `groups`. See [Domains and auth](../getting-started/domains-and-auth) for details
 - `terrariumctl set idp oidc ...` verifies the issuer, callback flow, and client credentials before persisting the new settings.
 - If your provider needs separate OIDC clients for Cockpit/published routes and LXD, pass `--lxd-oidc-client` plus `--lxd-oidc-secret-file`.
 

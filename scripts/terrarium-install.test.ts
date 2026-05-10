@@ -115,6 +115,7 @@ describe("terrarium install CLI parsing", () => {
       adminGroup: "admin",
       lxdDomain: "lxd.example.test",
       manageDomain: "manage.example.test",
+      oidcIssuer: "https://tenant.us1.zitadel.cloud",
       proxyDomain: "proxy.example.test"
     });
 
@@ -123,6 +124,11 @@ describe("terrarium install CLI parsing", () => {
     expect(instructions).toContain("https://lxd.example.test/oidc/callback");
     expect(instructions).toContain("openid profile email");
     expect(instructions).toContain('groups must be a JSON string array containing "admin"');
+    expect(instructions).toContain("Project role assignments are not emitted as a flat groups claim by default.");
+    expect(instructions).toContain("Create an Action named groupsClaim");
+    expect(instructions).toContain("function groupsClaim(ctx, api)");
+    expect(instructions).toContain("Pre Userinfo creation");
+    expect(instructions).toContain("Pre access token creation");
     expect(instructions).toContain("/oauth2/route/.../callback");
   });
 

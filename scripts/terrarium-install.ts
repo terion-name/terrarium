@@ -517,8 +517,10 @@ export function externalOidcSetupInstructions(options: {
   adminGroup: string;
   lxdDomain: string;
   manageDomain: string;
+  oidcIssuer?: string;
   proxyDomain: string;
 }): string {
+  const isZitadel = /zitadel/i.test(options.oidcIssuer ?? "");
   return [
     "",
     "Before continuing, configure an OIDC application/client in your provider:",
@@ -531,6 +533,33 @@ export function externalOidcSetupInstructions(options: {
     "  Grant/flow: authorization code",
     "  Scopes:     openid profile email",
     `  Claim:      groups must be a JSON string array containing "${options.adminGroup}"`,
+    "              A provider role assignment is not enough unless it is emitted in this claim.",
+    ...(isZitadel
+      ? [
+          "",
+          "ZITADEL Cloud note:",
+          "  Project role assignments are not emitted as a flat groups claim by default.",
+          "  Create an Action named groupsClaim and attach it to the Complement Token flow",
+          "  for both Pre Userinfo creation and Pre access token creation:",
+          "",
+          "  function groupsClaim(ctx, api) {",
+          "    var groups = [];",
+          "    if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {",
+          "      api.v1.claims.setClaim('groups', groups);",
+          "      return;",
+          "    }",
+          "    for (var i = 0; i < ctx.v1.user.grants.grants.length; i++) {",
+          "      var grant = ctx.v1.user.grants.grants[i];",
+          "      if (!grant || !grant.roles) continue;",
+          "      for (var j = 0; j < grant.roles.length; j++) {",
+          "        var role = grant.roles[j];",
+          "        if (groups.indexOf(role) === -1) groups.push(role);",
+          "      }",
+          "    }",
+          "    api.v1.claims.setClaim('groups', groups);",
+          "  }"
+        ]
+      : []),
     "",
     "If your provider will not allow the LXD and web callbacks on one client,",
     "create a separate LXD client and enter it at the optional LXD prompts.",
@@ -557,16 +586,15 @@ async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<voi
       continue;
     }
 
-    if (!printedSetupInstructions) {
-      console.log(externalOidcSetupInstructions(options));
-      printedSetupInstructions = true;
-    }
-
     options.authDomain = "";
     options.oidcIssuer = normalizeOidcIssuer(
       await promptText("External OIDC issuer URL", options.oidcIssuer),
       "--oidc"
     );
+    if (!printedSetupInstructions) {
+      console.log(externalOidcSetupInstructions(options));
+      printedSetupInstructions = true;
+    }
     options.oidcClientId = await promptText("External OIDC client ID", options.oidcClientId);
     options.oidcClientSecret = await promptSecret("External OIDC client secret", options.oidcClientSecret);
     options.lxdOidcClientId = await promptText("Optional separate LXD OIDC client ID", options.lxdOidcClientId);

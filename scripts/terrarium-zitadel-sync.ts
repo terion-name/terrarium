@@ -254,9 +254,9 @@ type ZitadelApiCall = <T>(
   query?: Record<string, string>
 ) => Promise<T>;
 
-const TERRARIUM_GROUPS_ACTION_NAME = "terrariumGroups";
-export function terrariumGroupsActionScript(projectId: string): string {
-  return `function terrariumGroups(ctx, api) {
+const GROUPS_CLAIM_ACTION_NAME = "groupsClaim";
+export function groupsClaimActionScript(projectId: string): string {
+  return `function groupsClaim(ctx, api) {
   var groups = [];
   var terrariumProjectId = ${JSON.stringify(projectId)};
   if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
@@ -419,13 +419,13 @@ export function mergedRoleKeys(existingRoleKeys: string[], requiredRoleKey: stri
 }
 
 async function ensureGroupsAction(authDomain: string, pat: string, projectId: string): Promise<string> {
-  const script = terrariumGroupsActionScript(projectId);
+  const script = groupsClaimActionScript(projectId);
   const actions = await zitadelApi<{ result?: ZitadelAction[] }>(authDomain, pat, "POST", "/management/v1/actions/_search", {});
-  const existing = (actions.result ?? []).find((action) => action.name === TERRARIUM_GROUPS_ACTION_NAME);
+  const existing = (actions.result ?? []).find((action) => action.name === GROUPS_CLAIM_ACTION_NAME);
   if (existing?.id) {
     if ((existing.script ?? "").trim() !== script.trim()) {
       await zitadelApi(authDomain, pat, "PUT", `/management/v1/actions/${existing.id}`, {
-        name: TERRARIUM_GROUPS_ACTION_NAME,
+        name: GROUPS_CLAIM_ACTION_NAME,
         script,
         timeout: "10s",
         allowedToFail: false
@@ -435,13 +435,13 @@ async function ensureGroupsAction(authDomain: string, pat: string, projectId: st
   }
 
   const created = await zitadelApi<{ id?: string }>(authDomain, pat, "POST", "/management/v1/actions", {
-    name: TERRARIUM_GROUPS_ACTION_NAME,
+    name: GROUPS_CLAIM_ACTION_NAME,
     script,
     timeout: "10s",
     allowedToFail: false
   });
   if (!created.id) {
-    throw new Error("failed to create Terrarium groups action");
+    throw new Error("failed to create groups claim action");
   }
   return created.id;
 }
