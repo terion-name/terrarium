@@ -5,6 +5,13 @@ import { join } from "node:path";
 const repoRoot = join(import.meta.dir, "..");
 
 describe("Cockpit plugin fallback builds", () => {
+  test("installs runtime tools expected by the ZFS disk inventory backend", () => {
+    const defaults = readFileSync(join(repoRoot, "ansible/roles/cockpit_plugins/defaults/main.yml"), "utf8");
+
+    expect(defaults).toContain("- procinfo");
+    expect(defaults).toContain("- smartmontools");
+  });
+
   test("pin upstream bootstrap scripts to their declared Yarn releases", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/cockpit_plugins/tasks/main.yml"), "utf8");
 
