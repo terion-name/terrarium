@@ -18,6 +18,8 @@ describe("install.sh bootstrap", () => {
   test("uses source fallback only for explicit branch-like refs", () => {
     const source = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
+    expect(source).toContain("UPDATE=false");
+    expect(source).toContain("--update");
     expect(source).toContain('if [[ -n "${BOOTSTRAP_REF}" ]]; then');
     expect(source).toContain(
       'install_release_bundle "${tmpdir}" "${arch}" "${BOOTSTRAP_REF}" || die "Terrarium install failed for release bundle ${BOOTSTRAP_REF}"'
@@ -28,6 +30,8 @@ describe("install.sh bootstrap", () => {
     expect(source).toContain('if is_release_ref "${REF}"; then');
     expect(source).toContain('install_release_bundle "${tmpdir}" "${arch}" "${REF}" || die "Terrarium install failed for release bundle ${REF}"');
     expect(source).toContain('download_release_bundle "${bundle_dir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"');
+    expect(source).toContain('"${terrariumctl}" update --ref "${ref}" "$@"');
+    expect(source).toContain('"${terrariumctl}" install --ref "${ref}" "$@" </dev/tty');
     expect(source).toContain('build_from_source "${tmpdir}" "${REF}"');
     expect(source).not.toContain('build_from_source "${tmpdir}" "main"');
     expect(source).not.toContain("release bundle is unavailable; using source fallback");

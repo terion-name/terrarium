@@ -41,6 +41,7 @@ import { execCmd } from "./ctl/exec";
 import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
+import { updateCmd } from "./ctl/update";
 import { completionScript, type CompletionShell } from "./ctl/completion";
 
 /**
@@ -95,6 +96,19 @@ cli
 cli.command("reconfigure", "Re-run the Ansible reconciliation with the installed binary").action(async () => {
   await reconfigureCmd();
 });
+
+cli
+  .command("update", "Update installed Terrarium code/assets and re-run reconciliation")
+  .option("--ref <ref>", "Release tag or source branch to update to", STRING_OPTION)
+  .option("--skip-reconfigure", "Update code/assets without running Ansible reconciliation")
+  .option("--non-interactive", "Accepted for install.sh --update compatibility")
+  .action(async (options) => {
+    const rawOptions = options as Record<string, unknown>;
+    await updateCmd({
+      ref: cliOption(rawOptions, "ref"),
+      reconfigure: !Boolean(rawOptions.skipReconfigure)
+    });
+  });
 
 cli
   .command("completion <shell>", "Print shell completion script: bash, zsh, or fish")

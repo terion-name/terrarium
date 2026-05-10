@@ -110,6 +110,16 @@ describe("terrarium install CLI parsing", () => {
     expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ansible-playbook -i inventory.ini site.yml');
   });
 
+  test("interactive install offers update when an existing Terrarium config is present", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
+
+    expect(source).toContain("handleExistingInteractiveInstall");
+    expect(source).toContain("Existing Terrarium configuration found at ${CONFIG_PATH}");
+    expect(source).toContain("Update existing installation");
+    expect(source).toContain("Reinstall / reconfigure from scratch");
+    expect(source).toContain("await updateCmd({ ref: options.ref })");
+  });
+
   test("shows concrete external OIDC setup requirements before provider prompts", () => {
     const instructions = externalOidcSetupInstructions({
       adminGroup: "admin",

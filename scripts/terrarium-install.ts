@@ -8,6 +8,8 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
 import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
+import { CONFIG_PATH } from "./ctl/context";
+import { updateCmd } from "./ctl/update";
 import { verifyOidcConfig, verifyS3Config } from "./ctl/verify";
 import { normalizeS3Endpoint } from "./lib/common";
 
@@ -114,6 +116,30 @@ function printSplash(): void {
   console.log(chalk.magenta(TERRARIUM_SPLASH));
   console.log(chalk.dim(`terrariumctl install ${TERRARIUM_VERSION}`));
   console.log("");
+}
+
+async function handleExistingInteractiveInstall(options: InstallOptions): Promise<boolean> {
+  if (options.mode !== "interactive" || !existsSync(CONFIG_PATH)) {
+    return false;
+  }
+
+  const action = await select({
+    message: `Existing Terrarium configuration found at ${CONFIG_PATH}. What do you want to do?`,
+    choices: [
+      { name: "Update existing installation", value: "update" },
+      { name: "Reinstall / reconfigure from scratch", value: "reinstall" },
+      { name: "Cancel", value: "cancel" }
+    ]
+  });
+
+  if (action === "update") {
+    await updateCmd({ ref: options.ref });
+    return true;
+  }
+  if (action === "cancel") {
+    fail("operation cancelled");
+  }
+  return false;
 }
 
 export function validateEmail(email: string, fieldName: string): string {
@@ -238,8 +264,8 @@ function ensureOs(): void {
 }
 
 async function ensureDeps(): Promise<void> {
-  await $`apt-get update -y`;
-  await $`apt-get install -y ca-certificates curl git ansible python3 jq unzip`;
+  await $`apt-get -o DPkg::Lock::Timeout=900 update -y`;
+  await $`apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl git ansible python3 jq unzip`;
 }
 
 function syncBundleArtifacts(bundleDir: string, repoDir: string): void {
@@ -1323,6 +1349,12 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   printSplash();
   requireRoot();
   ensureOs();
+
+  if (await handleExistingInteractiveInstall(options)) {
+    success("Terrarium update finished.");
+    return;
+  }
+
   await ensureDeps();
   await prepareRepo(options.ref);
 

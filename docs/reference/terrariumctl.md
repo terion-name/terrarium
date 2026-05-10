@@ -13,6 +13,7 @@
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
 | `terrariumctl backup restore` | required: `--instance`; optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores an instance either in place by default or as a new instance when `--as-new` is provided. |
 | `terrariumctl reconfigure` | none | n/a | Re-runs the local Ansible reconciliation using the saved config. |
+| `terrariumctl update` | optional: `--ref`, `--skip-reconfigure` | latest release, reconfigure after update | Updates installed Terrarium code/assets, refreshes Ansible collections, and re-runs reconciliation using the saved config. |
 | `terrariumctl config import` | none | n/a | Imports `/etc/terrarium/config.yaml` into the LXD dqlite-backed config store. |
 | `terrariumctl config export` | none | n/a | Recreates `/etc/terrarium/config.yaml` from the LXD dqlite-backed config store. |
 | `terrariumctl cluster status` | none | n/a | Shows LXD cluster state and the Terrarium OVN workload network. |
@@ -104,6 +105,24 @@ Terrarium keeps its canonical day-2 config in LXD's dqlite-backed project metada
 Use `terrariumctl config import` to copy the local export into the dqlite-backed store. Terrarium runs this automatically after LXD has been initialized during install and reconfigure.
 
 Use `terrariumctl config export` to recreate the local export from the dqlite-backed store. `terrariumctl reconfigure` does this automatically before invoking Ansible when the dqlite-backed store exists.
+
+## update
+
+Use `terrariumctl update` on an existing Terrarium host when you want newer Terrarium code, Ansible roles, managed LXD profiles, systemd units, or package lists without going through the installer again.
+
+```bash
+terrariumctl update
+terrariumctl update --ref 0.0.21
+terrariumctl update --skip-reconfigure
+```
+
+The command updates `/opt/terrarium`, refreshes Ansible collections, and then runs `terrariumctl reconfigure` with OS hardening skipped. It reuses the saved configuration from LXD's config store or `/etc/terrarium/config.yaml`; it does not ask storage, domain, IDP, S3, or syncoid setup questions.
+
+When using the bootstrap installer, pass `--update` to get the same behavior from a release bundle:
+
+```bash
+curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | sudo bash -s -- --update
+```
 
 ## exec
 

@@ -9,8 +9,11 @@ describe("terrariumctl completion", () => {
     expect(script).toContain("complete -F _terrariumctl_complete trm");
     expect(script).toContain("backup) COMPREPLY");
     expect(script).toContain("list export restore");
-    expect(script).toContain("--storage-source");
+    expect(script).toContain("update");
+    expect(script).toContain("update) COMPREPLY");
+    expect(script).toContain("--ref --skip-reconfigure --non-interactive");
     expect(script).toContain("--skip-reconfigure");
+    expect(script).toContain("--storage-source");
     expect(script).toContain("local oidc");
   });
 
@@ -19,6 +22,7 @@ describe("terrariumctl completion", () => {
     const fish = completionScript("fish");
 
     expect(zsh).toContain("#compdef terrariumctl trm");
+    expect(zsh).toContain("update) opts=(--ref --skip-reconfigure --non-interactive)");
     expect(zsh).toContain("compadd local oidc");
     expect(fish).toContain("complete -c terrariumctl");
     expect(fish).toContain("complete -c trm");

@@ -5,6 +5,7 @@ const commands = [
   "status",
   "backup",
   "reconfigure",
+  "update",
   "exec",
   "config",
   "cluster",
@@ -67,6 +68,7 @@ const optionGroups: Record<string, string[]> = {
     "--syncoid-ssh-key"
   ],
   backup: ["--source", "--instance", "--at", "--as-new"],
+  update: ["--ref", "--skip-reconfigure", "--non-interactive"],
   exec: ["--root", "--user"],
   cluster: [
     "--member",
@@ -161,6 +163,7 @@ _terrariumctl_complete() {
     case "\${command}" in
       install) COMPREPLY=( $(compgen -W "${words(optionGroups.install)} --help" -- "\${cur}") ) ;;
       backup) COMPREPLY=( $(compgen -W "${words(optionGroups.backup)} --help" -- "\${cur}") ) ;;
+      update) COMPREPLY=( $(compgen -W "${words(optionGroups.update)} --help" -- "\${cur}") ) ;;
       exec) COMPREPLY=( $(compgen -W "${words(optionGroups.exec)} --help" -- "\${cur}") ) ;;
       cluster) COMPREPLY=( $(compgen -W "${words(optionGroups.cluster)} --help" -- "\${cur}") ) ;;
       mount) COMPREPLY=( $(compgen -W "${words(optionGroups.mount)} --help" -- "\${cur}") ) ;;
@@ -226,6 +229,7 @@ _terrariumctl() {
     set) actions=(${words(actions.set)}); opts=(${words(optionGroups.set)}) ;;
     completion) actions=(${words(actions.completion)}) ;;
     install) opts=(${words(optionGroups.install)}) ;;
+    update) opts=(${words(optionGroups.update)}) ;;
     exec) opts=(${words(optionGroups.exec)}) ;;
   esac
 

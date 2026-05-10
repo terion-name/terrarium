@@ -10,6 +10,14 @@ A backup, human-readable copy of your settings is always kept at `/etc/terrarium
 
 Whenever you run a `terrariumctl set ...` command, Terrarium updates the database, updates the text file, and then seamlessly applies the changes to your system. (It's smart enough to skip the heavy OS-hardening steps during routine updates, making reconfigurations very fast).
 
+If you want to update Terrarium itself, use:
+
+```bash
+terrariumctl update
+```
+
+That refreshes the installed Terrarium release under `/opt/terrarium`, installs any updated Ansible collection requirements, and reapplies the saved configuration without asking the initial install questions again. If you run the interactive installer on a host that already has `/etc/terrarium/config.yaml`, it will ask whether you want to update the existing installation or intentionally reinstall from scratch.
+
 ## The Main Reconfiguration Commands
 
 Here are the commands you'll use to change how Terrarium behaves:

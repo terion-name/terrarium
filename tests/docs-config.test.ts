@@ -64,4 +64,16 @@ describe("docs config", () => {
     expect(coolify).toContain("user `terrarium`");
     expect(coolify).toContain("PermitRootLogin .*/PermitRootLogin no");
   });
+
+  test("documents day-2 Terrarium updates without reinstalling", () => {
+    const reference = readRepoFile("docs/reference/terrariumctl.md");
+    const reconfiguration = readRepoFile("docs/operations/reconfiguration.md");
+
+    expect(reference).toContain("| `terrariumctl update` |");
+    expect(reference).toContain("terrariumctl update --ref 0.0.21");
+    expect(reference).toContain("install.sh | sudo bash -s -- --update");
+    expect(reference).toContain("does not ask storage, domain, IDP, S3, or syncoid setup questions");
+    expect(reconfiguration).toContain("terrariumctl update");
+    expect(reconfiguration).toContain("update the existing installation or intentionally reinstall from scratch");
+  });
 });

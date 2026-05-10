@@ -4,6 +4,7 @@ set -Eeuo pipefail
 REPO_URL="${TERRARIUM_REPO_URL:-https://github.com/terion-name/terrarium.git}"
 GITHUB_REPO="${TERRARIUM_GITHUB_REPO:-terion-name/terrarium}"
 REF=""
+UPDATE=false
 EMBEDDED_BOOTSTRAP_REF="" # TERRARIUM_RELEASE_REF
 BOOTSTRAP_REF="${TERRARIUM_BOOTSTRAP_REF:-}"
 TMPDIR_PATH=""
@@ -17,15 +18,17 @@ usage() {
 Usage: install.sh [options]
 
   --ref REF
+  --update
   --help
 
-All other flags are forwarded to `terrariumctl install`.
+All other flags are forwarded to `terrariumctl install` or `terrariumctl update`.
 
 Behavior:
   - without --ref, the bootstrap downloads the bundled release when the installer is release-pinned
   - otherwise without --ref, it downloads the latest Terrarium release bundle
   - with a tag-like --ref, it downloads that release bundle
   - with a branch-like --ref (for example main), it falls back to a source build
+  - with --update, it updates an existing Terrarium install instead of starting the install wizard
 EOF
 }
 
@@ -118,6 +121,10 @@ parse_args() {
         REF="${1#--ref=}"
         shift
         ;;
+      --update)
+        UPDATE=true
+        shift
+        ;;
       --)
         shift
         while [[ $# -gt 0 ]]; do
@@ -155,7 +162,7 @@ install_release_bundle() {
   local resolved_ref="$3"
 
   download_release_bundle "${bundle_dir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"
-  run_terrariumctl_install "${bundle_dir}" "${bundle_dir}/dist/terrariumctl" "${resolved_ref}" "${FORWARD_ARGS[@]}"
+  run_terrariumctl "${bundle_dir}" "${bundle_dir}/dist/terrariumctl" "${resolved_ref}" "${FORWARD_ARGS[@]}"
 }
 
 build_from_source() {
@@ -178,7 +185,7 @@ build_from_source() {
     /opt/bun/bin/bun install --frozen-lockfile || /opt/bun/bin/bun install --no-progress
     /opt/bun/bin/bun scripts/build.ts
   )
-  run_terrariumctl_install "${build_dir}/repo" "${build_dir}/repo/dist/terrariumctl" "${source_ref}" "${FORWARD_ARGS[@]}"
+  run_terrariumctl "${build_dir}/repo" "${build_dir}/repo/dist/terrariumctl" "${source_ref}" "${FORWARD_ARGS[@]}"
 }
 
 is_non_interactive_install() {
@@ -193,11 +200,16 @@ is_non_interactive_install() {
   return 1
 }
 
-run_terrariumctl_install() {
+run_terrariumctl() {
   local bundle_dir="$1"
   local terrariumctl="$2"
   local ref="$3"
   shift 3
+
+  if [[ "${UPDATE}" == "true" ]]; then
+    TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" update --ref "${ref}" "$@"
+    return
+  fi
 
   if [[ -r /dev/tty ]]; then
     TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@" </dev/tty
