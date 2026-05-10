@@ -2,7 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { cac } from "cac";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateRootPassword, normalizeOidcIssuer, partitionEndForCandidate, readCliOption, registerInstallCommand } from "./terrarium-install";
+import {
+  externalOidcSetupInstructions,
+  generateRootPassword,
+  installReviewSummary,
+  normalizeOidcIssuer,
+  partitionEndForCandidate,
+  readCliOption,
+  registerInstallCommand
+} from "./terrarium-install";
 
 const repoRoot = join(import.meta.dir, "..");
 
@@ -100,5 +108,36 @@ describe("terrarium install CLI parsing", () => {
     expect(source).toContain("syncInstallBundle(BUNDLE_DIR, REPO_DIR)");
     expect(source).toContain("installing Terrarium release bundle into ${REPO_DIR}");
     expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ansible-playbook -i inventory.ini site.yml');
+  });
+
+  test("shows concrete external OIDC setup requirements before provider prompts", () => {
+    const instructions = externalOidcSetupInstructions({
+      adminGroup: "admin",
+      lxdDomain: "lxd.example.test",
+      manageDomain: "manage.example.test",
+      proxyDomain: "proxy.example.test"
+    });
+
+    expect(instructions).toContain("https://manage.example.test/oauth2/callback");
+    expect(instructions).toContain("https://proxy.example.test/oauth2/callback");
+    expect(instructions).toContain("https://lxd.example.test/oidc/callback");
+    expect(instructions).toContain("openid profile email");
+    expect(instructions).toContain('groups must be a JSON string array containing "admin"');
+    expect(instructions).toContain("/oauth2/route/.../callback");
+  });
+
+  test("summarizes optional integrations so accidental choices can be corrected before install", () => {
+    const summary = installReviewSummary({
+      enableS3: false,
+      enableSyncoid: true,
+      s3Bucket: "",
+      s3Endpoint: "",
+      s3Prefix: "terrarium",
+      syncoidTarget: "backup@example.test",
+      syncoidTargetDataset: "backup/terrarium"
+    });
+
+    expect(summary).toContain("S3 archive backups: disabled");
+    expect(summary).toContain("syncoid replication: enabled (backup@example.test:backup/terrarium)");
   });
 });

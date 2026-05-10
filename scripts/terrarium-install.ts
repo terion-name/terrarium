@@ -513,6 +513,34 @@ async function promptConfirm(message: string, defaultValue: boolean, assumeYes: 
   return await confirm({ message, default: defaultValue });
 }
 
+export function externalOidcSetupInstructions(options: {
+  adminGroup: string;
+  lxdDomain: string;
+  manageDomain: string;
+  proxyDomain: string;
+}): string {
+  return [
+    "",
+    "Before continuing, configure an OIDC application/client in your provider:",
+    "",
+    "  Redirect URLs:",
+    `    Cockpit / oauth2-proxy: https://${options.manageDomain}/oauth2/callback`,
+    `    Traefik dashboard:      https://${options.proxyDomain}/oauth2/callback`,
+    `    LXD:                    https://${options.lxdDomain}/oidc/callback`,
+    "",
+    "  Grant/flow: authorization code",
+    "  Scopes:     openid profile email",
+    `  Claim:      groups must be a JSON string array containing "${options.adminGroup}"`,
+    "",
+    "If your provider will not allow the LXD and web callbacks on one client,",
+    "create a separate LXD client and enter it at the optional LXD prompts.",
+    "",
+    "Published @auth routes add their own /oauth2/route/.../callback URLs;",
+    "add those later when you create protected routes.",
+    ""
+  ].join("\n");
+}
+
 /**
  * Collects external OIDC settings and verifies them before install continues.
  *
@@ -521,11 +549,17 @@ async function promptConfirm(message: string, defaultValue: boolean, assumeYes: 
  * and then use the same verifier without a retry loop.
  */
 async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<void> {
+  let printedSetupInstructions = false;
   while (true) {
     options.adminGroup = await promptText("Management admin group", options.adminGroup);
     if (!options.adminGroup) {
       warn("Management admin group is required for external OIDC mode.");
       continue;
+    }
+
+    if (!printedSetupInstructions) {
+      console.log(externalOidcSetupInstructions(options));
+      printedSetupInstructions = true;
     }
 
     options.authDomain = "";
@@ -608,6 +642,90 @@ async function promptAndVerifyS3(options: InstallOptions): Promise<void> {
       if (!(await promptConfirm("Update the S3 settings and try again?", true, false))) {
         fail("aborted");
       }
+    }
+  }
+}
+
+async function enableAndVerifyS3(options: InstallOptions): Promise<void> {
+  options.enableS3 = true;
+  await promptAndVerifyS3(options);
+}
+
+function disableS3(options: InstallOptions): void {
+  options.enableS3 = false;
+  options.s3Endpoint = "";
+  options.s3Bucket = "";
+  options.s3Region = "";
+  options.s3AccessKey = "";
+  options.s3SecretKey = "";
+}
+
+async function enableSyncoid(options: InstallOptions): Promise<void> {
+  options.enableSyncoid = true;
+  options.syncoidTarget = await promptText("syncoid SSH target (user@host)", options.syncoidTarget);
+  options.syncoidTargetDataset = await promptText("Remote dataset", options.syncoidTargetDataset || "backup/terrarium");
+  options.syncoidSshKey = await promptText("SSH private key path", options.syncoidSshKey || "/root/.ssh/id_ed25519");
+}
+
+function disableSyncoid(options: InstallOptions): void {
+  options.enableSyncoid = false;
+  options.syncoidTarget = "";
+  options.syncoidTargetDataset = "";
+  options.syncoidSshKey = "";
+}
+
+export function installReviewSummary(options: Pick<
+  InstallOptions,
+  | "enableS3"
+  | "enableSyncoid"
+  | "s3Bucket"
+  | "s3Endpoint"
+  | "s3Prefix"
+  | "syncoidTarget"
+  | "syncoidTargetDataset"
+>): string {
+  return [
+    "",
+    "Review optional integrations before install:",
+    `  S3 archive backups: ${options.enableS3 ? `enabled (${options.s3Bucket || "bucket not set"} at ${options.s3Endpoint || "endpoint not set"}, prefix ${options.s3Prefix || "terrarium"})` : "disabled"}`,
+    `  syncoid replication: ${options.enableSyncoid ? `enabled (${options.syncoidTarget || "target not set"}:${options.syncoidTargetDataset || "dataset not set"})` : "disabled"}`,
+    ""
+  ].join("\n");
+}
+
+async function reviewOptionalIntegrations(options: InstallOptions): Promise<void> {
+  while (true) {
+    console.log(installReviewSummary(options));
+    const action = await select({
+      message: "Continue with these optional integrations?",
+      choices: [
+        { name: "Continue install", value: "continue" },
+        { name: options.enableS3 ? "Edit S3 archive backups" : "Configure S3 archive backups", value: "edit-s3" },
+        ...(options.enableS3 ? [{ name: "Disable S3 archive backups", value: "disable-s3" }] : []),
+        { name: options.enableSyncoid ? "Edit syncoid replication" : "Configure syncoid replication", value: "edit-syncoid" },
+        ...(options.enableSyncoid ? [{ name: "Disable syncoid replication", value: "disable-syncoid" }] : []),
+        { name: "Cancel install", value: "cancel" }
+      ]
+    });
+
+    switch (action) {
+      case "continue":
+        return;
+      case "edit-s3":
+        await enableAndVerifyS3(options);
+        break;
+      case "disable-s3":
+        disableS3(options);
+        break;
+      case "edit-syncoid":
+        await enableSyncoid(options);
+        break;
+      case "disable-syncoid":
+        disableSyncoid(options);
+        break;
+      case "cancel":
+        fail("aborted");
+        break;
     }
   }
 }
@@ -854,16 +972,14 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   }
 
   if (await promptConfirm("Configure S3 archive backups?", false, options.assumeYes)) {
-    options.enableS3 = true;
-    await promptAndVerifyS3(options);
+    await enableAndVerifyS3(options);
   }
 
   if (await promptConfirm("Configure syncoid replication to another ZFS host?", false, options.assumeYes)) {
-    options.enableSyncoid = true;
-    options.syncoidTarget = options.syncoidTarget || (await promptText("syncoid SSH target (user@host)", ""));
-    options.syncoidTargetDataset = options.syncoidTargetDataset || (await promptText("Remote dataset", "backup/terrarium"));
-    options.syncoidSshKey = options.syncoidSshKey || (await promptText("SSH private key path", "/root/.ssh/id_ed25519"));
+    await enableSyncoid(options);
   }
+
+  await reviewOptionalIntegrations(options);
 }
 
 function validateNonInteractive(options: InstallOptions): void {
