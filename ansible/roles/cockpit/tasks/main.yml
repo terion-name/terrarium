@@ -5,6 +5,33 @@
       - cockpit-packagekit
     state: present
 
+- name: Allow root Cockpit login for Terrarium management
+  ansible.builtin.lineinfile:
+    path: /etc/cockpit/disallowed-users
+    regexp: "^root$"
+    state: absent
+  notify: restart cockpit
+
+- name: Trust Traefik management origin in Cockpit
+  community.general.ini_file:
+    path: /etc/cockpit/cockpit.conf
+    section: WebService
+    option: Origins
+    value: "https://{{ terrarium_manage_domain }} wss://{{ terrarium_manage_domain }}"
+    mode: "0644"
+    no_extra_spaces: true
+  notify: restart cockpit
+
+- name: Tell Cockpit to honor Traefik forwarded scheme
+  community.general.ini_file:
+    path: /etc/cockpit/cockpit.conf
+    section: WebService
+    option: ProtocolHeader
+    value: X-Forwarded-Proto
+    mode: "0644"
+    no_extra_spaces: true
+  notify: restart cockpit
+
 - name: Create cockpit socket override directory
   ansible.builtin.file:
     path: /etc/systemd/system/cockpit.socket.d
