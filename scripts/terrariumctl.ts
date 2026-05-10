@@ -444,7 +444,13 @@ cli.help();
 
 async function main(): Promise<void> {
   try {
-    cli.parse(normalizedArgv(process.argv), { run: false });
+    const argv = normalizedArgv(process.argv);
+    const userArgs = argv.slice(2);
+    if (userArgs.length === 0 || (userArgs.length === 1 && userArgs[0] === "help")) {
+      cli.outputHelp();
+      return;
+    }
+    cli.parse(argv, { run: false });
     await cli.runMatchedCommand();
   } catch (error) {
     console.error(chalk.red(`${PREFIX}: ${String(error).replace(/^Error: /, "")}`));
