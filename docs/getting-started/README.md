@@ -5,6 +5,7 @@ Welcome to Terrarium. Before you install, it helps to understand a few key conce
 This section covers everything you need to know to get up and running:
 
 - **[Installation](installation.md):** The step-by-step process for getting Terrarium onto your VPS.
+- **[Creating Your First Instance](creating-first-instance.md):** How to spin up your first container and publish an app to the web.
 - **[Storage and Sizing](storage.md):** How to choose the right hardware and structure your storage for the best performance and snapshot capabilities.
 - **[Domains and Authentication](domains-and-auth.md):** Setting up custom domains and choosing how you want to handle Single Sign-On (SSO) for your private apps.
 - **[Management GUIs](management-guis.md):** A quick tour of the built-in visual dashboards you get right out of the box.
