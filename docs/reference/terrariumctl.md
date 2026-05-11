@@ -137,21 +137,32 @@ terrariumctl proxy sync
 HTTP(S) route format:
 
 ```text
-https://<public-host>[:container-port][/path][@auth[:group[,group...]]]
-http://<public-host>[:container-port][/path][@auth[:group[,group...]]]
+https://<public-host>[:container-port][/path][@auth[:group[,group...]][~callback-host]]
+http://<public-host>[:container-port][/path][@auth[:group[,group...]][~callback-host]]
 ```
 
 Use `https://` for normal public routes. It creates a HTTPS router with Let's Encrypt and redirects plain HTTP to HTTPS. Use `http://` only when you intentionally want a plain HTTP public route. The port is the port inside the container; the public listener is still 80/443. If the port is omitted, Terrarium targets container port `80`. A path, when present, is matched as a prefix. Query strings and fragments are not supported.
+
+Wildcard HTTPS hosts such as `https://*.example.com:8080` require DNS-01 ACME. Configure the single Traefik DNS provider with lego environment variable names:
+
+```bash
+terrariumctl set dns provider cloudflare CF_DNS_API_TOKEN:your-token
+terrariumctl set dns provider route53 AWS_ACCESS_KEY_ID:your-key AWS_SECRET_ACCESS_KEY:your-secret AWS_REGION:us-east-1
+terrariumctl set dns provider
+```
+
+The last command disables DNS-01 and returns Traefik to HTTP-01. Traefik supports one DNS challenge provider per instance; see the [lego DNS provider list](https://go-acme.github.io/lego/dns/index.html) for provider codes and required environment variables.
 
 Authentication suffixes are supported only on HTTP(S) routes:
 
 ```bash
 lxc config set grafana user.proxy "https://grafana.example.com:3000@auth"
 lxc config set admin-tool user.proxy "https://admin.example.com:8080@auth:admins,devops"
+lxc config set wildcard-admin user.proxy "https://*.example.com:8080@auth:admins~auth.example.com"
 terrariumctl proxy sync
 ```
 
-`@auth` allows any authenticated user. `@auth:admins,devops` allows users in any listed group. Group names may contain letters, numbers, dots, underscores, and hyphens. External OIDC providers must emit a `groups` claim for group-restricted routes.
+`@auth` allows any authenticated user. `@auth:admins,devops` allows users in any listed group. Group names may contain letters, numbers, dots, underscores, and hyphens. Wildcard auth routes must add `~callback-host`; Terrarium always uses HTTPS and oauth2-proxy's callback path for that host. External OIDC providers must emit a `groups` claim for group-restricted routes.
 
 TCP and UDP route formats:
 

@@ -15,6 +15,7 @@ describe("terrariumctl completion", () => {
     expect(script).toContain("--skip-reconfigure");
     expect(script).toContain("--storage-source");
     expect(script).toContain("local oidc");
+    expect(script).toContain("provider");
   });
 
   test("completes root command prefixes", () => {
@@ -30,8 +31,10 @@ describe("terrariumctl completion", () => {
     expect(zsh).toContain("#compdef terrariumctl trm");
     expect(zsh).toContain("update) opts=(--ref --skip-reconfigure --non-interactive)");
     expect(zsh).toContain("compadd local oidc");
+    expect(zsh).toContain("compadd provider");
     expect(fish).toContain("complete -c terrariumctl");
     expect(fish).toContain("complete -c trm");
+    expect(fish).toContain("__fish_seen_subcommand_from dns");
     expect(fish).toContain("-l oidc-client");
     expect(fish).toContain("-s p");
   });

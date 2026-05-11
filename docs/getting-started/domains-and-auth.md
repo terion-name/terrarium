@@ -35,7 +35,7 @@ Container apps become public only when you add a `user.proxy` label to the LXD i
 For normal web apps, use this format:
 
 ```text
-https://<public-host>[:container-port][/path][@auth[:group[,group...]]]
+https://<public-host>[:container-port][/path][@auth[:group[,group...]][~callback-host]]
 ```
 
 Examples:
@@ -63,8 +63,30 @@ What each part means:
 - `/path` is optional and is matched as a path prefix.
 - `@auth` requires a successful OIDC login before traffic reaches the app.
 - `@auth:admins,devops` also requires membership in one of those groups.
+- `~auth.example.com` is required only for wildcard auth routes and gives Terrarium the concrete oauth2-proxy callback host.
 
-Use `https://` for normal public routes. Terrarium will request a Let's Encrypt certificate and redirect plain HTTP to HTTPS. Query strings and URL fragments are not part of route labels. Wildcard route hosts such as `*.example.com` are not supported; each published hostname needs its own explicit label.
+Use `https://` for normal public routes. Terrarium will request a Let's Encrypt certificate and redirect plain HTTP to HTTPS. Query strings and URL fragments are not part of route labels.
+
+Wildcard HTTPS routes are supported after DNS-01 ACME is configured:
+
+```bash
+terrariumctl set dns provider cloudflare CF_DNS_API_TOKEN:your-token
+lxc config set my-app user.proxy "https://*.example.com:8080"
+terrariumctl proxy sync
+```
+
+DNS credentials map directly to lego's provider environment variable names. See the [lego DNS provider list](https://go-acme.github.io/lego/dns/index.html) for supported providers and required variables. To disable DNS-01 and return to HTTP-01 certificate validation, run:
+
+```bash
+terrariumctl set dns provider
+```
+
+Wildcard auth routes need a concrete callback host under the same base domain:
+
+```bash
+lxc config set admin-ui user.proxy "https://*.example.com:3000@auth:admins~auth.example.com"
+terrariumctl proxy sync
+```
 
 You can publish more than one route from the same container by separating routes with commas or newlines:
 

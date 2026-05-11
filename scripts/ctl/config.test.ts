@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applySetIdpConfig, parseSetCommandOptions, runReconcileActions, type ReconcileActions } from "./config";
+import { applySetDnsProviderConfig, applySetIdpConfig, parseSetCommandOptions, runReconcileActions, type ReconcileActions } from "./config";
 
 function recordActions(calls: string[], outputs: string[] = [""]): ReconcileActions {
   return {
@@ -232,5 +232,46 @@ describe("terrariumctl config reconciliation", () => {
     expect(parsed.idp.oidcSecret).toBeUndefined();
     expect(parsed.idp.lxdOidcSecret).toBeUndefined();
     expect(parsed.s3.s3SecretKey).toBeUndefined();
+  });
+
+  test("stores DNS provider credentials as exact lego environment variables", () => {
+    const config: Record<string, unknown> = {};
+
+    const summary = applySetDnsProviderConfig(config, {
+      provider: "Cloudflare",
+      credentials: ["CF_API_KEY:key:with:colon", "CF_DNS_API_TOKEN:token"]
+    });
+
+    expect(summary).toBe("Enabled DNS-01 ACME provider cloudflare");
+    expect(config.terrarium_acme_dns_provider).toBe("cloudflare");
+    expect(config.terrarium_acme_dns_env).toEqual({
+      CF_API_KEY: "key:with:colon",
+      CF_DNS_API_TOKEN: "token"
+    });
+  });
+
+  test("clears DNS provider and DNS credentials together", () => {
+    const config: Record<string, unknown> = {
+      terrarium_acme_dns_provider: "cloudflare",
+      terrarium_acme_dns_env: { CF_DNS_API_TOKEN: "token" }
+    };
+
+    const summary = applySetDnsProviderConfig(config, { provider: undefined, credentials: [] });
+
+    expect(summary).toBe("Disabled DNS-01 ACME");
+    expect(config.terrarium_acme_dns_provider).toBe("");
+    expect(config.terrarium_acme_dns_env).toEqual({});
+  });
+
+  test("rejects DNS credentials that are not environment variable assignments", () => {
+    expect(() =>
+      applySetDnsProviderConfig(
+        {},
+        {
+          provider: "cloudflare",
+          credentials: ["cf-token:secret"]
+        }
+      )
+    ).toThrow("uppercase lego environment variable");
   });
 });

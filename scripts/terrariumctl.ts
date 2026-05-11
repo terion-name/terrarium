@@ -23,6 +23,7 @@ import {
   configExportCmd,
   configImportCmd,
   parseSetCommandOptions,
+  setDnsProviderCmd,
   setDomainsCmd,
   setEmailsCmd,
   setIdpCmd,
@@ -383,7 +384,7 @@ cli
   });
 
 cli
-  .command("set <section> [value]", "Update saved Terrarium configuration")
+  .command("set <section> [...args]", "Update saved Terrarium configuration")
   .option("--manage-domain <domain>", "Override the Cockpit domain", STRING_OPTION)
   .option("--proxy-domain <domain>", "Override the Traefik dashboard domain", STRING_OPTION)
   .option("--lxd-domain <domain>", "Override the LXD domain", STRING_OPTION)
@@ -411,10 +412,20 @@ cli
   .option("--syncoid-ssh-key <path>", "SSH key path for syncoid", STRING_OPTION)
   .option("--enable", "Enable the selected integration")
   .option("--disable", "Disable the selected integration")
-  .usage("set domains [rootDomain] | set emails | set idp local|oidc | set s3 | set syncoid")
-  .action(async (section, value, options) => {
+  .usage("set domains [rootDomain] | set emails | set idp local|oidc | set dns provider [provider] [KEY:VALUE...] | set s3 | set syncoid")
+  .action(async (section, args, options) => {
+    const values = (args as string[] | undefined) ?? [];
+    const value = values[0];
     const rawOptions = options as Record<string, unknown>;
     const parsed = parseSetCommandOptions(rawOptions);
+
+    if (section === "dns") {
+      if (value !== "provider") {
+        throw new Error("set dns requires: provider [provider] [KEY:VALUE...]");
+      }
+      await setDnsProviderCmd({ provider: values[1], credentials: values.slice(2) }, reconcileActions);
+      return;
+    }
 
     if (section === "domains") {
       await setDomainsCmd((value as string | undefined) || "", parsed.domains, reconcileActions, confirmDestructive);

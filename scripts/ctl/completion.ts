@@ -23,7 +23,7 @@ const actions: Record<string, string[]> = {
   proxy: ["sync"],
   mount: ["add", "attach", "remove", "list"],
   idp: ["sync", "status", "logs", "backup", "restore"],
-  set: ["domains", "emails", "idp", "s3", "syncoid"],
+  set: ["domains", "emails", "idp", "dns", "s3", "syncoid"],
   completion: ["bash", "zsh", "fish"]
 };
 
@@ -197,6 +197,8 @@ _terrariumctl_complete() {
     3)
       if [[ "\${command}" == "set" && "\${COMP_WORDS[2]}" == "idp" ]]; then
         COMPREPLY=( $(compgen -W "local oidc" -- "\${cur}") )
+      elif [[ "\${command}" == "set" && "\${COMP_WORDS[2]}" == "dns" ]]; then
+        COMPREPLY=( $(compgen -W "provider" -- "\${cur}") )
       elif [[ "\${command}" == "mount" && "\${COMP_WORDS[2]}" == "add" ]]; then
         COMPREPLY=( $(compgen -W "smb cifs" -- "\${cur}") )
       elif [[ "\${command}" == "cluster" && "\${COMP_WORDS[2]}" == "ovn" ]]; then
@@ -249,6 +251,8 @@ _terrariumctl() {
 
   if [[ "$words[2]" == "set" && "$words[3]" == "idp" ]]; then
     compadd local oidc
+  elif [[ "$words[2]" == "set" && "$words[3]" == "dns" ]]; then
+    compadd provider
   elif [[ "$words[2]" == "mount" && "$words[3]" == "add" ]]; then
     compadd smb cifs
   elif [[ "$words[2]" == "cluster" && "$words[3]" == "ovn" ]]; then
@@ -277,6 +281,7 @@ function fishCompletion(): string {
       }
     }
     lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from set; and __fish_seen_subcommand_from idp" -a "local oidc"`);
+    lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from set; and __fish_seen_subcommand_from dns" -a "provider"`);
     lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from mount; and __fish_seen_subcommand_from add" -a "smb cifs"`);
     lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from cluster; and __fish_seen_subcommand_from ovn" -a "configure"`);
   }

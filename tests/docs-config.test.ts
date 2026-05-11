@@ -83,16 +83,19 @@ describe("docs config", () => {
     const reference = readRepoFile("docs/reference/terrariumctl.md");
 
     for (const source of [domainsAndAuth, reference]) {
-      expect(source).toContain("https://<public-host>[:container-port][/path][@auth[:group[,group...]]]");
+      expect(source).toContain("https://<public-host>[:container-port][/path][@auth[:group[,group...]][~callback-host]]");
       expect(source).toContain("tcp://<public-port>:<container-port>");
       expect(source).toContain("udp://<public-port>:<container-port>");
       expect(source).toContain('lxc config set my-app user.proxy "https://app.example.com:8080');
       expect(source).toContain("must listen on `0.0.0.0`");
+      expect(source).toContain("https://go-acme.github.io/lego/dns/index.html");
+      expect(source).toContain("terrariumctl set dns provider cloudflare CF_DNS_API_TOKEN:your-token");
     }
 
     expect(domainsAndAuth).toContain("Published App Route Labels");
     expect(domainsAndAuth).toContain("go to **Configuration**, choose **Edit YAML**");
-    expect(domainsAndAuth).toContain("Wildcard route hosts such as `*.example.com` are not supported");
+    expect(domainsAndAuth).toContain('lxc config set admin-ui user.proxy "https://*.example.com:3000@auth:admins~auth.example.com"');
+    expect(reference).toContain("Traefik supports one DNS challenge provider per instance");
     expect(authProtection).toContain("../getting-started/domains-and-auth.md#published-app-route-labels");
   });
 });

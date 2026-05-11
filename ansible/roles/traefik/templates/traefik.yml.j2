@@ -18,8 +18,13 @@ certificatesResolvers:
     acme:
       email: {{ terrarium_acme_email }}
       storage: /var/lib/traefik/acme.json
+{% if terrarium_acme_dns_provider | default('') | length > 0 %}
+      dnsChallenge:
+        provider: {{ terrarium_acme_dns_provider }}
+{% else %}
       httpChallenge:
         entryPoint: web
+{% endif %}
 
 log:
   level: INFO

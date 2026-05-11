@@ -92,6 +92,14 @@
     - "{{ terrarium_traefik_config_dir }}/bootstrap-certs"
     - /var/lib/traefik
 
+- name: Create Traefik secret directory
+  ansible.builtin.file:
+    path: /etc/terrarium/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Determine whether bootstrap TLS is required
   ansible.builtin.set_fact:
     terrarium_bootstrap_tls_enabled: "{{ terrarium_idp_mode == 'local' and (terrarium_auth_domain | default('') | length > 0) }}"
@@ -183,6 +191,23 @@
     path: /var/lib/traefik/acme.json
     state: touch
     mode: "0600"
+
+- name: Render Traefik DNS challenge credential environment
+  ansible.builtin.template:
+    src: traefik-dns.env.j2
+    dest: /etc/terrarium/secrets/traefik-dns.env
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart traefik
+  when: terrarium_acme_dns_provider | default('') | length > 0
+
+- name: Remove Traefik DNS challenge credential environment when DNS-01 is disabled
+  ansible.builtin.file:
+    path: /etc/terrarium/secrets/traefik-dns.env
+    state: absent
+  notify: restart traefik
+  when: terrarium_acme_dns_provider | default('') | length == 0
 
 - name: Render Traefik static config
   ansible.builtin.template:

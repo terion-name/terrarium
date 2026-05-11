@@ -67,12 +67,14 @@ type DesiredPort = {
 type AuthSpec = {
   enabled: boolean;
   groups: string[];
+  callbackHost?: string;
 };
 
 type HttpProxyItem = {
   kind: "http";
   scheme: "http" | "https";
   host: string;
+  wildcardBaseHost?: string;
   path: string;
   targetPort: number;
   auth: AuthSpec;
@@ -102,6 +104,8 @@ export type ProxyBackendTarget = {
 type RouteAuthProfile = {
   key: string;
   host: string;
+  callbackHost: string;
+  wildcardBaseHost?: string;
   groups: string[];
   port: number;
   proxyPrefix: string;
@@ -405,13 +409,20 @@ function parseAuthSuffix(item: string): { route: string; auth: AuthSpec } {
   }
 
   const suffix = item.slice(authIndex);
-  if (!/^@auth(?::[A-Za-z0-9._,-]+)?$/.test(suffix)) {
+  if (!/^@auth(?::[A-Za-z0-9._,-]+)?(?:~[A-Za-z0-9.-]+)?$/.test(suffix)) {
     throw new Error(`unsupported auth suffix: ${suffix}`);
   }
 
-  const groups = suffix.includes(":")
-    ? suffix
-        .slice(suffix.indexOf(":") + 1)
+  const callbackIndex = suffix.indexOf("~");
+  const policySuffix = callbackIndex === -1 ? suffix : suffix.slice(0, callbackIndex);
+  const callbackHost = callbackIndex === -1 ? "" : suffix.slice(callbackIndex + 1);
+  if (callbackHost && (callbackHost.includes("*") || callbackHost.startsWith(".") || callbackHost.endsWith("."))) {
+    throw new Error(`auth callback host must be a concrete HTTPS hostname: ${callbackHost}`);
+  }
+
+  const groups = policySuffix.includes(":")
+    ? policySuffix
+        .slice(policySuffix.indexOf(":") + 1)
         .split(",")
         .map((group) => group.trim())
         .filter(Boolean)
@@ -421,9 +432,24 @@ function parseAuthSuffix(item: string): { route: string; auth: AuthSpec } {
     route: item.slice(0, authIndex),
     auth: {
       enabled: true,
-      groups: [...new Set(groups)].sort()
+      groups: [...new Set(groups)].sort(),
+      ...(callbackHost ? { callbackHost } : {})
     }
   };
+}
+
+function wildcardBaseHost(host: string): string | undefined {
+  if (!host.includes("*")) {
+    return undefined;
+  }
+  if (!host.startsWith("*.") || host.indexOf("*", 1) !== -1) {
+    throw new Error(`wildcard host must use a single leading '*.' label: ${host}`);
+  }
+  const baseHost = host.slice(2);
+  if (!baseHost || !baseHost.includes(".") || baseHost.includes("*")) {
+    throw new Error(`wildcard host must include a concrete base domain: ${host}`);
+  }
+  return baseHost;
 }
 
 function parseProxyItem(item: string): HttpProxyItem | TransportProxyItem {
@@ -434,10 +460,12 @@ function parseProxyItem(item: string): HttpProxyItem | TransportProxyItem {
     if (parsed.search || parsed.hash) {
       throw new Error(`query strings and fragments are not supported: ${item}`);
     }
+    const wildcardBase = wildcardBaseHost(parsed.hostname);
     return {
       kind: "http",
       scheme: parsed.protocol.replace(":", "") as "http" | "https",
       host: parsed.hostname,
+      ...(wildcardBase ? { wildcardBaseHost: wildcardBase } : {}),
       path: parsed.pathname || "/",
       targetPort: parsed.port ? Number(parsed.port) : 80,
       auth
@@ -604,9 +632,9 @@ async function syncLocalRoutesClient(config: Record<string, unknown>, profiles: 
     const appId = await lookupRoutesAppId(authDomain, adminPat, projectId);
     const redirectUris =
       profiles.length > 0
-        ? profiles.map((profile) => `https://${profile.host}${profile.callbackPath}`)
+        ? profiles.map((profile) => `https://${profile.callbackHost}${profile.callbackPath}`)
         : [`https://${manageDomain}/oauth2/app/callback`];
-    const postLogoutRedirectUris = [...new Set([`https://${manageDomain}/`, ...profiles.map((profile) => `https://${profile.host}/`)])];
+    const postLogoutRedirectUris = [...new Set([`https://${manageDomain}/`, ...profiles.map((profile) => `https://${profile.callbackHost}/`)])];
 
     await zitadelApi(
       authDomain,
@@ -977,25 +1005,26 @@ async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ target
 }
 
 function routeHostAllowedForManagedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
+  const baseHost = host.startsWith("*.") ? host.slice(2) : host;
   if (!rootDomain) {
-    return host === manageDomain;
+    return baseHost === manageDomain;
   }
-  return host === rootDomain || host.endsWith(`.${rootDomain}`);
+  return baseHost === rootDomain || baseHost.endsWith(`.${rootDomain}`);
 }
 
 function normalizedRouteAuthGroups(groups: string[]): string[] {
   return [...new Set(groups)].sort();
 }
 
-function routeAuthProfileKey(host: string, groups: string[]): string {
-  return `${host}\n${normalizedRouteAuthGroups(groups).join("\n")}`;
+function routeAuthProfileKey(host: string, groups: string[], callbackHost = host): string {
+  return `${host}\n${callbackHost}\n${normalizedRouteAuthGroups(groups).join("\n")}`;
 }
 
-function routeAuthProfileSuffix(host: string, groups: string[]): string {
+function routeAuthProfileSuffix(host: string, groups: string[], callbackHost = host): string {
   const policy = groups.length > 0 ? groups.join("-") : "authenticated";
   const base = slugify(`${host}-${policy}`);
   const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
-  const hash = createHash("sha256").update(routeAuthProfileKey(host, groups)).digest("hex").slice(0, 10);
+  const hash = createHash("sha256").update(routeAuthProfileKey(host, groups, callbackHost)).digest("hex").slice(0, 10);
   return `${trimmed || "route"}-${hash}`;
 }
 
@@ -1003,10 +1032,57 @@ function routeAuthList(values: string[]): string {
   return `[ ${values.map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(", ")} ]`;
 }
 
+function escapeHostRegexp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function hostRule(host: string): string {
+  const baseHost = wildcardBaseHost(host);
+  if (!baseHost) {
+    return `Host(\`${host}\`)`;
+  }
+  return `HostRegexp(\`^[^.]+\\.${escapeHostRegexp(baseHost)}$\`)`;
+}
+
+function tlsConfigForRoute(item: HttpProxyItem): Record<string, unknown> {
+  if (!item.wildcardBaseHost) {
+    return { certResolver: "letsencrypt" };
+  }
+  return {
+    certResolver: "letsencrypt",
+    domains: [
+      {
+        main: item.wildcardBaseHost,
+        sans: [`*.${item.wildcardBaseHost}`]
+      }
+    ]
+  };
+}
+
+function validateWildcardRoute(item: HttpProxyItem, rawItem: string, dnsProvider: string): string | null {
+  if (!item.wildcardBaseHost && item.auth.callbackHost) {
+    return `auth callback host suffix is supported only on wildcard routes: ${rawItem}`;
+  }
+  if (!item.wildcardBaseHost) {
+    return null;
+  }
+  if (item.scheme === "https" && !dnsProvider) {
+    return `wildcard HTTPS route ${rawItem} requires DNS-01 ACME; run terrariumctl set dns provider <provider> KEY:VALUE`;
+  }
+  if (item.auth.enabled && !item.auth.callbackHost) {
+    return `wildcard auth route ${rawItem} requires a concrete callback host suffix such as @auth~auth.${item.wildcardBaseHost}`;
+  }
+  if (item.auth.callbackHost && !(item.auth.callbackHost === item.wildcardBaseHost || item.auth.callbackHost.endsWith(`.${item.wildcardBaseHost}`))) {
+    return `wildcard auth callback host ${item.auth.callbackHost} must be ${item.wildcardBaseHost} or a subdomain of it`;
+  }
+  return null;
+}
+
 export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record<string, unknown>): { profiles: RouteAuthProfile[]; errors: string[] } {
   const rootDomain = configString(config, "terrarium_root_domain");
   const manageDomain = configString(config, "terrarium_manage_domain");
-  const profilePolicies = new Map<string, { host: string; groups: string[] }>();
+  const dnsProvider = configString(config, "terrarium_acme_dns_provider");
+  const profilePolicies = new Map<string, { host: string; callbackHost: string; wildcardBaseHost?: string; groups: string[] }>();
   const errors: string[] = [];
 
   for (const container of containers) {
@@ -1028,6 +1104,11 @@ export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record
       if (parsed.kind !== "http" || !parsed.auth.enabled) {
         continue;
       }
+      const wildcardError = validateWildcardRoute(parsed, rawItem, dnsProvider);
+      if (wildcardError) {
+        errors.push(`${name}: ${wildcardError}`);
+        continue;
+      }
 
       if (!routeHostAllowedForManagedAuth(parsed.host, rootDomain, manageDomain)) {
         errors.push(`${name}: auth-protected route host ${parsed.host} must be ${manageDomain} or a subdomain of ${rootDomain}`);
@@ -1035,20 +1116,31 @@ export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record
       }
 
       const groups = normalizedRouteAuthGroups(parsed.auth.groups);
-      profilePolicies.set(routeAuthProfileKey(parsed.host, groups), { host: parsed.host, groups });
+      const callbackHost = parsed.auth.callbackHost ?? parsed.host;
+      profilePolicies.set(routeAuthProfileKey(parsed.host, groups, callbackHost), {
+        host: parsed.host,
+        callbackHost,
+        ...(parsed.wildcardBaseHost ? { wildcardBaseHost: parsed.wildcardBaseHost } : {}),
+        groups
+      });
     }
   }
 
   const profiles: RouteAuthProfile[] = [];
   const sortedPolicies = [...profilePolicies.values()].sort(
-    (left, right) => left.host.localeCompare(right.host) || left.groups.join(",").localeCompare(right.groups.join(","))
+    (left, right) =>
+      left.host.localeCompare(right.host) ||
+      left.callbackHost.localeCompare(right.callbackHost) ||
+      left.groups.join(",").localeCompare(right.groups.join(","))
   );
   for (const [index, policy] of sortedPolicies.entries()) {
-    const suffix = routeAuthProfileSuffix(policy.host, policy.groups);
+    const suffix = routeAuthProfileSuffix(policy.host, policy.groups, policy.callbackHost);
     const proxyPrefix = `/oauth2/route/${suffix}`;
     profiles.push({
-      key: routeAuthProfileKey(policy.host, policy.groups),
+      key: routeAuthProfileKey(policy.host, policy.groups, policy.callbackHost),
       host: policy.host,
+      callbackHost: policy.callbackHost,
+      ...(policy.wildcardBaseHost ? { wildcardBaseHost: policy.wildcardBaseHost } : {}),
       groups: policy.groups,
       port: ROUTE_AUTH_BASE_PORT + index,
       proxyPrefix,
@@ -1071,7 +1163,7 @@ export function buildRouteAuthRedirectUris(routeLabels: string[], config: Record
   }));
   const { profiles, errors } = buildRouteAuthProfiles(containers, config);
   return {
-    redirectUris: profiles.map((profile) => `https://${profile.host}${profile.callbackPath}`),
+    redirectUris: profiles.map((profile) => `https://${profile.callbackHost}${profile.callbackPath}`),
     errors
   };
 }
@@ -1093,21 +1185,23 @@ export function buildRouteAuthComposeArtifacts(
 
   const services = Object.fromEntries(
     profiles.map((profile) => {
+      const wildcardCookieDomain = profile.wildcardBaseHost ? `.${profile.wildcardBaseHost}` : "";
       const cfgLines = [
         'provider = "oidc"',
         'provider_display_name = "Terrarium"',
         `http_address = "127.0.0.1:${profile.port}"`,
         `proxy_prefix = "${profile.proxyPrefix}"`,
-        `redirect_url = "${profile.callbackPath}"`,
+        `redirect_url = "${profile.wildcardBaseHost ? `https://${profile.callbackHost}${profile.callbackPath}` : profile.callbackPath}"`,
         `oidc_issuer_url = "${issuer}"`,
         'oidc_groups_claim = "groups"',
         `client_id = "${clientId}"`,
         `client_secret = "${clientSecret}"`,
         `cookie_secret = "${cookieSecret}"`,
-        `cookie_name = "__Host-terrarium_route_${profile.containerName.replace(/^route-/, "")}"`,
+        `cookie_name = "${profile.wildcardBaseHost ? "terrarium_route" : "__Host-terrarium_route"}_${profile.containerName.replace(/^route-/, "")}"`,
         "cookie_secure = true",
         'cookie_path = "/"',
-        `whitelist_domains = [ "${profile.host}" ]`,
+        ...(wildcardCookieDomain ? [`cookie_domains = [ "${wildcardCookieDomain}" ]`] : []),
+        `whitelist_domains = [ "${wildcardCookieDomain || profile.host}" ]`,
         'email_domains = [ "*" ]',
         'upstreams = [ "static://202" ]',
         'scope = "openid profile email"',
@@ -1309,6 +1403,17 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
 }
 
 function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Record<string, { address: string }>): string {
+  const acme: Record<string, unknown> = {
+    email: configString(config, "terrarium_acme_email") || configString(config, "terrarium_email"),
+    storage: "/var/lib/traefik/acme.json"
+  };
+  const dnsProvider = configString(config, "terrarium_acme_dns_provider");
+  if (dnsProvider) {
+    acme.dnsChallenge = { provider: dnsProvider };
+  } else {
+    acme.httpChallenge = { entryPoint: "web" };
+  }
+
   return yamlStringify({
     api: {},
     entryPoints: {
@@ -1325,13 +1430,7 @@ function buildStaticConfig(config: Record<string, unknown>, extraEntrypoints: Re
     },
     certificatesResolvers: {
       letsencrypt: {
-        acme: {
-          email: configString(config, "terrarium_acme_email") || configString(config, "terrarium_email"),
-          storage: "/var/lib/traefik/acme.json",
-          httpChallenge: {
-            entryPoint: "web"
-          }
-        }
+        acme
       }
     },
     log: { level: "INFO" }
@@ -1379,6 +1478,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
   const httpClaims = new Set<string>();
   const oauthProfileSchemes = new Map<string, "http" | "https">();
   const portClaims = new Set<string>();
+  const dnsProvider = configString(config, "terrarium_acme_dns_provider");
   const errors: string[] = [];
   const { profiles: authProfiles, errors: authProfileErrors } = buildRouteAuthProfiles(containers, config);
   errors.push(...authProfileErrors);
@@ -1401,7 +1501,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
     }
 
     oauthProfileSchemes.set(profile.key, scheme);
-    const rule = `Host(\`${profile.host}\`) && PathPrefix(\`${profile.proxyPrefix}/\`)`;
+    const rule = `Host(\`${profile.callbackHost}\`) && PathPrefix(\`${profile.proxyPrefix}/\`)`;
     const httpRouterName = `${profile.serviceName}-oauth2-http`;
     if (scheme === "https") {
       httpRouters[httpRouterName] = {
@@ -1461,6 +1561,11 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
       }
 
       if (item.kind === "http") {
+        const wildcardError = validateWildcardRoute(item, rawItem, dnsProvider);
+        if (wildcardError) {
+          errors.push(`${name}: ${wildcardError}`);
+          continue;
+        }
         const backend = backendTargets[proxyBackendKey(name, "tcp", item.targetPort)];
         const backendAddress = backend?.address ?? ipAddress;
         const backendPort = backend?.port ?? item.targetPort;
@@ -1469,7 +1574,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
           continue;
         }
 
-        const authProfile = item.auth.enabled ? authProfileByKey.get(routeAuthProfileKey(item.host, item.auth.groups)) : undefined;
+        const authProfile = item.auth.enabled ? authProfileByKey.get(routeAuthProfileKey(item.host, item.auth.groups, item.auth.callbackHost ?? item.host)) : undefined;
         if (item.auth.enabled && !authProfile) {
           continue;
         }
@@ -1489,7 +1594,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
           }
         };
 
-        let rule = `Host(\`${item.host}\`)`;
+        let rule = hostRule(item.host);
         if (item.path !== "/") {
           rule += ` && PathPrefix(\`${item.path}\`)`;
         }
@@ -1505,7 +1610,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
             entryPoints: ["websecure"],
             rule,
             service: serviceName,
-            tls: { certResolver: "letsencrypt" },
+            tls: tlsConfigForRoute(item),
             ...(item.auth.enabled
               ? {
                   middlewares: [authProfile!.middlewareName]

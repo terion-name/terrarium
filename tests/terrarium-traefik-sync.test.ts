@@ -79,9 +79,14 @@ describe("terrarium route auth generation", () => {
   test("uses HTTP ACME challenges in generated Traefik static config", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
 
-    expect(source).toContain("httpChallenge:");
+    expect(source).toContain("acme.httpChallenge = { entryPoint: \"web\" }");
     expect(source).toContain('entryPoint: "web"');
     expect(source).not.toContain("tlsChallenge:");
+  });
+
+  test("switches generated Traefik static config to DNS-01 when a lego provider is configured", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+    expect(source).toContain("acme.dnsChallenge = { provider: dnsProvider }");
   });
 
   test("treats ZITADEL no-op updates as successful idempotent responses", () => {
@@ -248,6 +253,61 @@ describe("terrarium route auth generation", () => {
       expect(oauthRules.some((rule) => rule.includes(`PathPrefix(\`${profile.proxyPrefix}/\`)`))).toBe(true);
       expect(oauthRules.some((rule) => rule.includes("PathPrefix(`/oauth2/`)"))).toBe(false);
     }
+  });
+
+  test("renders wildcard HTTPS routes with HostRegexp and wildcard ACME domains", () => {
+    const { dynamicYaml, errors } = buildDynamicConfig(
+      [container("app", "https://*.example.test:8080")],
+      { ...routeAuthConfig, terrarium_acme_dns_provider: "cloudflare" }
+    );
+    const dynamic = parse(dynamicYaml) as {
+      http: {
+        routers: Record<string, { rule: string; tls?: { certResolver?: string; domains?: Array<{ main: string; sans: string[] }> } }>;
+      };
+    };
+    const httpsRouter = Object.values(dynamic.http.routers).find((router) => router.tls);
+
+    expect(errors).toEqual([]);
+    expect(httpsRouter?.rule).toBe("HostRegexp(`^[^.]+\\.example\\.test$`)");
+    expect(httpsRouter?.tls).toEqual({
+      certResolver: "letsencrypt",
+      domains: [{ main: "example.test", sans: ["*.example.test"] }]
+    });
+  });
+
+  test("rejects wildcard HTTPS routes until DNS-01 is configured", () => {
+    const { errors } = buildDynamicConfig([container("app", "https://*.example.test:8080")], routeAuthConfig);
+
+    expect(errors).toContain("app: wildcard HTTPS route https://*.example.test:8080 requires DNS-01 ACME; run terrariumctl set dns provider <provider> KEY:VALUE");
+  });
+
+  test("uses a concrete callback host and shared cookie domain for wildcard route auth", () => {
+    const { dynamicYaml, authProfiles, errors } = buildDynamicConfig(
+      [container("admin", "https://*.example.test:8080@auth:admins~auth.example.test")],
+      { ...routeAuthConfig, terrarium_acme_dns_provider: "cloudflare" }
+    );
+    const dynamic = parse(dynamicYaml) as {
+      http: {
+        routers: Record<string, { rule: string; service: string }>;
+      };
+    };
+    const { profileConfigs } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_acme_dns_provider: "cloudflare" },
+      authProfiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+    const profile = authProfiles[0];
+
+    expect(errors).toEqual([]);
+    expect(profile.callbackHost).toBe("auth.example.test");
+    expect(Object.values(dynamic.http.routers).some((router) => router.rule === `Host(\`auth.example.test\`) && PathPrefix(\`${profile.proxyPrefix}/\`)`)).toBe(true);
+    expect(profileConfigs[profile.containerName]).toContain(`redirect_url = "https://auth.example.test${profile.callbackPath}"`);
+    expect(profileConfigs[profile.containerName]).toContain('cookie_domains = [ ".example.test" ]');
+    expect(profileConfigs[profile.containerName]).toContain('whitelist_domains = [ ".example.test" ]');
+    expect(profileConfigs[profile.containerName]).toContain('cookie_name = "terrarium_route_');
+    expect(profileConfigs[profile.containerName]).not.toContain('cookie_name = "__Host-');
   });
 
   test("uses reconciled backend targets when LXD uses host-side proxy devices", () => {

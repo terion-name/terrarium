@@ -79,6 +79,12 @@ export type SetSyncoidOptions = {
   syncoidSshKey?: string;
 };
 
+/** Reusable option bag for `set dns provider`. */
+export type SetDnsProviderOptions = {
+  provider?: string;
+  credentials: string[];
+};
+
 type SetIdpPlan = {
   summary: string;
   verifyOidc?: OidcVerificationOptions;
@@ -147,6 +153,59 @@ async function persistAndReconcile(config: MutableConfig, summary: string, actio
   saveMutableConfig(stringify(config));
   await runReconcileActions(config, actions);
   console.log(success(summary));
+}
+
+function validateLegoDnsProvider(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalized)) {
+    throw new Error("DNS provider must be a lego provider code such as cloudflare, hetzner, route53, or acme-dns");
+  }
+  return normalized;
+}
+
+function parseDnsCredentials(credentials: string[]): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const credential of credentials) {
+    const separator = credential.indexOf(":");
+    if (separator <= 0) {
+      throw new Error(`DNS credential must use KEY:VALUE form: ${credential}`);
+    }
+    const key = credential.slice(0, separator);
+    const value = credential.slice(separator + 1);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) {
+      throw new Error(`DNS credential key must be an uppercase lego environment variable name: ${key}`);
+    }
+    if (/[\r\n]/.test(value)) {
+      throw new Error(`DNS credential value for ${key} must be a single line`);
+    }
+    if (value) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+/** Enables or disables Traefik DNS-01 ACME using lego provider env names. */
+export function applySetDnsProviderConfig(config: MutableConfig, options: SetDnsProviderOptions): string {
+  const provider = validateLegoDnsProvider(options.provider ?? "");
+  if (!provider) {
+    setConfigValue(config, "terrarium_acme_dns_provider", "");
+    setConfigValue(config, "terrarium_acme_dns_env", {});
+    return "Disabled DNS-01 ACME";
+  }
+
+  setConfigValue(config, "terrarium_acme_dns_provider", provider);
+  setConfigValue(config, "terrarium_acme_dns_env", parseDnsCredentials(options.credentials));
+  return `Enabled DNS-01 ACME provider ${provider}`;
+}
+
+export async function setDnsProviderCmd(options: SetDnsProviderOptions, actions: ReconcileActions): Promise<void> {
+  const config = loadMutableConfig();
+  const summary = applySetDnsProviderConfig(config, options);
+  await persistAndReconcile(config, summary, actions);
 }
 
 /** Imports the local YAML export into the dqlite-backed LXD project store. */
