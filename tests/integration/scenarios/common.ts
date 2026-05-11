@@ -86,23 +86,26 @@ export function expectedRouteAuthRedirectUris(routeLabels: string[]): string[] {
 
     const route = label.slice(0, authIndex);
     const suffix = label.slice(authIndex);
-    if (!/^@auth(?::[A-Za-z0-9._,-]+)?$/.test(suffix)) {
+    if (!/^@auth(?::[A-Za-z0-9._,-]+)?(?:~[A-Za-z0-9.-]+)?$/.test(suffix)) {
       throw new Error(`unsupported auth suffix: ${suffix}`);
     }
 
     const parsed = new URL(route);
+    const callbackIndex = suffix.indexOf("~");
+    const policySuffix = callbackIndex === -1 ? suffix : suffix.slice(0, callbackIndex);
+    const callbackHost = callbackIndex === -1 ? parsed.hostname : suffix.slice(callbackIndex + 1);
     const groups = [
       ...new Set(
-        suffix.includes(":")
-          ? suffix
-              .slice(suffix.indexOf(":") + 1)
+        policySuffix.includes(":")
+          ? policySuffix
+              .slice(policySuffix.indexOf(":") + 1)
               .split(",")
               .map((group) => group.trim())
               .filter(Boolean)
           : []
       )
     ].sort();
-    const key = `${parsed.hostname}\n${groups.join("\n")}`;
+    const key = `${parsed.hostname}\n${callbackHost}\n${groups.join("\n")}`;
     if (profiles.has(key)) {
       continue;
     }
@@ -112,7 +115,7 @@ export function expectedRouteAuthRedirectUris(routeLabels: string[]): string[] {
     const base = slugify(`${parsed.hostname}-${policy}`);
     const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
     const hash = createHash("sha256").update(key).digest("hex").slice(0, 10);
-    redirectUris.push(`https://${parsed.hostname}/oauth2/route/${trimmed || "route"}-${hash}/callback`);
+    redirectUris.push(`https://${callbackHost}/oauth2/route/${trimmed || "route"}-${hash}/callback`);
   }
   return redirectUris.sort();
 }
