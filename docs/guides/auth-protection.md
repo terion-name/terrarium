@@ -28,6 +28,8 @@ terrariumctl proxy sync
 
 That's literally it. Now, whenever someone visits `app.example.com`, they will be redirected to your Terrarium login page (either ZITADEL or your external provider like Google). Only authenticated users will be allowed through to see the app.
 
+For the full `user.proxy` label grammar, including multiple routes and raw TCP/UDP routes, see [Domains and Authentication](../getting-started/domains-and-auth.md#published-app-route-labels).
+
 ---
 
 ## Restricting Access to Specific Groups

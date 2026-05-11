@@ -76,4 +76,23 @@ describe("docs config", () => {
     expect(reconfiguration).toContain("terrariumctl update");
     expect(reconfiguration).toContain("update the existing installation or intentionally reinstall from scratch");
   });
+
+  test("documents user.proxy label formats in getting started docs", () => {
+    const domainsAndAuth = readRepoFile("docs/getting-started/domains-and-auth.md");
+    const authProtection = readRepoFile("docs/guides/auth-protection.md");
+    const reference = readRepoFile("docs/reference/terrariumctl.md");
+
+    for (const source of [domainsAndAuth, reference]) {
+      expect(source).toContain("https://<public-host>[:container-port][/path][@auth[:group[,group...]]]");
+      expect(source).toContain("tcp://<public-port>:<container-port>");
+      expect(source).toContain("udp://<public-port>:<container-port>");
+      expect(source).toContain('lxc config set my-app user.proxy "https://app.example.com:8080');
+      expect(source).toContain("must listen on `0.0.0.0`");
+    }
+
+    expect(domainsAndAuth).toContain("Published App Route Labels");
+    expect(domainsAndAuth).toContain("go to **Configuration**, choose **Edit YAML**");
+    expect(domainsAndAuth).toContain("Wildcard route hosts such as `*.example.com` are not supported");
+    expect(authProtection).toContain("../getting-started/domains-and-auth.md#published-app-route-labels");
+  });
 });

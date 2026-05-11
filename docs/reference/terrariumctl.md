@@ -124,6 +124,59 @@ When using the bootstrap installer, pass `--update` to get the same behavior fro
 curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/install.sh | sudo bash -s -- --update
 ```
 
+## proxy labels
+
+Terrarium publishes container services from the LXD `user.proxy` config key. The value is one route or a comma/newline-separated list of routes.
+
+```bash
+lxc config set my-app user.proxy "https://app.example.com:8080"
+lxc config set my-app user.proxy "https://app.example.com:8080,https://api.example.com:3000/api"
+terrariumctl proxy sync
+```
+
+HTTP(S) route format:
+
+```text
+https://<public-host>[:container-port][/path][@auth[:group[,group...]]]
+http://<public-host>[:container-port][/path][@auth[:group[,group...]]]
+```
+
+Use `https://` for normal public routes. It creates a HTTPS router with Let's Encrypt and redirects plain HTTP to HTTPS. Use `http://` only when you intentionally want a plain HTTP public route. The port is the port inside the container; the public listener is still 80/443. If the port is omitted, Terrarium targets container port `80`. A path, when present, is matched as a prefix. Query strings and fragments are not supported.
+
+Authentication suffixes are supported only on HTTP(S) routes:
+
+```bash
+lxc config set grafana user.proxy "https://grafana.example.com:3000@auth"
+lxc config set admin-tool user.proxy "https://admin.example.com:8080@auth:admins,devops"
+terrariumctl proxy sync
+```
+
+`@auth` allows any authenticated user. `@auth:admins,devops` allows users in any listed group. Group names may contain letters, numbers, dots, underscores, and hyphens. External OIDC providers must emit a `groups` claim for group-restricted routes.
+
+TCP and UDP route formats:
+
+```text
+tcp://<public-port>:<container-port>
+udp://<public-port>:<container-port>
+```
+
+Examples:
+
+```bash
+lxc config set postgres user.proxy "tcp://15432:5432"
+lxc config set game user.proxy "udp://25565:25565"
+terrariumctl proxy sync
+```
+
+TCP/UDP routes are raw transport routes. They do not support `@auth`, hostnames, paths, or TLS termination. Terrarium creates a Traefik entrypoint and opens the matching managed UFW port.
+
+Operational rules:
+
+- The container must have an IPv4 address on the Terrarium network, or a managed host-loopback proxy backend.
+- The service inside the container must listen on `0.0.0.0`, not only `127.0.0.1`.
+- Run `terrariumctl proxy sync` after changing labels, or wait for the automatic sync timer.
+- Duplicate HTTP host/path claims and duplicate TCP/UDP public ports are rejected during sync.
+
 ## exec
 
 `terrariumctl exec` is Terrarium's safer wrapper around `lxc exec`.

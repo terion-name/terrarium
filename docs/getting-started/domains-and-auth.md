@@ -28,6 +28,70 @@ If you provide a custom root domain like `--domain example.com`, Terrarium autom
 
 These domains are strictly for management and explicitly published services. A service running inside a container is not reachable from the outside until you deliberately publish it.
 
+## Published App Route Labels
+
+Container apps become public only when you add a `user.proxy` label to the LXD instance. The label tells Terrarium which public domain to serve and which private port inside the container to forward to.
+
+For normal web apps, use this format:
+
+```text
+https://<public-host>[:container-port][/path][@auth[:group[,group...]]]
+```
+
+Examples:
+
+```bash
+lxc config set my-app user.proxy "https://app.example.com:8080"
+lxc config set admin-ui user.proxy "https://admin.example.com:3000@auth"
+lxc config set dev-tool user.proxy "https://dev.example.com:8080@auth:admins,devops"
+terrariumctl proxy sync
+```
+
+In the LXD UI, open the instance, go to **Configuration**, choose **Edit YAML**, and add the label under `config:`:
+
+```yaml
+config:
+  user.proxy: https://app.example.com:8080
+```
+
+Save the YAML, then wait for a minute or run `terrariumctl proxy sync` from the host shell if you want the route applied immediately.
+
+What each part means:
+
+- `https://app.example.com` is the public domain Traefik will serve.
+- `:8080` is the port inside the container. If omitted, Terrarium uses container port `80`.
+- `/path` is optional and is matched as a path prefix.
+- `@auth` requires a successful OIDC login before traffic reaches the app.
+- `@auth:admins,devops` also requires membership in one of those groups.
+
+Use `https://` for normal public routes. Terrarium will request a Let's Encrypt certificate and redirect plain HTTP to HTTPS. Query strings and URL fragments are not part of route labels. Wildcard route hosts such as `*.example.com` are not supported; each published hostname needs its own explicit label.
+
+You can publish more than one route from the same container by separating routes with commas or newlines:
+
+```bash
+lxc config set my-app user.proxy "https://app.example.com:8080,https://api.example.com:3000/api"
+terrariumctl proxy sync
+```
+
+Raw TCP and UDP routes are also supported:
+
+```text
+tcp://<public-port>:<container-port>
+udp://<public-port>:<container-port>
+```
+
+Examples:
+
+```bash
+lxc config set postgres user.proxy "tcp://15432:5432"
+lxc config set game user.proxy "udp://25565:25565"
+terrariumctl proxy sync
+```
+
+TCP and UDP routes do not support domains, paths, TLS termination, or `@auth`. Terrarium creates a dedicated Traefik entrypoint and opens the matching managed firewall port.
+
+For every label format, the service inside the container must listen on `0.0.0.0`, not only `127.0.0.1`. Terrarium syncs labels automatically every minute, but `terrariumctl proxy sync` applies changes immediately.
+
 ## Email Settings
 
 - `--email`: Sets the primary Terrarium contact/admin email and is used as the default ZITADEL bootstrap admin email.
