@@ -1,0 +1,11 @@
+# Terrarium shell completion bootstrap.
+#
+# bash-completion normally lazy-loads /usr/share/bash-completion/completions
+# entries, but freshly updated hosts and minimal root shells do not always have
+# that machinery active. Load Terrarium completion explicitly for interactive
+# Bash shells while keeping non-interactive shell startup untouched.
+if [ -n "${BASH_VERSION:-}" ] && case "$-" in *i*) true ;; *) false ;; esac; then
+  if ! complete -p terrariumctl >/dev/null 2>&1 && [ -r /usr/share/bash-completion/completions/terrariumctl ]; then
+    . /usr/share/bash-completion/completions/terrariumctl
+  fi
+fi

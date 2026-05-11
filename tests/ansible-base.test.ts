@@ -92,7 +92,18 @@ describe("terrariumctl install alias", () => {
     expect(tasks).toContain("/usr/local/share/zsh/site-functions/_trm");
     expect(tasks).toContain("/usr/share/fish/vendor_completions.d/terrariumctl.fish");
     expect(tasks).toContain("/usr/share/fish/vendor_completions.d/trm.fish");
+    expect(tasks).toContain("Install Terrarium Bash completion profile loader");
+    expect(tasks).toContain("/etc/profile.d/terrariumctl-completion.sh");
     expect(tasks).toContain("and terrarium_trm_alias.stat.lnk_source == \"/usr/local/bin/terrariumctl\"");
+  });
+
+  test("loads bash completion explicitly for interactive shells", () => {
+    const template = readFileSync(join(repoRoot, "ansible/roles/base/templates/terrariumctl-completion.sh.j2"), "utf8");
+
+    expect(template).toContain('${BASH_VERSION:-}');
+    expect(template).toContain('case "$-" in *i*)');
+    expect(template).toContain("complete -p terrariumctl");
+    expect(template).toContain("/usr/share/bash-completion/completions/terrariumctl");
   });
 });
 

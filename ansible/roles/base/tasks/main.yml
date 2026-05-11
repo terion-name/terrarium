@@ -157,6 +157,12 @@
       and terrarium_trm_alias.stat.lnk_source == "/usr/local/bin/terrariumctl"
     )
 
+- name: Install Terrarium Bash completion profile loader
+  ansible.builtin.template:
+    src: terrariumctl-completion.sh.j2
+    dest: /etc/profile.d/terrariumctl-completion.sh
+    mode: "0644"
+
 - name: Ensure root has a local password for Cockpit
   ansible.builtin.user:
     name: root

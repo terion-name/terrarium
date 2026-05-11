@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { completionScript } from "./completion";
+import { commandCompletionCandidates, completionScript } from "./completion";
 
 describe("terrariumctl completion", () => {
   test("generates bash completion for terrariumctl and trm", () => {
@@ -15,6 +15,12 @@ describe("terrariumctl completion", () => {
     expect(script).toContain("--skip-reconfigure");
     expect(script).toContain("--storage-source");
     expect(script).toContain("local oidc");
+  });
+
+  test("completes root command prefixes", () => {
+    expect(commandCompletionCandidates("st")).toEqual(["status"]);
+    expect(commandCompletionCandidates("re")).toEqual(["reconfigure"]);
+    expect(commandCompletionCandidates("")).toContain("install");
   });
 
   test("generates zsh and fish completion for the installed aliases", () => {

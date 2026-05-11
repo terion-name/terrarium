@@ -137,6 +137,10 @@ const optionGroups: Record<string, string[]> = {
   ]
 };
 
+export function commandCompletionCandidates(prefix: string): string[] {
+  return commands.filter((command) => command.startsWith(prefix));
+}
+
 function words(values: string[]): string {
   return values.join(" ");
 }
