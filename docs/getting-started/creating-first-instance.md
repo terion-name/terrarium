@@ -26,7 +26,7 @@ You can choose whether you want to work through the browser or the terminal. Bot
 If you prefer the terminal, you can create the exact same container in one command. SSH into your Terrarium host and run:
 
 ```bash
-lxc launch images:ubuntu/24.04 my-first-app
+lxc launch ubuntu:24.04 my-first-app
 ```
 
 *(By default, Terrarium automatically applies its secure container profile, which puts the container on the private `terrarium-ovn` network and gives it its own isolated ZFS storage.)*

@@ -19,7 +19,7 @@ Terrarium is designed for this. By default, the `ubuntu/24.04` image is pre-conf
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 my-stack --profile dev
+lxc launch ubuntu:24.04 my-stack --profile dev
 ```
 
 *(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new instance named `my-stack` with the `dev` profile.)*

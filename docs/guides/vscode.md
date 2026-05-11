@@ -17,7 +17,7 @@ Let's spin up a fresh container just for coding.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 devbox --profile dev
+lxc launch ubuntu:24.04 devbox --profile dev
 ```
 
 *(You can also use the **LXD UI** at `lxd.<your-domain>`; choose the `dev` profile.)*

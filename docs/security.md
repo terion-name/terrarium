@@ -51,7 +51,7 @@ Terrarium's managed LXD profiles create a normal `terrarium` user inside new clo
 For development containers and AI-agent sandboxes that need to install packages, use the standalone `dev` profile:
 
 ```bash
-lxc launch images:ubuntu/24.04 devbox --profile dev
+lxc launch ubuntu:24.04 devbox --profile dev
 trm exec devbox
 ```
 

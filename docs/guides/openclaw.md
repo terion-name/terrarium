@@ -14,7 +14,7 @@ First, let's create a fresh LXC container specifically for OpenClaw.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 openclaw --profile dev
+lxc launch ubuntu:24.04 openclaw --profile dev
 ```
 
 *(You can also do this visually through the **LXD UI** at `lxd.<your-domain>`. Create an `ubuntu/24.04` instance named `openclaw` and choose the `dev` profile.)*

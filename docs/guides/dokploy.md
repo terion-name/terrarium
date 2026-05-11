@@ -18,7 +18,7 @@ First, we need a container for the Dokploy control panel.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 dokploy --profile dev
+lxc launch ubuntu:24.04 dokploy --profile dev
 ```
 
 The `dev` profile lets the `terrarium` user run the installer with sudo without using root as the normal working account.
@@ -48,7 +48,7 @@ Head to `https://dokploy.example.com` and create your first admin account.
 Now we need a separate container for your actual apps to run on. We'll call this one `apps-a`.
 
 ```bash
-lxc launch images:ubuntu/24.04 apps-a
+lxc launch ubuntu:24.04 apps-a
 ```
 
 Dokploy currently requires root access for remote deployment servers, so this guide keeps root SSH enabled inside the app-server container with key-only authentication. This is still isolated from the host by Terrarium's unprivileged LXD boundary.

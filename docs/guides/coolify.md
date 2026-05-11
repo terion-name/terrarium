@@ -17,7 +17,7 @@ This gives Coolify the SSH-managed server architecture it expects, while Terrari
 First, let's create a container just for the Coolify dashboard.
 
 ```bash
-lxc launch images:ubuntu/24.04 coolify --profile dev
+lxc launch ubuntu:24.04 coolify --profile dev
 ```
 
 The `dev` profile lets the `terrarium` user run the installer with sudo without using root as the normal working account.
@@ -58,7 +58,7 @@ terrariumctl proxy sync
 Now we need a place for your actual apps to run. Let's create a new "deployment server" container.
 
 ```bash
-lxc launch images:ubuntu/24.04 apps-server-1 --profile dev
+lxc launch ubuntu:24.04 apps-server-1 --profile dev
 ```
 
 Coolify supports non-root server users when the user has SSH key access and passwordless sudo. Its docs currently mark this as experimental, which fits Terrarium's `dev` profile model: Coolify connects as `terrarium`, and `terrarium` can use sudo while preparing deployments.

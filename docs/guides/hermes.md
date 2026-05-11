@@ -12,7 +12,7 @@ You can do this visually in the LXD UI or from the CLI.
 
 **From the CLI:**
 ```bash
-lxc launch images:ubuntu/24.04 hermes --profile dev
+lxc launch ubuntu:24.04 hermes --profile dev
 ```
 
 *(You can also use the **LXD UI** at `lxd.<your-domain>` to create a new `ubuntu/24.04` instance named `hermes` with the `dev` profile.)*
