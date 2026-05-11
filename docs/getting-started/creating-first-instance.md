@@ -49,7 +49,7 @@ lxc exec my-first-app -- bash
 Once you are inside the container's shell, run this command to start a simple Python web server on port `8080`:
 
 ```bash
-python3 -m http.server 8080
+nohup python3 -m http.server 8080 >/tmp/http-server.log 2>&1 &
 ```
 
 Right now, that web server is running entirely privately. It is only accessible to other containers on your Terrarium network. The public internet cannot see it.
