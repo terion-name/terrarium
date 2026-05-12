@@ -20,6 +20,8 @@ describe("terrarium update command", () => {
     expect(update).toContain('existsSync("/opt/bun/bin/bun") ? "/opt/bun/bin/bun" : "bun"');
     expect(update).toContain("installAnsibleCollections");
     expect(update).toContain("reconfigureCmd({ applyHardening: false })");
+    expect(update).toContain("installCompiledCli");
+    expect(update).toContain('"completion", "all", "install"');
     expect(update).not.toContain("interactiveConfig");
     expect(update).not.toContain("confirmDestructiveActions");
   });

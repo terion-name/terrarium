@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runText } from "../lib/common";
@@ -10,6 +10,8 @@ const BUNDLE_DIR = process.env.TERRARIUM_BUNDLE_DIR ?? "";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
 const GITHUB_REPO = process.env.TERRARIUM_GITHUB_REPO ?? "terion-name/terrarium";
 const ANSIBLE_GALAXY_ATTEMPTS = 4;
+const INSTALLED_CLI = "/usr/local/bin/terrariumctl";
+const TRM_ALIAS = "/usr/local/bin/trm";
 
 export type UpdateOptions = {
   ref?: string;
@@ -157,6 +159,29 @@ async function ensureUpdateDependencies(): Promise<void> {
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "ca-certificates", "curl", "git", "ansible", "python3", "jq", "unzip"], PREFIX);
 }
 
+function trmAliasIsManaged(): boolean {
+  if (!existsSync(TRM_ALIAS)) {
+    return true;
+  }
+  try {
+    return lstatSync(TRM_ALIAS).isSymbolicLink() && readlinkSync(TRM_ALIAS) === INSTALLED_CLI;
+  } catch {
+    return false;
+  }
+}
+
+function installCompiledCli(): void {
+  const source = join(REPO_DIR, "dist", "terrariumctl");
+  const staged = `${INSTALLED_CLI}.new-${process.pid}`;
+  copyFileSync(source, staged);
+  chmodSync(staged, 0o755);
+  renameSync(staged, INSTALLED_CLI);
+  if (trmAliasIsManaged()) {
+    rmSync(TRM_ALIAS, { force: true });
+    symlinkSync(INSTALLED_CLI, TRM_ALIAS);
+  }
+}
+
 export async function updateCmd(options: UpdateOptions = {}): Promise<void> {
   requireRoot();
   await ensureUpdateDependencies();
@@ -184,6 +209,9 @@ export async function updateCmd(options: UpdateOptions = {}): Promise<void> {
 
     if (options.reconfigure !== false) {
       await reconfigureCmd({ applyHardening: false });
+    } else {
+      installCompiledCli();
+      await runText([INSTALLED_CLI, "completion", "all", "install"], PREFIX);
     }
   } finally {
     if (downloadedBundle) {

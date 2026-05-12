@@ -82,28 +82,17 @@ describe("terrariumctl install alias", () => {
   test("registers shell completions for terrariumctl and trm", () => {
     const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");
 
-    expect(tasks).toContain("Create shell completion directories");
-    expect(tasks).toContain("/usr/local/bin/terrariumctl completion bash");
-    expect(tasks).toContain("/usr/local/bin/terrariumctl completion zsh");
-    expect(tasks).toContain("/usr/local/bin/terrariumctl completion fish");
-    expect(tasks).toContain("/usr/share/bash-completion/completions/terrariumctl");
-    expect(tasks).toContain("/usr/share/bash-completion/completions/trm");
-    expect(tasks).toContain("/usr/local/share/zsh/site-functions/_terrariumctl");
-    expect(tasks).toContain("/usr/local/share/zsh/site-functions/_trm");
-    expect(tasks).toContain("/usr/share/fish/vendor_completions.d/terrariumctl.fish");
-    expect(tasks).toContain("/usr/share/fish/vendor_completions.d/trm.fish");
-    expect(tasks).toContain("Install Terrarium Bash completion profile loader");
-    expect(tasks).toContain("/etc/profile.d/terrariumctl-completion.sh");
-    expect(tasks).toContain("and terrarium_trm_alias.stat.lnk_source == \"/usr/local/bin/terrariumctl\"");
+    expect(tasks).toContain("Install Terrarium shell completions for available shells");
+    expect(tasks).toContain("/usr/local/bin/terrariumctl completion all install");
   });
 
   test("loads bash completion explicitly for interactive shells", () => {
-    const template = readFileSync(join(repoRoot, "ansible/roles/base/templates/terrariumctl-completion.sh.j2"), "utf8");
+    const completion = readFileSync(join(repoRoot, "scripts/ctl/completion.ts"), "utf8");
 
-    expect(template).toContain('${BASH_VERSION:-}');
-    expect(template).toContain('case "$-" in *i*)');
-    expect(template).toContain("complete -p terrariumctl");
-    expect(template).toContain("/usr/share/bash-completion/completions/terrariumctl");
+    expect(completion).toContain('${BASH_VERSION:-}');
+    expect(completion).toContain('case "$-" in *i*)');
+    expect(completion).toContain("complete -p terrariumctl");
+    expect(completion).toContain("terrariumctl-completion.sh");
   });
 });
 

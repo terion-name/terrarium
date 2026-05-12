@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { CONFIG_PATH, PREFIX } from "./context";
-import { runText } from "../lib/common";
+import { runInteractive } from "../lib/common";
 import { exportClusterStoreToConfigFile } from "../lib/config-store";
 
 export type ReconfigureOptions = {
@@ -20,6 +20,7 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
     throw new Error("compiled Terrarium binaries are missing from /opt/terrarium/dist; rerun install.sh");
   }
 
+  console.log(`${PREFIX}: exporting saved configuration to ${CONFIG_PATH}`);
   exportClusterStoreToConfigFile(CONFIG_PATH, PREFIX);
 
   const args = ["ansible-playbook", "-i", "inventory.ini", "site.yml", "-e", `@${CONFIG_PATH}`];
@@ -27,9 +28,7 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
     args.push("-e", "terrarium_apply_hardening=false");
   }
 
-  await runText(
-    args,
-    PREFIX,
-    { cwd: "/opt/terrarium/ansible" }
-  );
+  console.log(`${PREFIX}: running Ansible reconciliation`);
+  await runInteractive(args, PREFIX, { cwd: "/opt/terrarium/ansible" });
+  console.log(`${PREFIX}: reconfigure finished`);
 }

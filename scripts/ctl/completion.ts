@@ -1,4 +1,21 @@
+import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 export type CompletionShell = "bash" | "zsh" | "fish";
+export type CompletionInstallShell = CompletionShell | "all";
+
+type CompletionInstallResult = {
+  shell: CompletionShell;
+  installed: boolean;
+  path?: string;
+  reason?: string;
+};
+
+const DEFAULT_BASH_COMPLETION_DIR = "/usr/share/bash-completion/completions";
+const DEFAULT_ZSH_COMPLETION_DIR = "/usr/local/share/zsh/site-functions";
+const DEFAULT_FISH_COMPLETION_DIR = "/usr/share/fish/vendor_completions.d";
+const DEFAULT_PROFILE_D_DIR = "/etc/profile.d";
+const DEFAULT_BIN_DIR = "/usr/local/bin";
 
 const commands = [
   "install",
@@ -24,7 +41,7 @@ const actions: Record<string, string[]> = {
   mount: ["add", "attach", "remove", "list"],
   idp: ["sync", "status", "logs", "backup", "restore"],
   set: ["domains", "emails", "idp", "dns", "s3", "syncoid"],
-  completion: ["bash", "zsh", "fish"]
+  completion: ["bash", "zsh", "fish", "all"]
 };
 
 const optionGroups: Record<string, string[]> = {
@@ -155,6 +172,160 @@ export function completionScript(shell: CompletionShell): string {
   return fishCompletion();
 }
 
+function pathEnv(): string[] {
+  return (process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    .split(":")
+    .filter(Boolean);
+}
+
+function executableExists(name: string): boolean {
+  return pathEnv().some((directory) => {
+    try {
+      accessSync(join(directory, name), constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function shellListed(name: string): boolean {
+  try {
+    return readFileSync("/etc/shells", "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .some((line) => line === name || line.endsWith(`/${name}`));
+  } catch {
+    return false;
+  }
+}
+
+function forcedCompletionShells(): Set<CompletionShell> | undefined {
+  const raw = process.env.TERRARIUM_COMPLETION_SHELLS?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  return new Set(
+    raw
+      .split(/[,\s]+/)
+      .map((shell) => shell.trim())
+      .filter((shell): shell is CompletionShell => ["bash", "zsh", "fish"].includes(shell))
+  );
+}
+
+function shellIsAvailable(shell: CompletionShell): boolean {
+  const forced = forcedCompletionShells();
+  if (forced) {
+    return forced.has(shell);
+  }
+  return executableExists(shell) || shellListed(shell);
+}
+
+function bashCompletionDir(): string {
+  return process.env.TERRARIUM_BASH_COMPLETION_DIR || DEFAULT_BASH_COMPLETION_DIR;
+}
+
+function zshCompletionDir(): string {
+  return process.env.TERRARIUM_ZSH_COMPLETION_DIR || DEFAULT_ZSH_COMPLETION_DIR;
+}
+
+function fishCompletionDir(): string {
+  return process.env.TERRARIUM_FISH_COMPLETION_DIR || DEFAULT_FISH_COMPLETION_DIR;
+}
+
+function profileDDir(): string {
+  return process.env.TERRARIUM_PROFILE_D_DIR || DEFAULT_PROFILE_D_DIR;
+}
+
+function binDir(): string {
+  return process.env.TERRARIUM_BIN_DIR || DEFAULT_BIN_DIR;
+}
+
+function completionPath(shell: CompletionShell, command: "terrariumctl" | "trm"): string {
+  if (shell === "bash") {
+    return join(bashCompletionDir(), command);
+  }
+  if (shell === "zsh") {
+    return join(zshCompletionDir(), `_${command}`);
+  }
+  return join(fishCompletionDir(), `${command}.fish`);
+}
+
+function bashProfileLoaderPath(): string {
+  return join(profileDDir(), "terrariumctl-completion.sh");
+}
+
+function bashProfileLoader(): string {
+  return `# Terrarium shell completion bootstrap.
+
+# bash-completion normally lazy-loads /usr/share/bash-completion/completions
+# entries, but freshly updated hosts and minimal root shells do not always have
+# that machinery active. Load Terrarium completion explicitly for interactive
+# Bash shells while keeping non-interactive shell startup untouched.
+if [ -n "\${BASH_VERSION:-}" ]; then
+  case "$-" in *i*)
+    if ! complete -p terrariumctl >/dev/null 2>&1 && [ -r ${completionPath("bash", "terrariumctl")} ]; then
+      . ${completionPath("bash", "terrariumctl")}
+    fi
+  ;; esac
+fi
+`;
+}
+
+function managedTrmAliasExists(): boolean {
+  const trmPath = join(binDir(), "trm");
+  if (!existsSync(trmPath)) {
+    return false;
+  }
+  try {
+    const stat = lstatSync(trmPath);
+    if (!stat.isSymbolicLink()) {
+      return false;
+    }
+    const target = readlinkSync(trmPath);
+    return target === join(binDir(), "terrariumctl") || target === "/usr/local/bin/terrariumctl";
+  } catch {
+    return false;
+  }
+}
+
+function writeFile(path: string, content: string, mode = 0o644): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
+  writeFileSync(path, content, { mode });
+  chmodSync(path, mode);
+}
+
+function replaceSymlink(path: string, target: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
+  rmSync(path, { force: true });
+  symlinkSync(target, path);
+}
+
+function installCompletionScript(shell: CompletionShell): CompletionInstallResult {
+  const primaryPath = completionPath(shell, "terrariumctl");
+  writeFile(primaryPath, completionScript(shell));
+
+  if (managedTrmAliasExists()) {
+    replaceSymlink(completionPath(shell, "trm"), primaryPath);
+  }
+
+  if (shell === "bash") {
+    writeFile(bashProfileLoaderPath(), bashProfileLoader());
+  }
+
+  return { shell, installed: true, path: primaryPath };
+}
+
+export function installCompletionScripts(shell: CompletionInstallShell): CompletionInstallResult[] {
+  const shells: CompletionShell[] = shell === "all" ? ["bash", "zsh", "fish"] : [shell];
+  return shells.map((candidate) => {
+    if (shell === "all" && !shellIsAvailable(candidate)) {
+      return { shell: candidate, installed: false, reason: `${candidate} is not installed` };
+    }
+    return installCompletionScript(candidate);
+  });
+}
+
 function bashCompletion(): string {
   return `# terrariumctl bash completion
 _terrariumctl_complete() {
@@ -203,6 +374,8 @@ _terrariumctl_complete() {
         COMPREPLY=( $(compgen -W "smb cifs" -- "\${cur}") )
       elif [[ "\${command}" == "cluster" && "\${COMP_WORDS[2]}" == "ovn" ]]; then
         COMPREPLY=( $(compgen -W "configure" -- "\${cur}") )
+      elif [[ "\${command}" == "completion" ]]; then
+        COMPREPLY=( $(compgen -W "install" -- "\${cur}") )
       fi
       ;;
   esac
@@ -257,6 +430,8 @@ _terrariumctl() {
     compadd smb cifs
   elif [[ "$words[2]" == "cluster" && "$words[3]" == "ovn" ]]; then
     compadd configure
+  elif [[ "$words[2]" == "completion" ]]; then
+    compadd install
   fi
 }
 
@@ -284,6 +459,7 @@ function fishCompletion(): string {
     lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from set; and __fish_seen_subcommand_from dns" -a "provider"`);
     lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from mount; and __fish_seen_subcommand_from add" -a "smb cifs"`);
     lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from cluster; and __fish_seen_subcommand_from ovn" -a "configure"`);
+    lines.push(`complete -c ${command} -f -n "__fish_seen_subcommand_from completion; and __fish_seen_subcommand_from bash zsh fish all" -a "install"`);
   }
   return `${lines.join("\n")}\n`;
 }

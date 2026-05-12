@@ -43,7 +43,7 @@ import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
 import { updateCmd } from "./ctl/update";
-import { completionScript, type CompletionShell } from "./ctl/completion";
+import { completionScript, installCompletionScripts, type CompletionInstallShell, type CompletionShell } from "./ctl/completion";
 
 /**
  * Prompts before destructive operations that alter persisted or mounted state.
@@ -112,11 +112,28 @@ cli
   });
 
 cli
-  .command("completion <shell>", "Print shell completion script: bash, zsh, or fish")
-  .usage("completion bash|zsh|fish")
-  .action((shell) => {
-    if (!["bash", "zsh", "fish"].includes(shell)) {
+  .command("completion <shell> [action]", "Print or install shell completion: bash, zsh, fish, or all")
+  .usage("completion bash|zsh|fish\n  completion bash|zsh|fish|all install")
+  .action((shell, action) => {
+    if (!["bash", "zsh", "fish", "all"].includes(shell)) {
       throw new Error(`unsupported completion shell: ${shell}`);
+    }
+    if (action) {
+      if (action !== "install") {
+        throw new Error(`unsupported completion action: ${action}`);
+      }
+      const results = installCompletionScripts(shell as CompletionInstallShell);
+      for (const result of results) {
+        if (result.installed) {
+          console.log(`installed ${result.shell} completion at ${result.path}`);
+        } else {
+          console.log(`skipped ${result.shell} completion: ${result.reason}`);
+        }
+      }
+      return;
+    }
+    if (shell === "all") {
+      throw new Error("completion all is only supported with the install action");
     }
     process.stdout.write(completionScript(shell as CompletionShell));
   });

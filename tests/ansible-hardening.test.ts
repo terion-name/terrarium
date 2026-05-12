@@ -17,6 +17,8 @@ describe("hardening role", () => {
     const system = readFileSync(join(repoRoot, "scripts/ctl/system.ts"), "utf8");
     expect(ctl).toContain("reconfigure: () => reconfigureCmd({ applyHardening: false })");
     expect(system).toContain("terrarium_apply_hardening=false");
+    expect(system).toContain("running Ansible reconciliation");
+    expect(system).toContain("runInteractive(args");
   });
 
   test("preserves provider-injected SSH key revocation after sshd hardening", () => {

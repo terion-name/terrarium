@@ -40,7 +40,7 @@
 | `terrariumctl set idp local|oidc` | mode plus optional flags | n/a | Switches between self-hosted ZITADEL and external OIDC, verifies external OIDC settings when applicable, and reconfigures oauth2-proxy plus LXD management auth together. |
 | `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings, verifies the target with a real test operation, and can enable or disable S3 exports. |
 | `terrariumctl set syncoid` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates syncoid replication settings and can enable or disable syncoid. |
-| `terrariumctl completion` | `bash`, `zsh`, or `fish` | n/a | Prints a shell completion script. Installed hosts register completion for both `terrariumctl` and `trm` automatically. |
+| `terrariumctl completion` | `bash`, `zsh`, `fish`, or `all install` | print script unless `install` is used | Prints or installs shell completion. Install/update also refresh completion for detected shells automatically. |
 
 ## install
 
