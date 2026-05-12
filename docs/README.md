@@ -12,6 +12,16 @@ That gives you three things at once:
 
 And if you enable S3 exports, that time machine is not limited to the local disk. You also get an off-host disaster-recovery path for the day the whole VPS disappears.
 
+> [!TIP]
+> **Technical details in short**
+> This tool sets up and orchestrates LXD, Traefik, Firewall, Virtual Networking, clustering, ZFS and backups. 
+> 
+> LXD is a systen that runs LXC containers and VMs (we are focused on containers). LXC containers are Linux system containers that sit conceptually between Docker-style application containers and traditional VMs. Like Docker containers, they are lightweight and share the host kernel using Linux namespaces and cgroups. Unlike typical Docker usage, LXC is often used to run a full OS-like userspace with init, package management, services, users, and networking, giving a VM-like administration experience without hardware virtualization overhead. They can also run inside ordinary cloud VMs because they do not require nested virtualization, though their isolation is not as strong as a true VM because the kernel is shared with the host. 
+> 
+> Using ZFS brings to the mix cheap hot snapshots that give "time machine" like experience with ability to "rewind" containers state in small increments together with exportable backups. 
+> 
+> Traefik is a reverse proxy that lives on host and can pass traffic in containers (in case of Terrarium - autoconfigurated via labels on containers). All this works on single node or in a cluster, that is built upon OVN and secure wireguard internal connections.
+
 If you are new to Terrarium, start here:
 
 - [Getting Started](getting-started/README.md)
