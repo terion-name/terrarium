@@ -8,6 +8,21 @@ type UserResponse = { userId?: string };
 type AppResponse = { appId?: string; clientId?: string; clientSecret?: string };
 type SearchProjectResult = { result?: Array<{ id?: string; name?: string }> };
 type SearchAppResult = { result?: Array<{ id?: string; name?: string }> };
+type SearchUserResult = {
+  result?: Array<{
+    id?: string;
+    userId?: string;
+    userName?: string;
+    preferredLoginName?: string;
+    human?: {
+      userId?: string;
+      userName?: string;
+      preferredLoginName?: string;
+      email?: { email?: string };
+      profile?: { email?: string };
+    };
+  }>;
+};
 type ActionResult = { result?: Array<{ id?: string; name?: string; script?: string }> };
 type Flow = { flow?: { triggerActions?: Array<{ triggerType?: { id?: string }; actions?: Array<{ id?: string }> }> } };
 type FixtureOptions = {
@@ -41,6 +56,8 @@ export type ZitadelFixtureProgressHandler = (progress: ZitadelFixtureProgress) =
 
 const GROUPS_ACTION_NAME = "groupsClaim";
 const DENIED_ROUTE_ROLE = "bystanders";
+const INTEGRATION_PROJECT_NAME_PATTERN = /^terrarium-(?:gha|local)-[a-z0-9-]+$/;
+const INTEGRATION_USER_EMAIL_PATTERN = /^(?:admin|agent|denied)\+(?:gha|local)-[a-z0-9-]+@example\.net$/;
 const GROUPS_ACTION_SCRIPT = `function groupsClaim(ctx, api) {
   var groups = [];
   if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
@@ -232,6 +249,24 @@ export class ZitadelCloudProvider {
 
   async verifyManagementAccess(): Promise<void> {
     await this.api("POST", "/management/v1/projects/_search", {});
+  }
+
+  async cleanupStaleIntegrationFixtures(): Promise<void> {
+    const users = await this.api<SearchUserResult>("POST", "/management/v1/users/_search", {});
+    for (const user of users.result ?? []) {
+      const userId = user.userId ?? user.id ?? user.human?.userId ?? "";
+      const email = user.human?.email?.email ?? user.human?.profile?.email ?? user.preferredLoginName ?? user.userName ?? user.human?.preferredLoginName ?? user.human?.userName ?? "";
+      if (userId && INTEGRATION_USER_EMAIL_PATTERN.test(email)) {
+        await this.deleteUser(userId);
+      }
+    }
+
+    const projects = await this.api<SearchProjectResult>("POST", "/management/v1/projects/_search", {});
+    for (const project of projects.result ?? []) {
+      if (project.id && project.name && INTEGRATION_PROJECT_NAME_PATTERN.test(project.name)) {
+        await this.deleteProject(project.id);
+      }
+    }
   }
 
   private async createProject(name: string): Promise<string> {

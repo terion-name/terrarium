@@ -190,6 +190,11 @@ export class IntegrationContext {
     });
   }
 
+  async cleanupStaleZitadelFixtures(): Promise<void> {
+    this.logger.info("cleanup stale ZITADEL integration fixtures");
+    await this.zitadelCloud.cleanupStaleIntegrationFixtures();
+  }
+
   host(label: string, server: ServerRecord, domains: DomainBundle, volume?: VolumeRecord): ManagedHost {
     return { label, server, domains, volume };
   }

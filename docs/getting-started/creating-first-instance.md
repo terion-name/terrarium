@@ -26,7 +26,7 @@ You can choose whether you want to work through the browser or the terminal. Bot
 If you prefer the terminal, you can create the exact same container in one command. SSH into your Terrarium host and run:
 
 ```bash
-lxc launch ubuntu:24.04 my-first-app
+trm launch ubuntu:24.04 my-first-app
 ```
 
 *(By default, Terrarium automatically applies its secure container profile, which puts the container on the private `terrarium-ovn` network and gives it its own isolated ZFS storage.)*
@@ -43,7 +43,7 @@ For this example, let's just run a tiny, temporary web server.
 
 **From the CLI:**
 ```bash
-lxc exec my-first-app -- bash
+trm exec my-first-app
 ```
 
 Once you are inside the container's shell, run this command to start a simple Python web server on port `8080`:
@@ -80,6 +80,12 @@ On the Terrarium host terminal (not inside the container), run:
 
 ```bash
 lxc config set my-first-app user.proxy "https://my-app.example.com:8080"
+```
+
+You can also set the route during launch:
+
+```bash
+trm launch ubuntu:24.04 my-first-app --proxy https://my-app.example.com:8080
 ```
 
 ## 4. Applying the Change

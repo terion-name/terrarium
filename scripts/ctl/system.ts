@@ -7,6 +7,21 @@ export type ReconfigureOptions = {
   applyHardening?: boolean;
 };
 
+const BLOCKING_STDIO_EXEC = `
+import fcntl
+import os
+import sys
+
+for fd in (0, 1, 2):
+    try:
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+    except OSError:
+        pass
+
+os.execvp(sys.argv[1], sys.argv[1:])
+`;
+
 /**
  * Re-runs the installed Ansible reconciliation against the persisted host config.
  *
@@ -29,6 +44,6 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
   }
 
   console.log(`${PREFIX}: running Ansible reconciliation`);
-  await runInteractive(args, PREFIX, { cwd: "/opt/terrarium/ansible" });
+  await runInteractive(["python3", "-c", BLOCKING_STDIO_EXEC, ...args], PREFIX, { cwd: "/opt/terrarium/ansible" });
   console.log(`${PREFIX}: reconfigure finished`);
 }

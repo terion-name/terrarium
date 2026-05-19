@@ -43,6 +43,8 @@ describe("terrariumctl completion", () => {
     expect(script).toContain("list export restore");
     expect(script).toContain("update");
     expect(script).toContain("update) COMPREPLY");
+    expect(script).toContain("launch) COMPREPLY");
+    expect(script).toContain("--profile --disk --memory --cpu --requirements --playbook --role --docker-compose --cloud-init --proxy");
     expect(script).toContain("--ref --skip-reconfigure --non-interactive");
     expect(script).toContain("--skip-reconfigure");
     expect(script).toContain("--storage-source");
@@ -63,6 +65,7 @@ describe("terrariumctl completion", () => {
 
     expect(zsh).toContain("#compdef terrariumctl trm");
     expect(zsh).toContain("update) opts=(--ref --skip-reconfigure --non-interactive)");
+    expect(zsh).toContain("launch) opts=(--profile --disk --memory --cpu --requirements --playbook --role --docker-compose --cloud-init --proxy)");
     expect(zsh).toContain("compadd local oidc");
     expect(zsh).toContain("compadd provider");
     expect(fish).toContain("complete -c terrariumctl");

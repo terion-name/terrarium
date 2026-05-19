@@ -8,6 +8,7 @@
 | --- | --- | --- | --- |
 | `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host, including preflight verification for external OIDC and S3 when enabled. |
 | `terrariumctl status` | none | n/a | Shows Terrarium service status, management endpoints, IDP mode, admin group, and the oauth2-proxy state. |
+| `terrariumctl launch` | required: image and instance name; optional provisioning flags | normal LXD launch with optional generated cloud-init | Launches an LXD container, optionally applying resource limits, generated Ansible/Docker Compose provisioning, and a Terrarium `user.proxy` label. |
 | `terrariumctl exec` | required: instance name; optional command after `--`, `--root`, `--user` | `terrarium` login shell | Opens a shell or runs a command inside a container as the non-root `terrarium` user by default. |
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
@@ -41,6 +42,63 @@
 | `terrariumctl set s3` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates S3 backup settings, verifies the target with a real test operation, and can enable or disable S3 exports. |
 | `terrariumctl set syncoid` | optional flags | keeps current enable/disable state unless `--enable` or `--disable` is passed | Updates syncoid replication settings and can enable or disable syncoid. |
 | `terrariumctl completion` | `bash`, `zsh`, `fish`, or `all install` | print script unless `install` is used | Prints or installs shell completion. Install/update also refresh completion for detected shells automatically. |
+
+## launch
+
+`trm launch` wraps `lxc launch` and adds Terrarium provisioning shortcuts. Basic LXD-style launches work as expected:
+
+```bash
+trm launch ubuntu:24.04 web-01
+trm launch ubuntu:24.04 web-01 --profile dev
+trm launch ubuntu:24.04 web-01 --disk 40G --memory 4G --cpu 2
+```
+
+For a more practical walkthrough with Ansible, Docker Compose, variables, Git assets, and proxy labels, see [Templating Containers with `trm launch`](../guides/templating.md).
+
+Provisioning flags generate cloud-init user-data that installs the needed packages and runs inside the new container:
+
+```bash
+trm launch ubuntu:24.04 web-01 --playbook ./site.yml
+trm launch ubuntu:24.04 web-01 --requirements ./requirements.yml --playbook ./site.yml
+trm launch ubuntu:24.04 docker-01 --role geerlingguy.docker
+trm launch ubuntu:24.04 app-01 --docker-compose ./docker-compose.yml
+```
+
+`--requirements`, `--playbook`, `--role`, and `--docker-compose` can each be passed multiple times and can be combined. Local files are embedded into cloud-init. Git assets use this form:
+
+```bash
+trm launch ubuntu:24.04 app-01 \
+  --requirements ./requirements.yml \
+  --playbook git+https://github.com/org/repo.git//site.yml?ref=v1.0.0 \
+  --docker-compose git+https://github.com/org/repo.git//docker-compose.yml?ref=v1.0.0
+```
+
+Launch variables can be passed inline or through dotenv files:
+
+```bash
+trm launch ubuntu:24.04 app-01 \
+  --vars ./app.env \
+  --var APP_VERSION=1.2.3 \
+  --playbook ./site.yml \
+  --docker-compose ./docker-compose.yml
+```
+
+Variables are exported to generated provisioning commands, passed to Ansible as extra vars, and supplied to Docker Compose with `--env-file`. Inline `--var KEY=value` entries override the same key from earlier `--vars` files.
+
+To provide your own cloud-init completely, use `--cloud-init`. It cannot be combined with the generated Ansible or Docker Compose shortcuts:
+
+```bash
+trm launch ubuntu:24.04 raw-01 --cloud-init ./user-data.yml
+```
+
+`--proxy` validates and sets the Terrarium `user.proxy` label at launch time. Repeat it to publish multiple routes:
+
+```bash
+trm launch ubuntu:24.04 app-01 \
+  --docker-compose ./docker-compose.yml \
+  --proxy https://app.example.com:8080 \
+  --proxy https://admin.example.com:3000@auth:admins
+```
 
 ## install
 

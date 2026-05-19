@@ -4,6 +4,7 @@ import {
   assertInstalledHost,
   captureFailureArtifacts,
   createHttpFixtureContainer,
+  createLaunchFixtureContainer,
   exerciseReconfiguration,
   expectedRouteAuthRedirectUris,
   installSyncoidKey,
@@ -25,6 +26,7 @@ import { expectHttpBodyContains, waitForHttpStatusResolved } from "../assertions
 /** Runs the high-signal real-infra smoke suite on one primary and one replica host. */
 export async function runSmokeSuite(context: IntegrationContext): Promise<void> {
   await context.zitadelCloud.verifyManagementAccess();
+  await context.cleanupStaleZitadelFixtures();
   const sshKeyId = await context.registerHetznerKey(`terrarium-${context.config.slug}`);
   const syncoidTargetDataset = `terrarium/replicated-${context.config.slug}`;
   const replica = await provisionHost(context, { label: "replica", withVolume: false }, sshKeyId);
@@ -82,6 +84,18 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
     await waitForHttpStatusResolved(`https://auth-${context.config.slug}.${rootDomain}`, [302], {
       resolveIp: primary.server.ipv4
     });
+
+    const launchRouteHost = `launch-${context.config.slug}.${rootDomain}`;
+    await createLaunchFixtureContainer(
+      primarySsh,
+      `launch-${context.config.slug}`,
+      `https://${launchRouteHost}:8080`,
+      "terrarium-launch-ok"
+    );
+    await expectHttpBodyContains(`https://${launchRouteHost}`, "terrarium-launch-ok", {
+      resolveIp: primary.server.ipv4
+    });
+
     await verifyLocalBackupRestore(primarySsh, `proxy-${context.config.slug}`);
     await verifyS3BackupRestore(primarySsh, `proxy-${context.config.slug}`);
     await verifySyncoid(primarySsh, replicaSsh, syncoidTargetDataset);

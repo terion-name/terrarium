@@ -40,6 +40,7 @@ import {
 } from "./ctl/mount";
 import { execCmd } from "./ctl/exec";
 import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
+import { launchCmd, launchOptionsFromCli } from "./ctl/launch";
 import { statusCmd } from "./ctl/status";
 import { reconfigureCmd } from "./ctl/system";
 import { updateCmd } from "./ctl/update";
@@ -136,6 +137,27 @@ cli
       throw new Error("completion all is only supported with the install action");
     }
     process.stdout.write(completionScript(shell as CompletionShell));
+  });
+
+cli
+  .command("launch <image> <name>", "Launch an LXD container with Terrarium provisioning shortcuts")
+  .option("--profile <profile>", "LXD profile to apply; can be repeated", STRING_OPTION)
+  .option("--disk <size>", "Root disk size, for example 40G", STRING_OPTION)
+  .option("--memory <size>", "Memory limit, for example 4G", STRING_OPTION)
+  .option("--cpu <count>", "CPU limit", STRING_OPTION)
+  .option("--requirements <pathOrGit>", "Ansible Galaxy requirements file; can be repeated", STRING_OPTION)
+  .option("--playbook <pathOrGit>", "Ansible playbook file; can be repeated", STRING_OPTION)
+  .option("--role <role>", "Ansible Galaxy role to install and run; can be repeated", STRING_OPTION)
+  .option("--docker-compose <pathOrGit>", "Docker Compose file to launch; can be repeated", STRING_OPTION)
+  .option("--var <keyValue>", "Launch variable KEY=value; exported to provisioning commands, Ansible, and Compose; can be repeated", STRING_OPTION)
+  .option("--vars <path>", "Dotenv file with launch variables; can be repeated", STRING_OPTION)
+  .option("--cloud-init <path>", "Raw cloud-init user-data file; cannot be combined with provisioning shortcuts", STRING_OPTION)
+  .option("--proxy <route>", "Set the Terrarium user.proxy label; can be repeated", STRING_OPTION)
+  .usage(
+    "launch IMAGE NAME [--profile PROFILE] [--disk 40G] [--memory 4G] [--cpu 2]\n  terrariumctl launch ubuntu:24.04 web-01 --playbook ./site.yml\n  terrariumctl launch ubuntu:24.04 app-01 --docker-compose ./docker-compose.yml --proxy https://app.example.com:8080"
+  )
+  .action(async (image, name, options) => {
+    await launchCmd(image as string, name as string, launchOptionsFromCli(options as Record<string, unknown>));
   });
 
 cli

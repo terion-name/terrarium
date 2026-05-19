@@ -18,7 +18,10 @@ describe("docs config", () => {
 
   test("documents the non-root container workflow and trm exec wrapper", () => {
     const security = readRepoFile("docs/security.md");
+    const docsConfig = readRepoFile("docs/.vitepress/config.mts");
     const reference = readRepoFile("docs/reference/terrariumctl.md");
+    const firstInstance = readRepoFile("docs/getting-started/creating-first-instance.md");
+    const templating = readRepoFile("docs/guides/templating.md");
     const guidePaths = [
       "docs/guides/openclaw.md",
       "docs/guides/hermes.md",
@@ -35,8 +38,21 @@ describe("docs config", () => {
     expect(security).toContain("day-to-day work should happen under `/home/terrarium`");
 
     expect(reference).toContain("| `terrariumctl exec` |");
+    expect(reference).toContain("| `terrariumctl launch` |");
+    expect(reference).toContain("trm launch ubuntu:24.04 app-01 --docker-compose ./docker-compose.yml");
+    expect(reference).toContain("Templating Containers with `trm launch`");
+    expect(docsConfig).toContain('link: "/guides/templating"');
+    expect(templating).toContain("trm launch ubuntu:24.04 customer-portal");
+    expect(templating).toContain("--vars ./portal.env");
+    expect(templating).toContain("--var APP_ENV=production");
+    expect(templating).toContain("git+https://github.com/org/repo.git//path/inside/repo.yml?ref=v1.0.0");
+    expect(templating).toContain("As Ansible extra vars through `--extra-vars`");
+    expect(templating).toContain("As Docker Compose variables through `--env-file`");
+    expect(templating).toContain("Raw cloud-init replaces Terrarium's generated template");
     expect(reference).toContain("trm exec my-stack");
     expect(reference).toContain("trm exec my-stack --root");
+    expect(firstInstance).toContain("trm launch ubuntu:24.04 my-first-app");
+    expect(firstInstance).toContain("trm launch ubuntu:24.04 my-first-app --proxy");
 
     expect(guides).toContain("--profile dev");
     expect(guides).toContain("trm exec");

@@ -512,6 +512,88 @@ ${setupCommand}
   await waitForDetachedCommand(host, setupStatusPath, setupLogPath, 20 * 60 * 1000);
 }
 
+/** Launches a small HTTP fixture through `trm launch` to verify generated cloud-init and launch-time proxy labels. */
+export async function createLaunchFixtureContainer(host: SshHost, containerName: string, label: string, bodyText: string): Promise<void> {
+  const setupId = randomUUID();
+  const playbookPath = `/root/${containerName}-launch-${setupId}.yml`;
+  const varsPath = `/root/${containerName}-launch-${setupId}.env`;
+  const setupLogPath = `/root/${containerName}-launch-${setupId}.log`;
+  const setupScriptPath = `/root/${containerName}-launch-${setupId}.sh`;
+  const setupRunnerPath = `/root/${containerName}-launch-runner-${setupId}.sh`;
+  const setupStatusPath = `/root/${containerName}-launch-${setupId}.exit`;
+  const playbook = `---
+- hosts: localhost
+  connection: local
+  become: true
+  tasks:
+    - name: Install Python HTTP fixture runtime
+      ansible.builtin.apt:
+        name: python3
+        update_cache: true
+        state: present
+    - name: Create fixture document root
+      ansible.builtin.file:
+        path: /srv/www
+        state: directory
+        mode: "0755"
+    - name: Write fixture body
+      ansible.builtin.copy:
+        dest: /srv/www/index.html
+        mode: "0644"
+        content: "{{ launch_body_text }}\n"
+    - name: Install fixture HTTP service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/terrarium-launch-fixture.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Terrarium launch integration HTTP fixture
+          After=network-online.target
+
+          [Service]
+          WorkingDirectory=/srv/www
+          ExecStart=/usr/bin/python3 -m http.server 8080 --directory /srv/www
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+    - name: Start fixture HTTP service
+      ansible.builtin.systemd:
+        name: terrarium-launch-fixture.service
+        daemon_reload: true
+        enabled: true
+        state: started
+`;
+
+  await deleteContainerIfPresent(host, containerName);
+  await host.write(
+    setupScriptPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+trap 'lxc exec ${shellArg(containerName)} -- tail -n 200 /var/log/cloud-init-output.log 2>/dev/null || true' ERR
+echo '[launch-fixture] write-playbook ${containerName}'
+cat > ${shellArg(playbookPath)} <<'EOF'
+${playbook}EOF
+cat > ${shellArg(varsPath)} <<'EOF'
+launch_body_text=from-vars-file
+EOF
+echo '[launch-fixture] launch ${containerName}'
+timeout 600s /usr/local/bin/trm launch ubuntu:24.04 ${shellArg(containerName)} --playbook ${shellArg(playbookPath)} --vars ${shellArg(varsPath)} --var ${shellArg(`launch_body_text=${bodyText}`)} --proxy ${shellArg(label)}
+echo '[launch-fixture] wait-cloud-init ${containerName}'
+timeout 900s lxc exec ${shellArg(containerName)} -- cloud-init status --wait
+echo '[launch-fixture] fixture-state ${containerName}'
+timeout 60s lxc exec ${shellArg(containerName)} -- systemctl is-active terrarium-launch-fixture.service
+timeout 60s lxc exec ${shellArg(containerName)} -- cat /srv/www/index.html
+echo '[launch-fixture] proxy-sync ${containerName}'
+timeout 300s ${remoteCtl("proxy sync")}
+echo '[launch-fixture] done ${containerName}'
+`,
+    "700"
+  );
+  await host.execDetached(shellArg(setupScriptPath), setupRunnerPath, setupStatusPath, setupLogPath);
+  await waitForDetachedCommand(host, setupStatusPath, setupLogPath, 25 * 60 * 1000);
+}
+
 /** Forces local snapshots, mutates container state, and verifies in-place restore. */
 export async function verifyLocalBackupRestore(host: SshHost, containerName: string): Promise<void> {
   const dataset = `terrarium/containers/${containerName}`;

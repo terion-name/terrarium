@@ -23,6 +23,7 @@ const commands = [
   "backup",
   "reconfigure",
   "update",
+  "launch",
   "exec",
   "config",
   "cluster",
@@ -86,6 +87,18 @@ const optionGroups: Record<string, string[]> = {
   ],
   backup: ["--source", "--instance", "--at", "--as-new"],
   update: ["--ref", "--skip-reconfigure", "--non-interactive"],
+  launch: [
+    "--profile",
+    "--disk",
+    "--memory",
+    "--cpu",
+    "--requirements",
+    "--playbook",
+    "--role",
+    "--docker-compose",
+    "--cloud-init",
+    "--proxy"
+  ],
   exec: ["--root", "--user"],
   cluster: [
     "--member",
@@ -339,6 +352,7 @@ _terrariumctl_complete() {
       install) COMPREPLY=( $(compgen -W "${words(optionGroups.install)} --help" -- "\${cur}") ) ;;
       backup) COMPREPLY=( $(compgen -W "${words(optionGroups.backup)} --help" -- "\${cur}") ) ;;
       update) COMPREPLY=( $(compgen -W "${words(optionGroups.update)} --help" -- "\${cur}") ) ;;
+      launch) COMPREPLY=( $(compgen -W "${words(optionGroups.launch)} --help" -- "\${cur}") ) ;;
       exec) COMPREPLY=( $(compgen -W "${words(optionGroups.exec)} --help" -- "\${cur}") ) ;;
       cluster) COMPREPLY=( $(compgen -W "${words(optionGroups.cluster)} --help" -- "\${cur}") ) ;;
       mount) COMPREPLY=( $(compgen -W "${words(optionGroups.mount)} --help" -- "\${cur}") ) ;;
@@ -409,6 +423,7 @@ _terrariumctl() {
     completion) actions=(${words(actions.completion)}) ;;
     install) opts=(${words(optionGroups.install)}) ;;
     update) opts=(${words(optionGroups.update)}) ;;
+    launch) opts=(${words(optionGroups.launch)}) ;;
     exec) opts=(${words(optionGroups.exec)}) ;;
   esac
 

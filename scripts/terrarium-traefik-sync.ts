@@ -488,6 +488,13 @@ function parseProxyItem(item: string): HttpProxyItem | TransportProxyItem {
   };
 }
 
+/** Validates the public `user.proxy` label grammar used by Terrarium route sync. */
+export function validateProxyLabel(label: string): void {
+  for (const item of splitProxyItems(label)) {
+    parseProxyItem(item);
+  }
+}
+
 function zitadelCurlBase(authDomain: string, pat: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string): string[] {
   const cmd = [
     "curl",

@@ -19,6 +19,7 @@ You can run databases, internal APIs, and experimental AI agents without worryin
 - **[VSCodium Web IDE](vscode.md):** The absolute best way to code in the cloud. Spin up a browser-based editor that is completely isolated and secured by SSO.
 - **[OpenClaw](openclaw.md):** Give the powerful autonomous AI agent a safe, disposable sandbox to execute code in.
 - **[Hermes](hermes.md):** Run agent-driven background services and expose only the user interface to the web.
+- **[Templating Containers with `trm launch`](templating.md):** Use Ansible, Galaxy roles, Docker Compose, variables, and proxy labels to launch ready-to-use containers in one command.
 - **[Docker Compose Stacks](compose.md):** The cleanest way to run multi-container apps (like a web server + Postgres + Redis) without making a mess of your host machine.
 - **[Dokploy](dokploy.md):** Turn your Terrarium containers into an automated, UI-driven deployment platform (like Heroku or Vercel).
 - **[Coolify](coolify.md):** Another excellent, self-hosted Heroku alternative that runs perfectly inside a single Terrarium LXC.

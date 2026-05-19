@@ -73,6 +73,7 @@ export default defineConfig({
           { text: "OpenClaw", link: "/guides/openclaw" },
           { text: "Hermes", link: "/guides/hermes" },
           { text: "VSCodium Web IDE", link: "/guides/vscode" },
+          { text: "Templating Containers with trm launch", link: "/guides/templating" },
           { text: "Isolated Docker Compose deployments", link: "/guides/compose" },
           { text: "Dokploy", link: "/guides/dokploy" },
           { text: "Coolify", link: "/guides/coolify" },

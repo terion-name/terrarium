@@ -117,6 +117,44 @@ describe("ZITADEL Cloud provider", () => {
     }
   });
 
+  test("stale cleanup removes only integration-shaped ZITADEL users and projects", async () => {
+    const calls = installFetchMock((call) => {
+      const method = call.init?.method ?? "GET";
+      const path = callPath(call);
+      if (method === "POST" && path === "/management/v1/users/_search") {
+        return Response.json({
+          result: [
+            { id: "user-1", preferredLoginName: "admin+gha-123abc@example.net" },
+            { id: "user-2", preferredLoginName: "person@example.net" },
+            { human: { userId: "user-3", email: { email: "agent+local-abc123-dev@example.net" } } }
+          ]
+        });
+      }
+      if (method === "POST" && path === "/management/v1/projects/_search") {
+        return Response.json({
+          result: [
+            { id: "project-1", name: "terrarium-gha-123abc" },
+            { id: "project-2", name: "production-terrarium" },
+            { id: "project-3", name: "terrarium-local-abc123-dev" }
+          ]
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    const provider = createProvider();
+
+    await provider.cleanupStaleIntegrationFixtures();
+
+    expect(calls.map(callPath)).toEqual([
+      "/management/v1/users/_search",
+      "/management/v1/users/user-1",
+      "/management/v1/users/user-3",
+      "/management/v1/projects/_search",
+      "/management/v1/projects/project-1",
+      "/management/v1/projects/project-3"
+    ]);
+  });
+
   test("management preflight fails permission errors without retrying", async () => {
     const calls = installFetchMock(() => new Response("AUTHZ-cdgFk", { status: 404 }));
     const sleeps: number[] = [];

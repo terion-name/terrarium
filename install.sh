@@ -162,7 +162,7 @@ install_release_bundle() {
   local resolved_ref="$3"
 
   download_release_bundle "${bundle_dir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"
-  run_terrariumctl "${bundle_dir}" "${bundle_dir}/dist/terrariumctl" "${resolved_ref}" "${FORWARD_ARGS[@]}"
+  run_terrariumctl_install "${bundle_dir}" "${bundle_dir}/dist/terrariumctl" "${resolved_ref}" "${FORWARD_ARGS[@]}"
 }
 
 build_from_source() {
@@ -185,7 +185,7 @@ build_from_source() {
     /opt/bun/bin/bun install --frozen-lockfile || /opt/bun/bin/bun install --no-progress
     /opt/bun/bin/bun scripts/build.ts
   )
-  run_terrariumctl "${build_dir}/repo" "${build_dir}/repo/dist/terrariumctl" "${source_ref}" "${FORWARD_ARGS[@]}"
+  run_terrariumctl_install "${build_dir}/repo" "${build_dir}/repo/dist/terrariumctl" "${source_ref}" "${FORWARD_ARGS[@]}"
 }
 
 is_non_interactive_install() {
@@ -200,7 +200,7 @@ is_non_interactive_install() {
   return 1
 }
 
-run_terrariumctl() {
+run_terrariumctl_install() {
   local bundle_dir="$1"
   local terrariumctl="$2"
   local ref="$3"
