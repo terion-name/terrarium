@@ -6,6 +6,7 @@ This section covers everything you need to know to get up and running:
 
 - **[Installation](./installation):** The step-by-step process for getting Terrarium onto your VPS.
 - **[Creating Your First Instance](./creating-first-instance):** How to spin up your first container and publish an app to the web.
+- **[Templating Containers with `trm launch`](./templating):** How to turn repeatable app setup into one launch command with Ansible, Docker Compose, variables, and proxy labels.
 - **[Storage and Sizing](./storage):** How to choose the right hardware and structure your storage for the best performance and snapshot capabilities.
 - **[Domains and Authentication](./domains-and-auth):** Setting up custom domains and choosing how you want to handle Single Sign-On (SSO) for your private apps.
 - **[Management GUIs](./management-guis):** A quick tour of the built-in visual dashboards you get right out of the box.

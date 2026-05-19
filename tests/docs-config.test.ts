@@ -21,7 +21,7 @@ describe("docs config", () => {
     const docsConfig = readRepoFile("docs/.vitepress/config.mts");
     const reference = readRepoFile("docs/reference/terrariumctl.md");
     const firstInstance = readRepoFile("docs/getting-started/creating-first-instance.md");
-    const templating = readRepoFile("docs/guides/templating.md");
+    const templating = readRepoFile("docs/getting-started/templating.md");
     const guidePaths = [
       "docs/guides/openclaw.md",
       "docs/guides/hermes.md",
@@ -41,7 +41,7 @@ describe("docs config", () => {
     expect(reference).toContain("| `terrariumctl launch` |");
     expect(reference).toContain("trm launch ubuntu:24.04 app-01 --docker-compose ./docker-compose.yml");
     expect(reference).toContain("Templating Containers with `trm launch`");
-    expect(docsConfig).toContain('link: "/guides/templating"');
+    expect(docsConfig).toContain('link: "/getting-started/templating"');
     expect(templating).toContain("trm launch ubuntu:24.04 customer-portal");
     expect(templating).toContain("--vars ./portal.env");
     expect(templating).toContain("--var APP_ENV=production");

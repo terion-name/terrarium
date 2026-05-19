@@ -53,7 +53,7 @@ trm launch ubuntu:24.04 web-01 --profile dev
 trm launch ubuntu:24.04 web-01 --disk 40G --memory 4G --cpu 2
 ```
 
-For a more practical walkthrough with Ansible, Docker Compose, variables, Git assets, and proxy labels, see [Templating Containers with `trm launch`](../guides/templating.md).
+For a more practical walkthrough with Ansible, Docker Compose, variables, Git assets, and proxy labels, see [Templating Containers with `trm launch`](../getting-started/templating.md).
 
 Provisioning flags generate cloud-init user-data that installs the needed packages and runs inside the new container:
 

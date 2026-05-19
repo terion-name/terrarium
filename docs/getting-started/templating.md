@@ -289,4 +289,4 @@ If the app is running but the public route does not respond, check that the serv
 terrariumctl proxy sync
 ```
 
-For the full route label grammar, including authenticated routes and wildcard domains, see [Domains and Authentication](../getting-started/domains-and-auth.md#published-app-route-labels).
+For the full route label grammar, including authenticated routes and wildcard domains, see [Domains and Authentication](domains-and-auth.md#published-app-route-labels).
