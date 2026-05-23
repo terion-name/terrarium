@@ -1,4 +1,5 @@
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runText } from "../lib/common";
@@ -12,6 +13,7 @@ const GITHUB_REPO = process.env.TERRARIUM_GITHUB_REPO ?? "terion-name/terrarium"
 const ANSIBLE_GALAXY_ATTEMPTS = 4;
 const INSTALLED_CLI = "/usr/local/bin/terrariumctl";
 const TRM_ALIAS = "/usr/local/bin/trm";
+const RELEASE_SIGNER_WORKFLOW = `${GITHUB_REPO}/.github/workflows/release.yml`;
 
 export type UpdateOptions = {
   ref?: string;
@@ -98,15 +100,55 @@ for release in json.load(sys.stdin):
   return ref;
 }
 
+export function checksumForReleaseAsset(checksums: string, assetName: string): string {
+  for (const line of checksums.split("\n")) {
+    const [digest, rawName] = line.trim().split(/\s+/, 2);
+    const name = rawName?.replace(/^\*/, "");
+    if (name === assetName && /^[a-fA-F0-9]{64}$/.test(digest ?? "")) {
+      return digest.toLowerCase();
+    }
+  }
+  throw new Error(`missing checksum for ${assetName}`);
+}
+
+function verifyReleaseChecksum(workDir: string, bundleName: string): void {
+  const expected = checksumForReleaseAsset(readFileSync(join(workDir, "SHA256SUMS"), "utf8"), bundleName);
+  const actual = createHash("sha256").update(readFileSync(join(workDir, bundleName))).digest("hex");
+  if (actual !== expected) {
+    throw new Error(`checksum mismatch for ${bundleName}`);
+  }
+}
+
+async function verifyReleaseAttestation(workDir: string, bundleName: string): Promise<void> {
+  await runText(
+    [
+      "gh",
+      "attestation",
+      "verify",
+      join(workDir, bundleName),
+      "-R",
+      GITHUB_REPO,
+      "--signer-workflow",
+      RELEASE_SIGNER_WORKFLOW
+    ],
+    PREFIX
+  );
+}
+
 async function downloadReleaseBundle(ref: string): Promise<string> {
   const arch = releaseArch();
   const resolvedRef = ref ? ref : await resolveLatestReleaseRef(arch);
   const workDir = mkdtempSync(join(tmpdir(), "terrarium-update-"));
-  const assetUrl = `https://github.com/${GITHUB_REPO}/releases/download/${resolvedRef}/terrarium-linux-${arch}.zip`;
+  const bundleName = `terrarium-linux-${arch}.zip`;
+  const assetUrl = `https://github.com/${GITHUB_REPO}/releases/download/${resolvedRef}/${bundleName}`;
+  const checksumsUrl = `https://github.com/${GITHUB_REPO}/releases/download/${resolvedRef}/SHA256SUMS`;
 
   try {
-    await runText(["curl", "-fsSL", assetUrl, "-o", join(workDir, "terrarium.zip")], PREFIX);
-    await runText(["unzip", "-q", join(workDir, "terrarium.zip"), "-d", workDir], PREFIX);
+    await runText(["curl", "-fsSL", assetUrl, "-o", join(workDir, bundleName)], PREFIX);
+    await runText(["curl", "-fsSL", checksumsUrl, "-o", join(workDir, "SHA256SUMS")], PREFIX);
+    verifyReleaseChecksum(workDir, bundleName);
+    await verifyReleaseAttestation(workDir, bundleName);
+    await runText(["unzip", "-q", join(workDir, bundleName), "-d", workDir], PREFIX);
     return workDir;
   } catch (error) {
     rmSync(workDir, { recursive: true, force: true });
@@ -156,7 +198,7 @@ async function installAnsibleCollections(): Promise<void> {
 
 async function ensureUpdateDependencies(): Promise<void> {
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "update", "-y"], PREFIX);
-  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "ca-certificates", "curl", "git", "ansible", "python3", "jq", "unzip"], PREFIX);
+  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "ca-certificates", "curl", "git", "gh", "ansible", "python3", "jq", "unzip"], PREFIX);
 }
 
 function trmAliasIsManaged(): boolean {

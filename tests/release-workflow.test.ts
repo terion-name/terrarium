@@ -44,6 +44,13 @@ describe("release workflow", () => {
     expect(source).toContain("cp -a ansible release/ansible");
     expect(source).toContain("rm -rf release/ansible/.ansible");
     expect(source).toContain('zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible');
+    expect(source).toContain("id-token: write");
+    expect(source).toContain("attestations: write");
+    expect(source).toContain("actions/attest-build-provenance@v3");
+    expect(source).toContain("release-assets/install.sh");
+    expect(source).toContain("release-assets/SHA256SUMS");
+    expect(source).toContain("release-assets/terrarium-linux-x64.zip");
+    expect(source).toContain("release-assets/terrarium-linux-arm64.zip");
     expect(source).toContain("tag_name: ${{ needs.release_tag.outputs.value }}");
   });
 
@@ -124,7 +131,7 @@ describe("release workflow", () => {
     const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
     expect(installer).toContain("ensure_git()");
-    expect(installer).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl unzip python3");
+    expect(installer).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl gh unzip python3");
     expect(installer).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y git");
     expect(installer).not.toContain("apt-get install -y ca-certificates curl unzip git python3");
     expect(installer).toContain('ensure_git\n    git clone --depth 1 --branch "${source_ref}"');

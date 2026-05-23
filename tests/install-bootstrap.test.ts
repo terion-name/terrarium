@@ -11,6 +11,10 @@ describe("install.sh bootstrap", () => {
     expect(source).toContain('resolved_ref="$(resolve_latest_tag "${arch}")" || die "failed to resolve latest Terrarium release tag"');
     expect(source).toContain('TERRARIUM_ASSET="terrarium-linux-${arch}.zip"');
     expect(source).toContain('[[ -n "${resolved_ref}" ]] || die "failed to resolve latest Terrarium release tag"');
+    expect(source).toContain("SHA256SUMS");
+    expect(source).toContain("sha256sum -c -");
+    expect(source).toContain("gh attestation verify");
+    expect(source).toContain("--signer-workflow");
     expect(source).not.toContain("head -n1 || true");
     expect(source).not.toContain("} || true");
   });
@@ -41,7 +45,7 @@ describe("install.sh bootstrap", () => {
     const source = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
     expect(source).toContain("DPkg::Lock::Timeout=900");
-    expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl unzip python3");
+    expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl gh unzip python3");
     expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y git");
   });
 

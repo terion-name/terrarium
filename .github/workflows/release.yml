@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release_tag:
@@ -122,6 +124,15 @@ jobs:
             cd release-assets
             sha256sum terrarium-linux-x64.zip terrarium-linux-arm64.zip install.sh > SHA256SUMS
           )
+
+      - name: Generate release bundle attestations
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            release-assets/install.sh
+            release-assets/SHA256SUMS
+            release-assets/terrarium-linux-x64.zip
+            release-assets/terrarium-linux-arm64.zip
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
