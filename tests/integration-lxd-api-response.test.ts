@@ -75,4 +75,64 @@ describe("LXD API public probe", () => {
     expect(result.status).toBe(403);
     expect(seenUrls).toEqual(["https://lxd.example.test/1.0", "https://lxd.example.test/1.0"]);
   });
+
+  test("does not retry unsafe trusted anonymous responses", async () => {
+    const responses = [response(200, JSON.stringify({ metadata: { api_extensions: [], auth: "trusted" } })), response(403)];
+
+    await expect(
+      waitForLxdApiRootResponse(
+        {
+          domains: {
+            lxd: "lxd.example.test",
+            auth: "auth.example.test"
+          },
+          server: {
+            ipv4: "203.0.113.10"
+          }
+        } as never,
+        {
+          timeoutMs: 1000,
+          sleep: async () => undefined,
+          readResponse: async () => {
+            const nextResponse = responses.shift();
+            if (!nextResponse) {
+              throw new Error("unexpected extra poll");
+            }
+            return nextResponse;
+          }
+        }
+      )
+    ).rejects.toThrow("trusted anonymous");
+    expect(responses).toHaveLength(1);
+  });
+
+  test("does not retry unsafe redirect responses", async () => {
+    const responses = [response(302, "", "location: https://evil.example.test/login\r\n"), response(403)];
+
+    await expect(
+      waitForLxdApiRootResponse(
+        {
+          domains: {
+            lxd: "lxd.example.test",
+            auth: "auth.example.test"
+          },
+          server: {
+            ipv4: "203.0.113.10"
+          }
+        } as never,
+        {
+          timeoutMs: 1000,
+          sleep: async () => undefined,
+          readResponse: async () => {
+            const nextResponse = responses.shift();
+            if (!nextResponse) {
+              throw new Error("unexpected extra poll");
+            }
+            return nextResponse;
+          }
+        }
+      )
+    ).rejects.toThrow("unexpected location");
+    expect(responses).toHaveLength(1);
+  });
 });

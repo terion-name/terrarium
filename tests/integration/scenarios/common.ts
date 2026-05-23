@@ -351,20 +351,33 @@ export async function waitForLxdApiRootResponse(host: ManagedHost, options: LxdA
   const deadline = Date.now() + (options.timeoutMs ?? LXD_API_POLL_TIMEOUT_MS);
   let lastError = "";
   while (Date.now() < deadline) {
+    let response: HttpsResponse;
     try {
-      const response = await readResponse(`https://${host.domains.lxd}/1.0`, {
+      response = await readResponse(`https://${host.domains.lxd}/1.0`, {
         resolveIp: host.server.ipv4,
         headers: ["Accept: application/json"]
       });
-      assertSafeLxdApiRootResponse(response, host.domains.lxd, host.domains.auth);
-      return response;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
       await sleep(5000);
+      continue;
     }
+
+    if (isTransientLxdApiRootResponse(response)) {
+      lastError = `LXD API root returned transient HTTP status ${response.status}`;
+      await sleep(5000);
+      continue;
+    }
+
+    assertSafeLxdApiRootResponse(response, host.domains.lxd, host.domains.auth);
+    return response;
   }
 
   throw new Error(`timed out waiting for LXD API root; last error=${lastError || "none"}`);
+}
+
+function isTransientLxdApiRootResponse(response: HttpsResponse): boolean {
+  return [404, 408, 425, 429, 500, 502, 503, 504].includes(response.status);
 }
 
 export function assertSafeLxdApiRootResponse(response: HttpsResponse, lxdHost: string, authHost?: string): void {
