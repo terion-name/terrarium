@@ -3,16 +3,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { buildLaunchArgs, launchOptionsFromCli } from "./launch";
+import { buildLaunchArgs, buildLaunchPlan, launchOptionsFromCli } from "./launch";
 
 const lxc = process.env.TERRARIUM_LXC_BIN ?? "/snap/bin/lxc";
+const repoRoot = join(import.meta.dir, "../..");
 
-function cloudInitFromArgs(args: string[]): Record<string, unknown> {
-  const entry = args.find((arg) => arg.startsWith("cloud-init.user-data="));
-  if (!entry) {
-    throw new Error("missing cloud-init.user-data launch config");
+function cloudInitFromPlan(plan: { cloudInit?: string }): Record<string, unknown> {
+  if (!plan.cloudInit) {
+    throw new Error("missing cloud-init launch config");
   }
-  return parse(entry.slice("cloud-init.user-data=".length).replace(/^#cloud-config\n/, "")) as Record<string, unknown>;
+  return parse(plan.cloudInit.replace(/^#cloud-config\n/, "")) as Record<string, unknown>;
 }
 
 describe("terrariumctl launch", () => {
@@ -52,15 +52,16 @@ describe("terrariumctl launch", () => {
       writeFileSync(playbook, "- hosts: localhost\n  tasks: []\n");
       writeFileSync(compose, "services:\n  app:\n    image: nginx\n");
 
-      const cloudInit = cloudInitFromArgs(
-        buildLaunchArgs("ubuntu:24.04", "docker-01", {
-          requirements: [requirements],
-          roles: ["geerlingguy.docker"],
-          playbooks: [playbook],
-          dockerCompose: [compose]
-        })
-      );
+      const plan = buildLaunchPlan("ubuntu:24.04", "docker-01", {
+        requirements: [requirements],
+        roles: ["geerlingguy.docker"],
+        playbooks: [playbook],
+        dockerCompose: [compose]
+      });
+      const cloudInit = cloudInitFromPlan(plan);
 
+      expect(plan.args).not.toContain(`cloud-init.user-data=${plan.cloudInit}`);
+      expect(plan.args).toContain("init");
       expect(cloudInit.packages).toEqual(
         expect.arrayContaining(["ansible", "docker.io", "docker-compose-v2"])
       );
@@ -84,8 +85,8 @@ describe("terrariumctl launch", () => {
       writeFileSync(playbook, "- hosts: localhost\n  tasks: []\n");
       writeFileSync(compose, "services:\n  app:\n    image: nginx:${APP_VERSION}\n");
 
-      const cloudInit = cloudInitFromArgs(
-        buildLaunchArgs("ubuntu:24.04", "app", {
+      const cloudInit = cloudInitFromPlan(
+        buildLaunchPlan("ubuntu:24.04", "app", {
           varsFiles: [varsFile],
           vars: ["APP_NAME=from-cli", "APP_VERSION=1.27"],
           playbooks: [playbook],
@@ -107,8 +108,8 @@ describe("terrariumctl launch", () => {
   });
 
   test("builds cloud-init commands for git assets with refs", () => {
-    const cloudInit = cloudInitFromArgs(
-      buildLaunchArgs("ubuntu:24.04", "app", {
+    const cloudInit = cloudInitFromPlan(
+      buildLaunchPlan("ubuntu:24.04", "app", {
         playbooks: ["git+https://github.com/org/repo.git//site.yml?ref=v1.0.0"],
         dockerCompose: ["git+https://github.com/org/repo.git//compose/docker-compose.yml?ref=v1.0.0"]
       })
@@ -127,9 +128,9 @@ describe("terrariumctl launch", () => {
       const userData = join(dir, "user-data.yml");
       writeFileSync(userData, "#cloud-config\nhostname: raw-01\n");
 
-      expect(buildLaunchArgs("ubuntu:24.04", "raw-01", { cloudInit: userData })).toContain(
-        "cloud-init.user-data=#cloud-config\nhostname: raw-01\n"
-      );
+      const plan = buildLaunchPlan("ubuntu:24.04", "raw-01", { cloudInit: userData });
+      expect(plan.args).toEqual([lxc, "init", "ubuntu:24.04", "raw-01"]);
+      expect(plan.cloudInit).toBe("#cloud-config\nhostname: raw-01\n");
       expect(() => buildLaunchArgs("ubuntu:24.04", "raw-01", { cloudInit: userData, playbooks: ["site.yml"] })).toThrow(
         "--cloud-init cannot be combined"
       );
@@ -166,6 +167,94 @@ describe("terrariumctl launch", () => {
       });
     } finally {
       process.argv = originalArgv;
+    }
+  });
+
+  test("keeps cloud-init secrets out of lxc process arguments", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "terrarium-launch-test-"));
+    try {
+      const fakeLxc = join(dir, "lxc");
+      const playbook = join(dir, "site.yml");
+      const argsLog = join(dir, "args.log");
+      const stdinLog = join(dir, "stdin.log");
+      const secret = "launch-secret-not-in-argv";
+      writeFileSync(playbook, "- hosts: localhost\n  tasks: []\n");
+      writeFileSync(
+        fakeLxc,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TERRARIUM_LXC_ARGS_LOG\"\nif [ \"$1\" = config ] && [ \"$2\" = set ]; then cat > \"$TERRARIUM_LXC_STDIN_LOG\"; fi\nexit 0\n",
+        { mode: 0o755 }
+      );
+
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          "run",
+          join(repoRoot, "scripts/terrariumctl.ts"),
+          "launch",
+          "ubuntu:24.04",
+          "secret-test",
+          "--playbook",
+          playbook,
+          "--var",
+          `API_TOKEN=${secret}`
+        ],
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TERRARIUM_LXC_BIN: fakeLxc,
+          TERRARIUM_LXC_ARGS_LOG: argsLog,
+          TERRARIUM_LXC_STDIN_LOG: stdinLog
+        },
+        stdout: "pipe",
+        stderr: "pipe"
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(new TextDecoder().decode(result.stdout)).not.toContain(secret);
+      expect(new TextDecoder().decode(result.stderr)).not.toContain(secret);
+      await expect(Bun.file(argsLog).text()).resolves.not.toContain(secret);
+      await expect(Bun.file(stdinLog).text()).resolves.toContain(secret);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not print cloud-init payload when lxc init fails", () => {
+    const dir = mkdtempSync(join(tmpdir(), "terrarium-launch-test-"));
+    try {
+      const fakeLxc = join(dir, "lxc");
+      const playbook = join(dir, "site.yml");
+      const secret = "launch-secret-not-in-error";
+      writeFileSync(playbook, "- hosts: localhost\n  tasks: []\n");
+      writeFileSync(fakeLxc, "#!/bin/sh\nexit 42\n", { mode: 0o755 });
+
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          "run",
+          join(repoRoot, "scripts/terrariumctl.ts"),
+          "launch",
+          "ubuntu:24.04",
+          "secret-fail",
+          "--playbook",
+          playbook,
+          "--var",
+          `API_TOKEN=${secret}`
+        ],
+        cwd: repoRoot,
+        env: { ...process.env, TERRARIUM_LXC_BIN: fakeLxc },
+        stdout: "pipe",
+        stderr: "pipe"
+      });
+
+      const stderr = new TextDecoder().decode(result.stderr);
+      expect(result.exitCode).toBe(1);
+      expect(stderr).toContain("command failed");
+      expect(stderr).toContain("lxc init ubuntu:24.04 secret-fail");
+      expect(stderr).not.toContain(secret);
+      expect(stderr).not.toContain("cloud-init.user-data");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

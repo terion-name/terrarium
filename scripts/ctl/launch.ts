@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { stringify } from "yaml";
-import { runInteractive, shellEscape } from "../lib/common";
+import { runInteractive, runText, shellEscape } from "../lib/common";
 import { validateProxyLabel } from "../terrarium-traefik-sync";
 import { cliOption, PREFIX } from "./context";
 
@@ -46,6 +46,12 @@ export type LaunchOptions = {
   proxies?: string[];
   vars?: string[];
   varsFiles?: string[];
+};
+
+export type LaunchPlan = {
+  args: string[];
+  instanceName: string;
+  cloudInit?: string;
 };
 
 type CloudInitFile = {
@@ -417,7 +423,7 @@ function needsGeneratedCloudInit(options: LaunchOptions): boolean {
   );
 }
 
-export function buildLaunchArgs(image: string, name: string, options: LaunchOptions = {}): string[] {
+export function buildLaunchPlan(image: string, name: string, options: LaunchOptions = {}): LaunchPlan {
   const normalizedImage = image.trim();
   const normalizedName = name.trim();
   if (!normalizedImage || !normalizedName) {
@@ -432,7 +438,12 @@ export function buildLaunchArgs(image: string, name: string, options: LaunchOpti
     throw new Error("--cloud-init cannot be combined with --requirements, --playbook, --role, --docker-compose, --var, or --vars");
   }
 
-  const args = [LXC, "launch", normalizedImage, normalizedName];
+  const cloudInit = options.cloudInit
+    ? explicitCloudInit(options.cloudInit)
+    : needsGeneratedCloudInit(options)
+      ? generatedCloudInit(options)
+      : undefined;
+  const args = [LXC, cloudInit ? "init" : "launch", normalizedImage, normalizedName];
   for (const profile of options.profiles ?? []) {
     args.push("--profile", profile);
   }
@@ -450,15 +461,21 @@ export function buildLaunchArgs(image: string, name: string, options: LaunchOpti
     validateProxyLabel(proxyLabel);
     args.push("--config", `user.proxy=${proxyLabel}`);
   }
-  if (options.cloudInit) {
-    args.push("--config", `cloud-init.user-data=${explicitCloudInit(options.cloudInit)}`);
-  } else if (needsGeneratedCloudInit(options)) {
-    args.push("--config", `cloud-init.user-data=${generatedCloudInit(options)}`);
-  }
 
-  return args;
+  return cloudInit ? { args, instanceName: normalizedName, cloudInit } : { args, instanceName: normalizedName };
+}
+
+export function buildLaunchArgs(image: string, name: string, options: LaunchOptions = {}): string[] {
+  return buildLaunchPlan(image, name, options).args;
 }
 
 export async function launchCmd(image: string, name: string, options: LaunchOptions): Promise<void> {
-  await runInteractive(buildLaunchArgs(image, name, options), PREFIX);
+  const plan = buildLaunchPlan(image, name, options);
+  await runInteractive(plan.args, PREFIX);
+  if (!plan.cloudInit) {
+    return;
+  }
+
+  await runText([LXC, "config", "set", plan.instanceName, "cloud-init.user-data", "-"], PREFIX, { stdin: plan.cloudInit });
+  await runInteractive([LXC, "start", plan.instanceName], PREFIX);
 }
