@@ -193,16 +193,21 @@ For ZITADEL Cloud there is no direct concept of groups, they operate with projec
 
 1. In Project the app is added in, in settings (first screen at project) enable "Return user roles during authentication"
 2. In the app go to "Token settings" and enable "User roles inside ID Token" and "Include user's profile info in the ID Token"
-3. Go to "Actions" (in top menu), add new script named "groupsClaim", place there:
+3. Copy the Project ID from the ZITADEL project that contains your Terrarium app. Go to "Actions" (in top menu), add new script named "groupsClaim", place there, and replace `replace-with-your-terrarium-project-id` with that Project ID:
 ```js
 function groupsClaim(ctx, api) {
   var groups = [];
+  var terrariumProjectId = "replace-with-your-terrarium-project-id";
   if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
     api.v1.claims.setClaim("groups", groups);
     return;
   }
   for (var i = 0; i < ctx.v1.user.grants.grants.length; i++) {
     var grant = ctx.v1.user.grants.grants[i];
+    var grantProjectId = grant && (grant.projectId || grant.projectID || grant.project_id);
+    if (grantProjectId !== terrariumProjectId) {
+      continue;
+    }
     if (!grant || !grant.roles) continue;
     for (var j = 0; j < grant.roles.length; j++) {
       var role = grant.roles[j];

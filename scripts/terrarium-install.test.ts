@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   externalOidcSetupInstructions,
+  externalZitadelGroupsClaimActionScript,
   generateRootPassword,
   installReviewSummary,
   normalizeOidcIssuer,
@@ -135,11 +136,49 @@ describe("terrarium install CLI parsing", () => {
     expect(instructions).toContain("openid profile email");
     expect(instructions).toContain('groups must be a JSON string array containing "admin"');
     expect(instructions).toContain("Project role assignments are not emitted as a flat groups claim by default.");
+    expect(instructions).toContain("Copy the Project ID from the ZITADEL project that contains your Terrarium app.");
     expect(instructions).toContain("Create an Action named groupsClaim");
     expect(instructions).toContain("function groupsClaim(ctx, api)");
+    expect(instructions).toContain("replace-with-your-terrarium-project-id");
+    expect(instructions).toContain("grantProjectId !== terrariumProjectId");
     expect(instructions).toContain("Pre Userinfo creation");
     expect(instructions).toContain("Pre access token creation");
     expect(instructions).toContain("/oauth2/route/.../callback");
+  });
+
+  test("ZITADEL Cloud groups action ignores roles from unrelated projects", () => {
+    const script = externalZitadelGroupsClaimActionScript("project-terrarium");
+    const groupsClaim = new Function(`${script}; return groupsClaim;`)() as (ctx: unknown, api: unknown) => void;
+    let emittedGroups: string[] = [];
+
+    groupsClaim(
+      {
+        v1: {
+          user: {
+            grants: {
+              grants: [
+                { projectId: "project-unrelated", roles: ["admin", "ops"] },
+                { projectID: "project-terrarium", roles: ["viewer"] },
+                { project_id: "project-terrarium", roles: ["admin"] }
+              ]
+            }
+          }
+        }
+      },
+      {
+        v1: {
+          claims: {
+            setClaim(name: string, value: string[]) {
+              if (name === "groups") {
+                emittedGroups = value;
+              }
+            }
+          }
+        }
+      }
+    );
+
+    expect(emittedGroups).toEqual(["viewer", "admin"]);
   });
 
   test("summarizes optional integrations so accidental choices can be corrected before install", () => {

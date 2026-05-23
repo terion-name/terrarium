@@ -547,6 +547,9 @@ export function externalOidcSetupInstructions(options: {
   proxyDomain: string;
 }): string {
   const isZitadel = /zitadel/i.test(options.oidcIssuer ?? "");
+  const zitadelGroupsClaimAction = externalZitadelGroupsClaimActionScript("replace-with-your-terrarium-project-id")
+    .split("\n")
+    .map((line) => `  ${line}`);
   return [
     "",
     "Before continuing, configure an OIDC application/client in your provider:",
@@ -565,25 +568,11 @@ export function externalOidcSetupInstructions(options: {
           "",
           "ZITADEL Cloud note:",
           "  Project role assignments are not emitted as a flat groups claim by default.",
+          "  Copy the Project ID from the ZITADEL project that contains your Terrarium app.",
           "  Create an Action named groupsClaim and attach it to the Complement Token flow",
           "  for both Pre Userinfo creation and Pre access token creation:",
           "",
-          "  function groupsClaim(ctx, api) {",
-          "    var groups = [];",
-          "    if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {",
-          "      api.v1.claims.setClaim('groups', groups);",
-          "      return;",
-          "    }",
-          "    for (var i = 0; i < ctx.v1.user.grants.grants.length; i++) {",
-          "      var grant = ctx.v1.user.grants.grants[i];",
-          "      if (!grant || !grant.roles) continue;",
-          "      for (var j = 0; j < grant.roles.length; j++) {",
-          "        var role = grant.roles[j];",
-          "        if (groups.indexOf(role) === -1) groups.push(role);",
-          "      }",
-          "    }",
-          "    api.v1.claims.setClaim('groups', groups);",
-          "  }"
+          ...zitadelGroupsClaimAction
         ]
       : []),
     "",
@@ -594,6 +583,34 @@ export function externalOidcSetupInstructions(options: {
     "add those later when you create protected routes.",
     ""
   ].join("\n");
+}
+
+export function externalZitadelGroupsClaimActionScript(projectId: string): string {
+  return `function groupsClaim(ctx, api) {
+  var groups = [];
+  var terrariumProjectId = ${JSON.stringify(projectId)};
+  if (!ctx || !ctx.v1 || !ctx.v1.user || !ctx.v1.user.grants || !ctx.v1.user.grants.grants) {
+    api.v1.claims.setClaim('groups', groups);
+    return;
+  }
+  for (var i = 0; i < ctx.v1.user.grants.grants.length; i++) {
+    var grant = ctx.v1.user.grants.grants[i];
+    var grantProjectId = grant && (grant.projectId || grant.projectID || grant.project_id);
+    if (grantProjectId !== terrariumProjectId) {
+      continue;
+    }
+    if (!grant || !grant.roles) {
+      continue;
+    }
+    for (var j = 0; j < grant.roles.length; j++) {
+      var role = grant.roles[j];
+      if (groups.indexOf(role) === -1) {
+        groups.push(role);
+      }
+    }
+  }
+  api.v1.claims.setClaim('groups', groups);
+}`;
 }
 
 /**
