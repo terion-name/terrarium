@@ -196,6 +196,10 @@ build_from_source() {
 }
 
 is_non_interactive_install() {
+  if [[ "${#FORWARD_ARGS[@]}" -eq 0 ]]; then
+    return 1
+  fi
+
   local arg
   for arg in "${FORWARD_ARGS[@]}"; do
     case "${arg}" in
@@ -218,16 +222,19 @@ run_terrariumctl_install() {
     return
   fi
 
-  if [[ -r /dev/tty ]]; then
-    TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@" </dev/tty
+  if is_non_interactive_install; then
+    TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@"
     return
   fi
 
-  if ! is_non_interactive_install; then
-    die "interactive install requires a TTY; run this from an interactive shell or pass --non-interactive with full configuration"
+  local tty_fd
+  if { exec {tty_fd}</dev/tty; } 2>/dev/null; then
+    TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@" <&"${tty_fd}"
+    exec {tty_fd}<&-
+    return
   fi
 
-  TERRARIUM_BUNDLE_DIR="${bundle_dir}" TERRARIUM_REPO_URL="${REPO_URL}" "${terrariumctl}" install --ref "${ref}" "$@"
+  die "interactive install requires a TTY; run this from an interactive shell or pass --non-interactive with full configuration"
 }
 
 main() {

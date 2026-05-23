@@ -121,8 +121,9 @@ describe("release workflow", () => {
     const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
     expect(installer).toContain("run_terrariumctl_install");
-    expect(installer).toContain("[[ -r /dev/tty ]]");
-    expect(installer).toContain('install --ref "${ref}" "$@" </dev/tty');
+    expect(installer.indexOf("if is_non_interactive_install; then")).toBeLessThan(installer.indexOf("exec {tty_fd}</dev/tty"));
+    expect(installer).toContain("exec {tty_fd}</dev/tty");
+    expect(installer).toContain('install --ref "${ref}" "$@" <&"${tty_fd}"');
     expect(installer).toContain("interactive install requires a TTY");
     expect(installer).toContain("--non-interactive|--help|-h");
   });

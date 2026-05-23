@@ -35,7 +35,8 @@ describe("install.sh bootstrap", () => {
     expect(source).toContain('install_release_bundle "${tmpdir}" "${arch}" "${REF}" || die "Terrarium install failed for release bundle ${REF}"');
     expect(source).toContain('download_release_bundle "${bundle_dir}" "${arch}" "${resolved_ref}" || die "failed to download Terrarium release bundle ${resolved_ref}"');
     expect(source).toContain('"${terrariumctl}" update --ref "${ref}" "$@"');
-    expect(source).toContain('"${terrariumctl}" install --ref "${ref}" "$@" </dev/tty');
+    expect(source.indexOf("if is_non_interactive_install; then")).toBeLessThan(source.indexOf("exec {tty_fd}</dev/tty"));
+    expect(source).toContain('"${terrariumctl}" install --ref "${ref}" "$@" <&"${tty_fd}"');
     expect(source).toContain('build_from_source "${tmpdir}" "${REF}"');
     expect(source).not.toContain('build_from_source "${tmpdir}" "main"');
     expect(source).not.toContain("release bundle is unavailable; using source fallback");
