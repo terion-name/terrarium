@@ -144,6 +144,30 @@ describe("browser assertion helpers", () => {
       isRetryableBlankNavigationError(
         new Error(
           [
+            "none of the password selectors were visible after username submit: input[type=\"password\"]",
+            "current URL: https://issuer.example.test/ui/v2/login/password?requestId=oidc_123",
+            "body:\n<empty>"
+          ].join("\n")
+        )
+      )
+    ).toBe(true);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
+            "none of the password selectors were visible after username submit: input[type=\"password\"]",
+            "current URL: https://issuer.example.test/ui/v2/login/password?requestId=oidc_123",
+            "body:\nPassword\nEnter your password."
+          ].join("\n")
+        )
+      )
+    ).toBe(false);
+
+    expect(
+      isRetryableBlankNavigationError(
+        new Error(
+          [
             "browser login flow (entering username) timed out after 180000ms",
             "stage: entering username",
             "url: https://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123"
@@ -250,7 +274,7 @@ describe("browser assertion helpers", () => {
         return this;
       },
       isVisible: async () => selector === '[data-testid="password-text-input"]' && passwordVisible,
-      innerText: async () => ""
+      innerText: async () => passwordVisible ? "Password\nEnter your password." : ""
     });
     const page = {
       url: () => currentUrl,
@@ -278,6 +302,47 @@ describe("browser assertion helpers", () => {
     expect(passwordVisible).toBe(true);
     expect(submits).toBe(1);
     expect(evaluatedAt).toEqual(["http://issuer.example.test/ui/v2/login/loginname?requestId=oidc_123"]);
+  });
+
+  test("reloads a blank ZITADEL password document before waiting for password selectors", async () => {
+    let currentUrl = "https://issuer.example.test/ui/v2/login/password?requestId=oidc_123";
+    let body = "";
+    let reloads = 0;
+    let passwordVisible = false;
+    let waitedForPasswordSelector = false;
+    const page = {
+      url: () => currentUrl,
+      locator: (selector: string) => ({
+        first() {
+          return this;
+        },
+        isVisible: async () => {
+          if (selector === '[data-testid="password-text-input"]') {
+            waitedForPasswordSelector = true;
+            return passwordVisible;
+          }
+          return false;
+        },
+        innerText: async () => body
+      }),
+      reload: async () => {
+        reloads += 1;
+        body = "Password\nEnter your password.";
+        passwordVisible = true;
+      },
+      waitForTimeout: async () => undefined
+    } as unknown as Page;
+
+    const result = await __browserTestHooks.waitForPasswordInputAfterUsernameSubmit(
+      page,
+      '[data-testid="username-text-input"]',
+      "agent@example.test",
+      "app.example.test"
+    );
+
+    expect(result).toEqual({ state: "password", selector: '[data-testid="password-text-input"]' });
+    expect(reloads).toBe(1);
+    expect(waitedForPasswordSelector).toBe(true);
   });
 
   test("does not treat the target app password field as a ZITADEL password step", async () => {

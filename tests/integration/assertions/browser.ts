@@ -96,6 +96,11 @@ async function waitForPasswordInputAfterUsernameSubmit(page: Page, usernameSelec
       return { state: "target" };
     }
 
+    if (isPasswordLoginStep(currentUrl) && await reloadBlankLoginDocumentIfNeeded(page)) {
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
     if (isPasswordLoginStep(currentUrl)) {
       const selector = await visiblePasswordInputSelector(page, 5000);
       if (selector) {
@@ -1299,7 +1304,11 @@ export function isRetryableBlankNavigationError(error: unknown): boolean {
     (message.includes("net::ERR_ABORTED") &&
       (message.includes("body:\n<empty>") || message.includes("browser login flow") || message.includes("timed out"))) ||
     (
-      (message.includes("none of the selectors were visible") || message.includes("none of the identity selectors were visible")) &&
+      (
+        message.includes("none of the selectors were visible") ||
+        message.includes("none of the identity selectors were visible") ||
+        message.includes("none of the password selectors were visible after username submit")
+      ) &&
       message.includes("body:\n<empty>") &&
       /https?:\/\/[^/\s]+\/ui\/v2\/login\//.test(message)
     ) ||
