@@ -18,6 +18,7 @@ describe("management oauth2-proxy template", () => {
     expect(template).toContain('cookie_path = "/"');
     expect(template).toContain('whitelist_domains = [ "{{ terrarium_manage_domain }}", "{{ terrarium_proxy_domain }}" ]');
     expect(template).toContain('trusted_proxy_ips = [ "127.0.0.1/32", "::1/128" ]');
+    expect(template).toContain("skip_jwt_bearer_tokens = false");
     expect(template).not.toContain("cookie_domains");
     expect(template).not.toContain("terrarium_oauth2_proxy_cookie_domain");
   });

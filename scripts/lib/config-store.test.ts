@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   exportClusterStoreToConfigFile,
+  hasConfigDocument,
   importConfigFileToClusterStore,
   readConfigDocument,
   writeConfigDocument
@@ -152,7 +153,8 @@ describe("Terrarium config store", () => {
         },
         () => {
           writeConfigDocument(configPath, "terrarium_email: ops@example.test\n", { requireClusterStore: true });
-          writeFileSync(configPath, "stale: true\n", "utf8");
+          expect(hasConfigDocument(configPath, "test")).toBe(true);
+          expect(() => readFileSync(configPath, "utf8")).toThrow();
           expect(exportClusterStoreToConfigFile(configPath, "test")).toBe(true);
           expect(readFileSync(configPath, "utf8")).toBe("terrarium_email: ops@example.test\n");
         }

@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CONFIG_PATH, PREFIX } from "./context";
 import { runInteractive } from "../lib/common";
 import { exportClusterStoreToConfigFile } from "../lib/config-store";
@@ -35,15 +37,33 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
     throw new Error("compiled Terrarium binaries are missing from /opt/terrarium/dist; rerun install.sh");
   }
 
-  console.log(`${PREFIX}: exporting saved configuration to ${CONFIG_PATH}`);
-  exportClusterStoreToConfigFile(CONFIG_PATH, PREFIX);
+  const tempDir = mkdtempSync(join(tmpdir(), "terrarium-reconfigure-"));
+  const tempConfigPath = join(tempDir, "config.yaml");
+  let ansibleConfigPath = tempConfigPath;
+  let exportedFromClusterStore = false;
 
-  const args = ["ansible-playbook", "-i", "inventory.ini", "site.yml", "-e", `@${CONFIG_PATH}`];
-  if (options.applyHardening === false) {
-    args.push("-e", "terrarium_apply_hardening=false");
+  try {
+    console.log(`${PREFIX}: exporting saved configuration to a temporary Ansible vars file`);
+    exportedFromClusterStore = exportClusterStoreToConfigFile(tempConfigPath, PREFIX);
+    if (!exportedFromClusterStore) {
+      if (!existsSync(CONFIG_PATH)) {
+        throw new Error("Terrarium config was not found in the LXD dqlite store or legacy local export");
+      }
+      ansibleConfigPath = CONFIG_PATH;
+    }
+
+    const args = ["ansible-playbook", "-i", "inventory.ini", "site.yml", "-e", `@${ansibleConfigPath}`];
+    if (options.applyHardening === false) {
+      args.push("-e", "terrarium_apply_hardening=false");
+    }
+
+    console.log(`${PREFIX}: running Ansible reconciliation`);
+    await runInteractive(["python3", "-c", BLOCKING_STDIO_EXEC, ...args], PREFIX, { cwd: "/opt/terrarium/ansible" });
+    console.log(`${PREFIX}: reconfigure finished`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+    if (exportedFromClusterStore) {
+      rmSync(CONFIG_PATH, { force: true });
+    }
   }
-
-  console.log(`${PREFIX}: running Ansible reconciliation`);
-  await runInteractive(["python3", "-c", BLOCKING_STDIO_EXEC, ...args], PREFIX, { cwd: "/opt/terrarium/ansible" });
-  console.log(`${PREFIX}: reconfigure finished`);
 }

@@ -254,7 +254,13 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
 
 /** Returns the local ZITADEL bootstrap credentials from an installed Terrarium host. */
 export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: string; password: string }> {
-  const config = await host.read("/etc/terrarium/config.yaml");
+  const configExport = await host.execAllowFailure(
+    "terrariumctl config export >/dev/null && cat /etc/terrarium/config.yaml; rc=$?; rm -f /etc/terrarium/config.yaml; exit $rc"
+  );
+  if (configExport.exitCode !== 0) {
+    throw new Error(`failed to export Terrarium config: ${(configExport.stderr || configExport.stdout).trim()}`);
+  }
+  const config = configExport.stdout;
   const emailMatch = config.match(/terrarium_zitadel_admin_email:\s*(.+)/);
   const instanceMatch = config.match(/terrarium_zitadel_instance_name:\s*(.+)/);
   const instance = (instanceMatch?.[1] || "terrarium-idp").trim().replace(/^["']|["']$/g, "");

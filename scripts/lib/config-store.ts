@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parse } from "yaml";
 
@@ -19,6 +19,7 @@ type LxcResult = {
 
 type WriteConfigOptions = {
   requireClusterStore?: boolean;
+  localExport?: boolean;
 };
 
 function configuredBackend(): ConfigBackend {
@@ -207,17 +208,37 @@ export function readConfigYaml<T>(path: string, prefix: string): T {
   return (parse(readConfigDocument(path, prefix)) ?? {}) as T;
 }
 
+export function hasConfigDocument(path: string, prefix: string): boolean {
+  try {
+    readConfigDocument(path, prefix);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function removeConfigExport(path: string): void {
+  rmSync(path, { force: true });
+}
+
 export function writeConfigDocument(path: string, content: string, options: WriteConfigOptions = {}): void {
   const backend = configuredBackend();
   const syncCluster = backend !== "file" && shouldUseClusterStore(path);
+  const writeLocalExport = !syncCluster || options.localExport === true || (!options.requireClusterStore && backend !== "lxd-dqlite");
 
   if (syncCluster && (options.requireClusterStore || backend === "lxd-dqlite")) {
     writeClusterConfigDocument(content);
+    if (!writeLocalExport) {
+      removeConfigExport(path);
+      return;
+    }
   }
 
-  mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
-  writeFileSync(path, content, "utf8");
-  chmodSync(path, 0o600);
+  if (writeLocalExport) {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
+    writeFileSync(path, content, "utf8");
+    chmodSync(path, 0o600);
+  }
 
   if (!syncCluster || options.requireClusterStore || backend === "lxd-dqlite") {
     return;
@@ -243,7 +264,7 @@ export function exportClusterStoreToConfigFile(path: string, prefix: string): bo
   if (clusterDocument === null) {
     return false;
   }
-  writeConfigDocument(path, clusterDocument, { requireClusterStore: false });
+  writeConfigDocument(path, clusterDocument, { requireClusterStore: false, localExport: true });
   return true;
 }
 

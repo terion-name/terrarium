@@ -12,6 +12,7 @@ import { CONFIG_PATH } from "./ctl/context";
 import { updateCmd } from "./ctl/update";
 import { verifyOidcConfig, verifyS3Config } from "./ctl/verify";
 import { normalizeS3Endpoint } from "./lib/common";
+import { hasConfigDocument } from "./lib/config-store";
 
 const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
@@ -119,12 +120,12 @@ function printSplash(): void {
 }
 
 async function handleExistingInteractiveInstall(options: InstallOptions): Promise<boolean> {
-  if (options.mode !== "interactive" || !existsSync(CONFIG_PATH)) {
+  if (options.mode !== "interactive" || !hasConfigDocument(CONFIG_PATH, PREFIX)) {
     return false;
   }
 
   const action = await select({
-    message: `Existing Terrarium configuration found at ${CONFIG_PATH}. What do you want to do?`,
+    message: "Existing Terrarium configuration found. What do you want to do?",
     choices: [
       { name: "Update existing installation", value: "update" },
       { name: "Reinstall / reconfigure from scratch", value: "reinstall" },
@@ -1410,7 +1411,7 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   }
   console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
   console.log(`${chalk.cyan("Management admin group:")} ${chalk.white(options.adminGroup)}`);
-  console.log(`${chalk.cyan("Resolved config:")} ${chalk.white("/etc/terrarium/config.yaml")}`);
+  console.log(`${chalk.cyan("Saved config:")} ${chalk.white("LXD dqlite store (run terrariumctl config export for a YAML copy)")}`);
   if (options.generatedRootPasswordPath) {
     console.log(`${chalk.cyan("Cockpit login:")} ${chalk.white(`generated root password saved to ${options.generatedRootPasswordPath}`)}`);
   } else if (options.rootPassword) {

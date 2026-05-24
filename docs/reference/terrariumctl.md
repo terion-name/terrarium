@@ -158,11 +158,11 @@ Terrarium keeps its canonical day-2 config in LXD's dqlite-backed project metada
 - key: `user.terrarium.config_b64`
 - value: base64-encoded YAML
 
-`/etc/terrarium/config.yaml` remains a root-only local export because Ansible consumes YAML files directly and operators still need a readable recovery/debug artifact.
+`/etc/terrarium/config.yaml` is a root-only YAML export, not the steady-state store. Terrarium creates it only as a transient Ansible input or when you explicitly run `terrariumctl config export`.
 
-Use `terrariumctl config import` to copy the local export into the dqlite-backed store. Terrarium runs this automatically after LXD has been initialized during install and reconfigure.
+Use `terrariumctl config import` to copy a local export into the dqlite-backed store. Terrarium runs this automatically after LXD has been initialized during install and removes the transient export afterwards.
 
-Use `terrariumctl config export` to recreate the local export from the dqlite-backed store. `terrariumctl reconfigure` does this automatically before invoking Ansible when the dqlite-backed store exists.
+Use `terrariumctl config export` to recreate the local export from the dqlite-backed store for recovery or debugging. `terrariumctl reconfigure` uses a temporary export before invoking Ansible and removes it afterwards.
 
 ## update
 
@@ -174,7 +174,7 @@ terrariumctl update --ref 0.0.21
 terrariumctl update --skip-reconfigure
 ```
 
-The command updates `/opt/terrarium`, refreshes Ansible collections, and then runs `terrariumctl reconfigure` with OS hardening skipped. It reuses the saved configuration from LXD's config store or `/etc/terrarium/config.yaml`; it does not ask storage, domain, IDP, S3, or syncoid setup questions.
+The command updates `/opt/terrarium`, refreshes Ansible collections, and then runs `terrariumctl reconfigure` with OS hardening skipped. It reuses the saved configuration from LXD's config store or the legacy `/etc/terrarium/config.yaml` fallback; it does not ask storage, domain, IDP, S3, or syncoid setup questions.
 
 When using the bootstrap installer, pass `--update` to get the same behavior from a release bundle:
 

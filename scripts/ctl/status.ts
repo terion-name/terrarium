@@ -47,7 +47,8 @@ export async function statusCmd(): Promise<void> {
   const traefikSyncTimer = await runAllowFailure(["systemctl", "is-active", "terrarium-traefik-sync.timer"]);
 
   console.log(heading("Terrarium status"));
-  console.log(`  ${label("Config:")} ${value(`/etc/terrarium/config.yaml (${activeConfigStore()})`)}`);
+  console.log(`  ${label("Config store:")} ${value(activeConfigStore())}`);
+  console.log(`  ${label("Config export:")} ${value("/etc/terrarium/config.yaml (run terrariumctl config export)")}`);
   console.log(`  ${label("Pool:")} ${value(pool)}`);
   console.log(`  ${label("Cockpit:")} ${value(`https://${manage}`)}`);
   console.log(`  ${label("Traefik dashboard:")} ${value(`https://${proxy}`)}`);

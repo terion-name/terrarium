@@ -298,7 +298,11 @@ async function verifyTerrariumCluster(context: IntegrationContext, sshKeyId: num
     await seedSsh.exec("terrariumctl cluster ovn configure", { timeoutMs: 30 * 60 * 1000 });
     await expectRemoteContains(seedSsh, "terrariumctl cluster status", "terrarium-ovn");
     await expectRemoteContains(joinSsh, "terrariumctl cluster status", "terrarium-ovn");
-    await expectRemoteContains(joinSsh, "grep -F 'terrarium_cluster_enabled: true' /etc/terrarium/config.yaml", "terrarium_cluster_enabled: true");
+    await expectRemoteContains(
+      joinSsh,
+      "terrariumctl config export >/dev/null && grep -F 'terrarium_cluster_enabled: true' /etc/terrarium/config.yaml; rc=$?; rm -f /etc/terrarium/config.yaml; exit $rc",
+      "terrarium_cluster_enabled: true"
+    );
     await verifyClusterOvnWorkloads(seedSsh, seedMember, joinMember, context.config.slug);
     await verifyClusterWorkloadOperations(seedSsh, seedMember, joinMember, context.config.slug);
     await verifyClusterRemoveWithMove(seedSsh, seedMember, joinMember, context.config.slug);

@@ -4,6 +4,7 @@ import { configString, loadConfig } from "../lib/common";
 import {
   configStoreSummary,
   DEFAULT_CONFIG_PATH,
+  hasConfigDocument,
   readConfigDocument,
   writeConfigDocument
 } from "../lib/config-store";
@@ -93,9 +94,14 @@ export function loadMutableConfig(): MutableConfig {
   return parse(readConfigDocument(CONFIG_PATH, PREFIX)) as MutableConfig;
 }
 
-/** Persists the mutable config to the cluster-backed store and local YAML export. */
+/** Persists the mutable config to the cluster-backed store. */
 export function saveMutableConfig(content: string): void {
   writeConfigDocument(CONFIG_PATH, content, { requireClusterStore: true });
+}
+
+/** Returns whether Terrarium has a saved config in the active store or legacy export. */
+export function savedConfigExists(): boolean {
+  return hasConfigDocument(CONFIG_PATH, PREFIX);
 }
 
 /** Returns the active config storage backend for human-readable status output. */

@@ -115,7 +115,8 @@ describe("terrarium install CLI parsing", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
 
     expect(source).toContain("handleExistingInteractiveInstall");
-    expect(source).toContain("Existing Terrarium configuration found at ${CONFIG_PATH}");
+    expect(source).toContain("hasConfigDocument(CONFIG_PATH, PREFIX)");
+    expect(source).toContain("Existing Terrarium configuration found. What do you want to do?");
     expect(source).toContain("Update existing installation");
     expect(source).toContain("Reinstall / reconfigure from scratch");
     expect(source).toContain("await updateCmd({ ref: options.ref })");

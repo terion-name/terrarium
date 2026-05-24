@@ -122,7 +122,7 @@ Terrarium keeps:
 
 - the installed Terrarium bundle at `/opt/terrarium`
 - the canonical config in LXD's dqlite-backed `terrarium-system` project after LXD is initialized
-- a local config export at `/etc/terrarium/config.yaml`
+- canonical config in LXD's dqlite-backed store, with an optional root-only YAML export available through `terrariumctl config export`
 
 From there, the main commands you will use are:
 

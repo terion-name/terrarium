@@ -14,6 +14,12 @@ http:
           - X-Auth-Request-User
           - X-Auth-Request-Email
           - X-Auth-Request-Groups
+    management-security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        customResponseHeaders:
+          Content-Security-Policy: "frame-ancestors 'none'"
     traefik-dashboard-root-redirect:
       redirectRegex:
         regex: "^https?://([^/]+)/?$"
@@ -34,6 +40,8 @@ http:
         - websecure
       rule: Host(`{{ terrarium_manage_domain }}`) && PathPrefix(`/oauth2/`)
       service: oauth2-proxy
+      middlewares:
+        - management-security-headers
       priority: 500
 {{ terrarium_host_tls(terrarium_manage_domain) }}
     proxy-oauth2:
@@ -41,6 +49,8 @@ http:
         - websecure
       rule: Host(`{{ terrarium_proxy_domain }}`) && PathPrefix(`/oauth2/`)
       service: oauth2-proxy
+      middlewares:
+        - management-security-headers
       priority: 500
 {{ terrarium_host_tls(terrarium_proxy_domain) }}
     cockpit:
@@ -49,6 +59,7 @@ http:
       rule: Host(`{{ terrarium_manage_domain }}`)
       middlewares:
         - admin-forward-auth
+        - management-security-headers
       service: cockpit
 {{ terrarium_host_tls(terrarium_manage_domain) }}
     traefik-dashboard-root:
@@ -58,6 +69,7 @@ http:
       middlewares:
         - admin-forward-auth
         - traefik-dashboard-root-redirect
+        - management-security-headers
       service: api@internal
 {{ terrarium_host_tls(terrarium_proxy_domain) }}
     traefik-dashboard:
@@ -66,12 +78,15 @@ http:
       rule: Host(`{{ terrarium_proxy_domain }}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))
       middlewares:
         - admin-forward-auth
+        - management-security-headers
       service: api@internal
 {{ terrarium_host_tls(terrarium_proxy_domain) }}
     lxd:
       entryPoints:
         - websecure
       rule: Host(`{{ terrarium_lxd_domain }}`)
+      middlewares:
+        - management-security-headers
       service: lxd
 {{ terrarium_host_tls(terrarium_lxd_domain) }}
 {% if terrarium_idp_mode == 'local' %}

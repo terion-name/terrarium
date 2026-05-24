@@ -21,7 +21,7 @@ Terrarium is built on four main layers:
 
 ### Where Does the Config Live?
 Terrarium is smart about not reinventing the wheel. Instead of running a complex secondary database just to store your settings, it uses LXD's built-in, highly available database (`dqlite`). 
-- A backup copy of your config is always kept at `/etc/terrarium/config.yaml` so you can read it easily.
+- The canonical config lives in LXD's dqlite-backed project store. You can create a root-only YAML export at `/etc/terrarium/config.yaml` with `terrariumctl config export` when you need a recovery/debug copy.
 - Whenever you make changes using commands like `terrariumctl set domains`, Terrarium updates the LXD database and tells Ansible to seamlessly apply the changes.
 
 ### The ZFS Storage Engine

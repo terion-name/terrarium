@@ -13,7 +13,7 @@ import {
   setConfigValue,
   success
 } from "./context";
-import { exportClusterStoreToConfigFile, importConfigFileToClusterStore } from "../lib/config-store";
+import { exportClusterStoreToConfigFile } from "../lib/config-store";
 import { reconfigureCmd } from "./system";
 
 const PREFIX = "terrariumctl cluster";
@@ -1030,7 +1030,6 @@ async function closeWireGuardFirewall(endpointCidrs: string[], port: string): Pr
 }
 
 async function converge(skipReconfigure: boolean | undefined): Promise<void> {
-  importConfigFileToClusterStore(CONFIG_PATH, PREFIX);
   if (!skipReconfigure) {
     await reconfigureCmd({ applyHardening: false });
   }
@@ -1727,7 +1726,6 @@ export async function clusterInviteCmd(member: string, options: ClusterInviteOpt
       upsertPendingWireGuardInvite(config, joinerTunnelIp, endpointCidr, tokenExpiry);
     }
     saveMutableConfig(stringify(config));
-    importConfigFileToClusterStore(CONFIG_PATH, PREFIX);
 
     await openWireGuardFirewall(endpointCidrs, wireGuardPort(config));
     if (joinerPeerCidr) {
@@ -1819,7 +1817,6 @@ export async function clusterInviteCleanupCmd(options: ClusterInviteCleanupOptio
 
   if (changedPending || changedPeers || removedWireGuard.changed || changedWireGuard) {
     saveMutableConfig(stringify(config));
-    importConfigFileToClusterStore(CONFIG_PATH, PREFIX);
   }
   if (removablePeerCidrs.length > 0) {
     await closeClusterFirewall(removablePeerCidrs);

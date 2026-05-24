@@ -89,6 +89,11 @@ describe("Traefik bootstrap certificate template", () => {
 
     expect(dynamicConfig).toContain("rule: Host(`{{ terrarium_lxd_domain }}`)");
     expect(dynamicConfig).toContain("certResolver: letsencrypt");
+    expect(dynamicConfig).toContain("management-security-headers:");
+    expect(dynamicConfig).toContain("frameDeny: true");
+    expect(dynamicConfig).toContain("contentTypeNosniff: true");
+    expect(dynamicConfig).toContain("Content-Security-Policy");
+    expect(dynamicConfig).toContain("frame-ancestors 'none'");
     expect(dynamicConfig).toContain("url: https://127.0.0.1:8443");
     expect(dynamicConfig).toContain("serversTransport: lxd-loopback");
     expect(dynamicConfig).toContain("insecureSkipVerify: true");

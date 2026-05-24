@@ -18,7 +18,7 @@ describe("hardening role", () => {
     expect(ctl).toContain("reconfigure: () => reconfigureCmd({ applyHardening: false })");
     expect(system).toContain("terrarium_apply_hardening=false");
     expect(system).toContain("running Ansible reconciliation");
-    expect(system).toContain("runInteractive(args");
+    expect(system).toContain("runInteractive([\"python3\", \"-c\", BLOCKING_STDIO_EXEC, ...args]");
   });
 
   test("preserves provider-injected SSH key revocation after sshd hardening", () => {

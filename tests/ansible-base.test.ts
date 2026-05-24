@@ -45,13 +45,15 @@ describe("cluster firewall", () => {
 });
 
 describe("config store reconciliation", () => {
-  test("imports the local config export into the LXD dqlite store before proxy sync", () => {
+  test("imports and removes the local config export before proxy sync", () => {
     const site = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
     const importIndex = site.indexOf("terrariumctl config import");
+    const removeIndex = site.indexOf("Remove transient local config export after dqlite import");
     const proxyIndex = site.indexOf("terrariumctl proxy sync");
 
     expect(importIndex).toBeGreaterThan(0);
-    expect(proxyIndex).toBeGreaterThan(importIndex);
+    expect(removeIndex).toBeGreaterThan(importIndex);
+    expect(proxyIndex).toBeGreaterThan(removeIndex);
   });
 });
 

@@ -6,7 +6,7 @@ Terrarium is designed to be flexible. You don't need to reinstall your server or
 
 Terrarium stores its configuration inside LXD's highly available internal database (`dqlite`). This means that if you have a cluster of servers, they all share the exact same configuration automatically.
 
-A backup, human-readable copy of your settings is always kept at `/etc/terrarium/config.yaml`.
+Terrarium keeps your saved settings in LXD's dqlite-backed config store. A root-only YAML copy can be created when needed with `terrariumctl config export`.
 
 Whenever you run a `terrariumctl set ...` command, Terrarium updates the database, updates the text file, and then seamlessly applies the changes to your system. (It's smart enough to skip the heavy OS-hardening steps during routine updates, making reconfigurations very fast).
 
