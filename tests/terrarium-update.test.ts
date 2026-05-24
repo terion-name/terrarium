@@ -16,7 +16,12 @@ describe("terrarium update command", () => {
     expect(ctl).toContain('option("--non-interactive"');
     expect(update).toContain("TERRARIUM_BUNDLE_DIR");
     expect(update).toContain("syncTree(BUNDLE_DIR, REPO_DIR)");
+    expect(update).toContain("GITHUB_CLI_APT_KEYRING");
+    expect(update).toContain("https://cli.github.com/packages");
+    expect(update).toContain("githubcli-archive-keyring.gpg");
+    expect(update).toContain('"dpkg", "--print-architecture"');
     expect(update).toContain('"git", "gh", "ansible", "python3", "jq", "unzip"');
+    expect(update).toContain('"gh", "attestation", "verify", "--help"');
     expect(update).toContain("SHA256SUMS");
     expect(update).toContain("verifyReleaseChecksum");
     expect(update).toContain("gh");

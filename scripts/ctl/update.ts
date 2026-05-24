@@ -1,5 +1,19 @@
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runText } from "../lib/common";
@@ -14,6 +28,9 @@ const ANSIBLE_GALAXY_ATTEMPTS = 4;
 const INSTALLED_CLI = "/usr/local/bin/terrariumctl";
 const TRM_ALIAS = "/usr/local/bin/trm";
 const RELEASE_SIGNER_WORKFLOW = `${GITHUB_REPO}/.github/workflows/release.yml`;
+const GITHUB_CLI_APT_KEYRING = "/etc/apt/keyrings/githubcli-archive-keyring.gpg";
+const GITHUB_CLI_APT_SOURCE = "/etc/apt/sources.list.d/github-cli.list";
+const GITHUB_CLI_APT_REPO = "https://cli.github.com/packages";
 
 export type UpdateOptions = {
   ref?: string;
@@ -198,7 +215,15 @@ async function installAnsibleCollections(): Promise<void> {
 
 async function ensureUpdateDependencies(): Promise<void> {
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "update", "-y"], PREFIX);
-  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "ca-certificates", "curl", "git", "gh", "ansible", "python3", "jq", "unzip"], PREFIX);
+  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "ca-certificates", "curl"], PREFIX);
+  await runText(["install", "-d", "-m", "0755", "/etc/apt/keyrings"], PREFIX);
+  await runText(["curl", "-fsSL", `${GITHUB_CLI_APT_REPO}/githubcli-archive-keyring.gpg`, "-o", GITHUB_CLI_APT_KEYRING], PREFIX);
+  chmodSync(GITHUB_CLI_APT_KEYRING, 0o644);
+  const arch = (await runText(["dpkg", "--print-architecture"], PREFIX)).trim();
+  writeFileSync(GITHUB_CLI_APT_SOURCE, `deb [arch=${arch} signed-by=${GITHUB_CLI_APT_KEYRING}] ${GITHUB_CLI_APT_REPO} stable main\n`);
+  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "update", "-y"], PREFIX);
+  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "git", "gh", "ansible", "python3", "jq", "unzip"], PREFIX);
+  await runText(["gh", "attestation", "verify", "--help"], PREFIX);
 }
 
 function trmAliasIsManaged(): boolean {

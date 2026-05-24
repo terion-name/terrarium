@@ -46,7 +46,12 @@ describe("install.sh bootstrap", () => {
     const source = readFileSync(join(repoRoot, "install.sh"), "utf8");
 
     expect(source).toContain("DPkg::Lock::Timeout=900");
-    expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl gh unzip python3");
+    expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl");
+    expect(source).toContain("https://cli.github.com/packages/githubcli-archive-keyring.gpg");
+    expect(source).toContain("/etc/apt/sources.list.d/github-cli.list");
+    expect(source).toContain("https://cli.github.com/packages stable main");
+    expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y gh unzip python3");
+    expect(source).toContain("gh attestation verify --help >/dev/null || die");
     expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y git");
   });
 

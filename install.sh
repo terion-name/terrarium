@@ -56,7 +56,14 @@ ensure_os() {
 ensure_bootstrap_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get -o DPkg::Lock::Timeout=900 update -y
-  apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl gh unzip python3
+  apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list
+  apt-get -o DPkg::Lock::Timeout=900 update -y
+  apt-get -o DPkg::Lock::Timeout=900 install -y gh unzip python3
+  gh attestation verify --help >/dev/null || die "GitHub CLI does not support attestation verification after installing from the official apt repository"
 }
 
 ensure_git() {
