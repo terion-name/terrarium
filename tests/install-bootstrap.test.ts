@@ -48,6 +48,9 @@ describe("install.sh bootstrap", () => {
     expect(source).toContain("DPkg::Lock::Timeout=900");
     expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl");
     expect(source).toContain("https://cli.github.com/packages/githubcli-archive-keyring.gpg");
+    expect(source).toContain("chown root:root /etc/apt/keyrings/githubcli-archive-keyring.gpg");
+    expect(source).toContain("chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg");
+    expect(source).toContain("install -o root -g root -m 0644 /dev/null /etc/apt/sources.list.d/github-cli.list");
     expect(source).toContain("/etc/apt/sources.list.d/github-cli.list");
     expect(source).toContain("https://cli.github.com/packages stable main");
     expect(source).toContain("apt-get -o DPkg::Lock::Timeout=900 install -y gh unzip python3");

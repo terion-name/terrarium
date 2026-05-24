@@ -20,6 +20,10 @@ describe("terrarium update command", () => {
     expect(update).toContain("https://cli.github.com/packages");
     expect(update).toContain("githubcli-archive-keyring.gpg");
     expect(update).toContain('"dpkg", "--print-architecture"');
+    expect(update).toContain('"chown", "root:root", GITHUB_CLI_APT_KEYRING');
+    expect(update).toContain("chmodSync(GITHUB_CLI_APT_KEYRING, 0o644)");
+    expect(update).toContain('"chown", "root:root", GITHUB_CLI_APT_SOURCE');
+    expect(update).toContain("chmodSync(GITHUB_CLI_APT_SOURCE, 0o644)");
     expect(update).toContain('"git", "gh", "ansible", "python3", "jq", "unzip"');
     expect(update).toContain('"gh", "attestation", "verify", "--help"');
     expect(update).toContain("SHA256SUMS");

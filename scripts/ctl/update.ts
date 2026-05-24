@@ -218,9 +218,12 @@ async function ensureUpdateDependencies(): Promise<void> {
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "ca-certificates", "curl"], PREFIX);
   await runText(["install", "-d", "-m", "0755", "/etc/apt/keyrings"], PREFIX);
   await runText(["curl", "-fsSL", `${GITHUB_CLI_APT_REPO}/githubcli-archive-keyring.gpg`, "-o", GITHUB_CLI_APT_KEYRING], PREFIX);
+  await runText(["chown", "root:root", GITHUB_CLI_APT_KEYRING], PREFIX);
   chmodSync(GITHUB_CLI_APT_KEYRING, 0o644);
   const arch = (await runText(["dpkg", "--print-architecture"], PREFIX)).trim();
   writeFileSync(GITHUB_CLI_APT_SOURCE, `deb [arch=${arch} signed-by=${GITHUB_CLI_APT_KEYRING}] ${GITHUB_CLI_APT_REPO} stable main\n`);
+  await runText(["chown", "root:root", GITHUB_CLI_APT_SOURCE], PREFIX);
+  chmodSync(GITHUB_CLI_APT_SOURCE, 0o644);
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "update", "-y"], PREFIX);
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "git", "gh", "ansible", "python3", "jq", "unzip"], PREFIX);
   await runText(["gh", "attestation", "verify", "--help"], PREFIX);
