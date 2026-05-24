@@ -55,6 +55,14 @@ describe("config store reconciliation", () => {
     expect(removeIndex).toBeGreaterThan(importIndex);
     expect(proxyIndex).toBeGreaterThan(removeIndex);
   });
+
+  test("keeps timer-driven proxy sync independent of the transient config export", () => {
+    const service = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/terrarium-traefik-sync.service.j2"), "utf8");
+
+    expect(service).toContain("ConditionPathExists=/usr/local/bin/terrariumctl");
+    expect(service).not.toContain("ConditionPathExists={{ terrarium_config_path }}");
+    expect(service).toContain("ExecStart=/usr/local/bin/terrariumctl proxy sync");
+  });
 });
 
 describe("partition-mode storage", () => {
