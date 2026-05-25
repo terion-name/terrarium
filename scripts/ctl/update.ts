@@ -28,6 +28,7 @@ const ANSIBLE_GALAXY_ATTEMPTS = 4;
 const INSTALLED_CLI = "/usr/local/bin/terrariumctl";
 const TRM_ALIAS = "/usr/local/bin/trm";
 const RELEASE_SIGNER_WORKFLOW = `${GITHUB_REPO}/.github/workflows/release.yml`;
+const RELEASE_ATTESTATION_BUNDLE = "terrarium-release-attestation.sigstore.json";
 const GITHUB_CLI_APT_KEYRING = "/etc/apt/keyrings/githubcli-archive-keyring.gpg";
 const GITHUB_CLI_APT_SOURCE = "/etc/apt/sources.list.d/github-cli.list";
 const GITHUB_CLI_APT_REPO = "https://cli.github.com/packages";
@@ -143,6 +144,8 @@ async function verifyReleaseAttestation(workDir: string, bundleName: string): Pr
       "attestation",
       "verify",
       join(workDir, bundleName),
+      "--bundle",
+      join(workDir, RELEASE_ATTESTATION_BUNDLE),
       "-R",
       GITHUB_REPO,
       "--signer-workflow",
@@ -159,10 +162,12 @@ async function downloadReleaseBundle(ref: string): Promise<string> {
   const bundleName = `terrarium-linux-${arch}.zip`;
   const assetUrl = `https://github.com/${GITHUB_REPO}/releases/download/${resolvedRef}/${bundleName}`;
   const checksumsUrl = `https://github.com/${GITHUB_REPO}/releases/download/${resolvedRef}/SHA256SUMS`;
+  const attestationUrl = `https://github.com/${GITHUB_REPO}/releases/download/${resolvedRef}/${RELEASE_ATTESTATION_BUNDLE}`;
 
   try {
     await runText(["curl", "-fsSL", assetUrl, "-o", join(workDir, bundleName)], PREFIX);
     await runText(["curl", "-fsSL", checksumsUrl, "-o", join(workDir, "SHA256SUMS")], PREFIX);
+    await runText(["curl", "-fsSL", attestationUrl, "-o", join(workDir, RELEASE_ATTESTATION_BUNDLE)], PREFIX);
     verifyReleaseChecksum(workDir, bundleName);
     await verifyReleaseAttestation(workDir, bundleName);
     await runText(["unzip", "-q", join(workDir, bundleName), "-d", workDir], PREFIX);

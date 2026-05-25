@@ -126,6 +126,7 @@ jobs:
           )
 
       - name: Generate release bundle attestations
+        id: release_attestations
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
@@ -133,6 +134,9 @@ jobs:
             release-assets/SHA256SUMS
             release-assets/terrarium-linux-x64.zip
             release-assets/terrarium-linux-arm64.zip
+
+      - name: Stage release attestation bundle
+        run: cp "${{ steps.release_attestations.outputs.bundle-path }}" release-assets/terrarium-release-attestation.sigstore.json
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -143,5 +147,6 @@ jobs:
             release-assets/terrarium-linux-x64.zip
             release-assets/terrarium-linux-arm64.zip
             release-assets/SHA256SUMS
+            release-assets/terrarium-release-attestation.sigstore.json
           generate_release_notes: true
           prerelease: ${{ contains(needs.release_tag.outputs.value, '-') }}

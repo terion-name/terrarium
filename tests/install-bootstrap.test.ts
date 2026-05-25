@@ -12,8 +12,10 @@ describe("install.sh bootstrap", () => {
     expect(source).toContain('TERRARIUM_ASSET="terrarium-linux-${arch}.zip"');
     expect(source).toContain('[[ -n "${resolved_ref}" ]] || die "failed to resolve latest Terrarium release tag"');
     expect(source).toContain("SHA256SUMS");
+    expect(source).toContain("terrarium-release-attestation.sigstore.json");
     expect(source).toContain("sha256sum -c -");
     expect(source).toContain("gh attestation verify");
+    expect(source).toContain('--bundle "${bundle_dir}/${attestation_name}"');
     expect(source).toContain("--signer-workflow");
     expect(source).not.toContain("head -n1 || true");
     expect(source).not.toContain("} || true");

@@ -47,10 +47,13 @@ describe("release workflow", () => {
     expect(source).toContain("id-token: write");
     expect(source).toContain("attestations: write");
     expect(source).toContain("actions/attest-build-provenance@v3");
+    expect(source).toContain("id: release_attestations");
+    expect(source).toContain("steps.release_attestations.outputs.bundle-path");
     expect(source).toContain("release-assets/install.sh");
     expect(source).toContain("release-assets/SHA256SUMS");
     expect(source).toContain("release-assets/terrarium-linux-x64.zip");
     expect(source).toContain("release-assets/terrarium-linux-arm64.zip");
+    expect(source).toContain("release-assets/terrarium-release-attestation.sigstore.json");
     expect(source).toContain("tag_name: ${{ needs.release_tag.outputs.value }}");
   });
 

@@ -27,9 +27,12 @@ describe("terrarium update command", () => {
     expect(update).toContain('"git", "gh", "ansible", "python3", "jq", "unzip"');
     expect(update).toContain('"gh", "attestation", "verify", "--help"');
     expect(update).toContain("SHA256SUMS");
+    expect(update).toContain('const RELEASE_ATTESTATION_BUNDLE = "terrarium-release-attestation.sigstore.json"');
     expect(update).toContain("verifyReleaseChecksum");
     expect(update).toContain("gh");
     expect(update).toContain("attestation");
+    expect(update).toContain('"--bundle"');
+    expect(update).toContain("join(workDir, RELEASE_ATTESTATION_BUNDLE)");
     expect(update).toContain("--signer-workflow");
     expect(update).toContain(".github/workflows/release.yml");
     expect(update).toContain("refusing to sync Terrarium source onto itself");

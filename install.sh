@@ -158,16 +158,19 @@ download_release_bundle() {
   local arch="$2"
   local resolved_ref="$3"
   local bundle_name="terrarium-linux-${arch}.zip"
+  local attestation_name="terrarium-release-attestation.sigstore.json"
   local asset_url="https://github.com/${GITHUB_REPO}/releases/download/${resolved_ref}/${bundle_name}"
   local checksums_url="https://github.com/${GITHUB_REPO}/releases/download/${resolved_ref}/SHA256SUMS"
+  local attestation_url="https://github.com/${GITHUB_REPO}/releases/download/${resolved_ref}/${attestation_name}"
   local checksum_line
 
   log "downloading Terrarium release bundle ${resolved_ref} (${arch})"
   curl -fsSL "${asset_url}" -o "${bundle_dir}/${bundle_name}" || return 1
   curl -fsSL "${checksums_url}" -o "${bundle_dir}/SHA256SUMS" || return 1
+  curl -fsSL "${attestation_url}" -o "${bundle_dir}/${attestation_name}" || return 1
   checksum_line="$(awk -v asset="${bundle_name}" '$2 == asset || $2 == "*" asset { print $1 "  " asset; found = 1 } END { if (!found) exit 1 }' "${bundle_dir}/SHA256SUMS")" || return 1
   (cd "${bundle_dir}" && printf '%s\n' "${checksum_line}" | sha256sum -c -) || return 1
-  gh attestation verify "${bundle_dir}/${bundle_name}" -R "${GITHUB_REPO}" --signer-workflow "${GITHUB_REPO}/.github/workflows/release.yml" || return 1
+  gh attestation verify "${bundle_dir}/${bundle_name}" --bundle "${bundle_dir}/${attestation_name}" -R "${GITHUB_REPO}" --signer-workflow "${GITHUB_REPO}/.github/workflows/release.yml" || return 1
   unzip -q "${bundle_dir}/${bundle_name}" -d "${bundle_dir}"
   [[ -x "${bundle_dir}/dist/terrariumctl" ]] || return 1
 }
