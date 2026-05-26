@@ -39,6 +39,7 @@ import {
   mountRemoveCmd
 } from "./ctl/mount";
 import { execCmd } from "./ctl/exec";
+import { imageCreateCmd, imageDeleteCmd, imageLaunchCmd, imageListCmd } from "./ctl/image";
 import { idpBackupCmd, idpLogsCmd, idpRestoreCmd, idpStatusCmd } from "./ctl/idp";
 import { launchCmd, launchOptionsFromCli } from "./ctl/launch";
 import { statusCmd } from "./ctl/status";
@@ -158,6 +159,63 @@ cli
   )
   .action(async (image, name, options) => {
     await launchCmd(image as string, name as string, launchOptionsFromCli(options as Record<string, unknown>));
+  });
+
+cli
+  .command("image <action> [...args]", "Golden image operations: create, list, launch, delete")
+  .option("--snapshot <name>", "Publish an existing instance snapshot", STRING_OPTION)
+  .option("--live", "Publish the current instance state without creating a temporary snapshot")
+  .option("--reuse", "Replace an existing image alias when creating")
+  .option("--profile <profile>", "LXD profile for image launch; can be repeated", STRING_OPTION)
+  .option("--disk <size>", "Root disk size for image launch, for example 40G", STRING_OPTION)
+  .option("--memory <size>", "Memory limit for image launch, for example 4G", STRING_OPTION)
+  .option("--cpu <count>", "CPU limit for image launch", STRING_OPTION)
+  .option("--proxy <route>", "Set the Terrarium user.proxy label on image launch; can be repeated", STRING_OPTION)
+  .usage(
+    "image create INSTANCE ALIAS [--snapshot SNAPSHOT|--live] [--reuse]\n  terrariumctl image list\n  terrariumctl image launch ALIAS NAME [--profile dev] [--proxy https://app.example.com:8080]\n  terrariumctl image delete ALIAS"
+  )
+  .action(async (action, args, options) => {
+    const commandArgs = (args as string[]) ?? [];
+    const rawOptions = options as Record<string, unknown>;
+    const normalizedAction = action.trim().toLowerCase();
+
+    if (normalizedAction === "create") {
+      const [instance, alias] = commandArgs;
+      if (!instance || !alias) {
+        throw new Error("image create requires: <instance> <alias>");
+      }
+      await imageCreateCmd(instance, alias, {
+        snapshot: cliOption(rawOptions, "snapshot"),
+        live: Boolean(rawOptions.live),
+        reuse: Boolean(rawOptions.reuse)
+      });
+      return;
+    }
+
+    if (normalizedAction === "list") {
+      await imageListCmd();
+      return;
+    }
+
+    if (normalizedAction === "launch") {
+      const [alias, name] = commandArgs;
+      if (!alias || !name) {
+        throw new Error("image launch requires: <alias> <name>");
+      }
+      await imageLaunchCmd(alias, name, launchOptionsFromCli(rawOptions));
+      return;
+    }
+
+    if (normalizedAction === "delete") {
+      const [alias] = commandArgs;
+      if (!alias) {
+        throw new Error("image delete requires: <alias>");
+      }
+      await imageDeleteCmd(alias);
+      return;
+    }
+
+    throw new Error(`unsupported image action: ${action}`);
   });
 
 cli

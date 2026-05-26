@@ -56,7 +56,8 @@ export default defineConfig({
           { text: "Overview", link: "/operations/" },
           { text: "Reconfiguration", link: "/operations/reconfiguration" },
           { text: "Clustering", link: "/operations/clustering" },
-          { text: "Backups and Restore", link: "/operations/backups-and-restore" }
+          { text: "Backups and Restore", link: "/operations/backups-and-restore" },
+          { text: "Golden Images", link: "/operations/golden-images" }
         ]
       },
       {

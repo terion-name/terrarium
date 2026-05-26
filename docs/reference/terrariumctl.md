@@ -9,6 +9,9 @@
 | `terrariumctl install` | optional flags, see below | interactive mode | Installs or bootstraps Terrarium on the current host, including preflight verification for external OIDC and S3 when enabled. |
 | `terrariumctl status` | none | n/a | Shows Terrarium service status, management endpoints, IDP mode, admin group, and the oauth2-proxy state. |
 | `terrariumctl launch` | required: image and instance name; optional provisioning flags | normal LXD launch with optional generated cloud-init | Launches an LXD container, optionally applying resource limits, generated Ansible/Docker Compose provisioning, and a Terrarium `user.proxy` label. |
+| `terrariumctl image create` | required: instance and image alias; optional: `--snapshot`, `--live`, `--reuse` | creates a temporary snapshot and sanitized image | Publishes a reusable golden LXD image from a container or snapshot without carrying published-route proxy config into the image. |
+| `terrariumctl image launch` | required: image alias and new instance name; optional launch flags | same as `terrariumctl launch` | Launches a new container from a Terrarium golden image. |
+| `terrariumctl image list/delete` | optional image alias for delete | n/a | Lists or removes local LXD images. |
 | `terrariumctl exec` | required: instance name; optional command after `--`, `--root`, `--user` | `terrarium` login shell | Opens a shell or runs a command inside a container as the non-root `terrarium` user by default. |
 | `terrariumctl backup list` | none | n/a | Lists local ZFS snapshots and, when enabled, S3 manifests. |
 | `terrariumctl backup export` | none | n/a | Uploads the current incremental ZFS backup chain to configured S3 storage. |
@@ -98,6 +101,59 @@ trm launch ubuntu:24.04 app-01 \
   --docker-compose ./docker-compose.yml \
   --proxy https://app.example.com:8080 \
   --proxy https://admin.example.com:3000@auth:admins
+```
+
+## image
+
+`trm image` creates and manages named golden images. Use it when a container is
+configured exactly how you want and you want to launch more containers from that
+state later.
+
+Create an image from the current instance state:
+
+```bash
+trm image create web-01 golden-web
+```
+
+By default, Terrarium creates a temporary LXD snapshot, copies it to a temporary
+instance, removes `user.proxy` and LXD proxy devices from that copy, publishes
+the image, and then removes the temporary resources. This keeps the image from
+accidentally inheriting the source container's public route.
+
+Create an image from an existing snapshot:
+
+```bash
+trm image create web-01 golden-web --snapshot known-good
+```
+
+Use `--live` when you explicitly want to publish the current instance state
+without creating a temporary snapshot first:
+
+```bash
+trm image create web-01 golden-web --live
+```
+
+If the alias already exists and you intentionally want to replace it, add
+`--reuse`:
+
+```bash
+trm image create web-01 golden-web --snapshot known-good --reuse
+```
+
+Launch from a golden image:
+
+```bash
+trm image launch golden-web web-02 --profile dev
+```
+
+`image launch` accepts the same basic launch flags as `trm launch`: `--profile`,
+`--disk`, `--memory`, `--cpu`, and `--proxy`.
+
+List or remove images:
+
+```bash
+trm image list
+trm image delete golden-web
 ```
 
 ## install

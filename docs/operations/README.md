@@ -7,6 +7,7 @@ This section covers all the things you do *after* Terrarium is installed. Whethe
 - **[Reconfiguration](reconfiguration.md):** How to safely change your domains, emails, and login methods without breaking anything.
 - **[Clustering](clustering.md):** How to link multiple Terrarium servers together into a highly available swarm.
 - **[Backups and Restore](backups-and-restore.md):** How to use your built-in time machine and off-site S3 exports.
+- **[Golden Images](golden-images.md):** How to save a configured container as a reusable launch template.
 
 ### The `terrariumctl` Command
 
@@ -17,6 +18,7 @@ The most common commands you'll use day-to-day are:
 - `terrariumctl set emails`
 - `terrariumctl set idp` (To change between local ZITADEL and external OIDC logins)
 - `terrariumctl set s3` (To configure off-site backups)
+- `terrariumctl image create` (To publish reusable golden images)
 - `terrariumctl proxy sync` (To manually update your network routing rules)
 
 *Want to see everything it can do? Check out the full [terrariumctl Reference](../reference/terrariumctl.md).*

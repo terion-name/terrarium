@@ -241,7 +241,28 @@ trm launch ubuntu:24.04 customer-portal \
 
 This creates one isolated container, prepares it with Ansible, starts two Compose stacks, and publishes two authenticated HTTPS routes.
 
-## 8. Use Raw Cloud-Init When You Need Full Control
+## 8. Save a Reusable Golden Image
+
+When a templated launch produces a container you want to reuse, turn it into a
+golden image:
+
+```bash
+trm image create customer-portal golden-customer-portal
+```
+
+Then launch more containers from that prepared state:
+
+```bash
+trm image launch golden-customer-portal customer-portal-02 --profile dev
+```
+
+Golden images are useful when provisioning is expensive or when you want a
+known-good starting point before a risky experiment. Terrarium strips published
+route config from the image source, so new containers do not accidentally
+inherit the old container's public hostname. See [Golden Images](../operations/golden-images.md)
+for the full workflow.
+
+## 9. Use Raw Cloud-Init When You Need Full Control
 
 If you already have a complete cloud-init file, pass it directly:
 
@@ -260,7 +281,7 @@ trm launch ubuntu:24.04 raw-01 \
   --proxy https://raw.example.com:8080
 ```
 
-## 9. Debugging a Launch
+## 10. Debugging a Launch
 
 Cloud-init runs after LXD reports that the container was created. If the instance exists but your app is not ready yet, open a shell:
 

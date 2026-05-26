@@ -22,6 +22,7 @@ describe("docs config", () => {
     const reference = readRepoFile("docs/reference/terrariumctl.md");
     const firstInstance = readRepoFile("docs/getting-started/creating-first-instance.md");
     const templating = readRepoFile("docs/getting-started/templating.md");
+    const goldenImages = readRepoFile("docs/operations/golden-images.md");
     const guidePaths = [
       "docs/guides/openclaw.md",
       "docs/guides/hermes.md",
@@ -39,6 +40,11 @@ describe("docs config", () => {
 
     expect(reference).toContain("| `terrariumctl exec` |");
     expect(reference).toContain("| `terrariumctl launch` |");
+    expect(reference).toContain("| `terrariumctl image create` |");
+    expect(reference).toContain("trm image launch golden-web web-02 --profile dev");
+    expect(docsConfig).toContain('link: "/operations/golden-images"');
+    expect(goldenImages).toContain("trm image create web-01 golden-web");
+    expect(goldenImages).toContain("removes published-route proxy config");
     expect(reference).toContain("trm launch ubuntu:24.04 app-01 --docker-compose ./docker-compose.yml");
     expect(reference).toContain("Templating Containers with `trm launch`");
     expect(docsConfig).toContain('link: "/getting-started/templating"');
@@ -49,6 +55,8 @@ describe("docs config", () => {
     expect(templating).toContain("As Ansible extra vars through `--extra-vars`");
     expect(templating).toContain("As Docker Compose variables through `--env-file`");
     expect(templating).toContain("Raw cloud-init replaces Terrarium's generated template");
+    expect(templating).toContain("trm image create customer-portal golden-customer-portal");
+    expect(templating).toContain("../operations/golden-images.md");
     expect(reference).toContain("trm exec my-stack");
     expect(reference).toContain("trm exec my-stack --root");
     expect(firstInstance).toContain("trm launch ubuntu:24.04 my-first-app");

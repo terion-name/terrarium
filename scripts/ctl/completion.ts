@@ -24,6 +24,7 @@ const commands = [
   "reconfigure",
   "update",
   "launch",
+  "image",
   "exec",
   "config",
   "cluster",
@@ -36,6 +37,7 @@ const commands = [
 
 const actions: Record<string, string[]> = {
   backup: ["list", "export", "restore"],
+  image: ["create", "list", "launch", "delete"],
   config: ["import", "export"],
   cluster: ["status", "init", "invite", "token", "join", "evacuate", "restore", "move", "remove", "ovn"],
   proxy: ["sync"],
@@ -99,6 +101,7 @@ const optionGroups: Record<string, string[]> = {
     "--cloud-init",
     "--proxy"
   ],
+  image: ["--snapshot", "--live", "--reuse", "--profile", "--disk", "--memory", "--cpu", "--proxy"],
   exec: ["--root", "--user"],
   cluster: [
     "--member",
@@ -353,6 +356,7 @@ _terrariumctl_complete() {
       backup) COMPREPLY=( $(compgen -W "${words(optionGroups.backup)} --help" -- "\${cur}") ) ;;
       update) COMPREPLY=( $(compgen -W "${words(optionGroups.update)} --help" -- "\${cur}") ) ;;
       launch) COMPREPLY=( $(compgen -W "${words(optionGroups.launch)} --help" -- "\${cur}") ) ;;
+      image) COMPREPLY=( $(compgen -W "${words(optionGroups.image)} --help" -- "\${cur}") ) ;;
       exec) COMPREPLY=( $(compgen -W "${words(optionGroups.exec)} --help" -- "\${cur}") ) ;;
       cluster) COMPREPLY=( $(compgen -W "${words(optionGroups.cluster)} --help" -- "\${cur}") ) ;;
       mount) COMPREPLY=( $(compgen -W "${words(optionGroups.mount)} --help" -- "\${cur}") ) ;;
@@ -370,6 +374,7 @@ _terrariumctl_complete() {
     2)
       case "\${command}" in
         backup) COMPREPLY=( $(compgen -W "${words(actions.backup)}" -- "\${cur}") ) ;;
+        image) COMPREPLY=( $(compgen -W "${words(actions.image)}" -- "\${cur}") ) ;;
         config) COMPREPLY=( $(compgen -W "${words(actions.config)}" -- "\${cur}") ) ;;
         cluster) COMPREPLY=( $(compgen -W "${words(actions.cluster)}" -- "\${cur}") ) ;;
         proxy) COMPREPLY=( $(compgen -W "${words(actions.proxy)}" -- "\${cur}") ) ;;
@@ -414,6 +419,7 @@ _terrariumctl() {
 
   case "$words[2]" in
     backup) actions=(${words(actions.backup)}); opts=(${words(optionGroups.backup)}) ;;
+    image) actions=(${words(actions.image)}); opts=(${words(optionGroups.image)}) ;;
     config) actions=(${words(actions.config)}) ;;
     cluster) actions=(${words(actions.cluster)}); opts=(${words(optionGroups.cluster)}) ;;
     proxy) actions=(${words(actions.proxy)}) ;;
