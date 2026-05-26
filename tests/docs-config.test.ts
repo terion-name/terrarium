@@ -61,6 +61,7 @@ describe("docs config", () => {
     expect(guides).not.toContain("lxc exec devbox --user 1000");
     expect(guides).not.toContain("lxc exec my-stack --user 1000");
     expect(sharedData).toContain("/home/terrarium/.codex");
+    expect(sharedData).toContain("lxc exec hermes -- chown -R terrarium:terrarium /home/terrarium/.codex");
     expect(sharedData).not.toContain("/root/.codex");
   });
 

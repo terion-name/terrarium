@@ -47,6 +47,14 @@ lxc storage volume attach terrarium agent-memory openclaw agent-memory /srv/shar
 lxc storage volume attach terrarium agent-memory hermes agent-memory /srv/shared-memory
 ```
 
+If the path should be writable by the normal Terrarium container user, set
+ownership after attaching it:
+
+```bash
+lxc exec openclaw -- chown -R terrarium:terrarium /srv/shared-memory
+lxc exec hermes -- chown -R terrarium:terrarium /srv/shared-memory
+```
+
 *In this example, both the `openclaw` and `hermes` containers can now read and write to the `/srv/shared-memory` folder, and they will instantly see each other's changes.*
 
 ---
@@ -65,6 +73,11 @@ lxc storage volume create terrarium codex-auth
 lxc storage volume attach terrarium codex-auth openclaw codex-auth /home/terrarium/.codex
 lxc storage volume attach terrarium codex-auth hermes codex-auth /home/terrarium/.codex
 lxc storage volume attach terrarium codex-auth research codex-auth /home/terrarium/.codex
+
+# Make the mounted auth directory writable by the normal container user
+lxc exec openclaw -- chown -R terrarium:terrarium /home/terrarium/.codex
+lxc exec hermes -- chown -R terrarium:terrarium /home/terrarium/.codex
+lxc exec research -- chown -R terrarium:terrarium /home/terrarium/.codex
 ```
 
 Now, just log into one of those containers, run the login command, and *boom*—all three containers are authenticated instantly.
