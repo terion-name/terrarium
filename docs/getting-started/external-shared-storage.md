@@ -28,7 +28,7 @@ For this example, we recommend a [Hetzner Storage Box](https://www.hetzner.com/s
 Make sure you know your:
 - **Username:** (e.g., `u12345`)
 - **Password**
-- **Host Address:** (e.g., `//u12345.your-storagebox.de/backup`)
+- **Share Address:** for the main account this is usually `//u12345.your-storagebox.de/backup`; for a subaccount it is usually `//u12345-sub1.your-storagebox.de/u12345-sub1`
 
 ## 2. Mount It to Terrarium
 
@@ -38,6 +38,13 @@ SSH into your host and run:
 
 ```bash
 terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
+```
+
+For a Storage Box subaccount, use the subaccount name in both the hostname and
+the share name:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345-sub1.your-storagebox.de/u12345-sub1 u12345-sub1
 ```
 
 Terrarium will safely ask for your password, establish an encrypted connection, and ensure the drive automatically reconnects if your server reboots. 

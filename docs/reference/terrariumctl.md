@@ -516,7 +516,7 @@ Restore behavior:
 | --- | --- | --- | --- | --- |
 | positional `protocol` | `smb` or `cifs` | yes | none | Chooses the SMB/CIFS mount handler. Both values map to a managed CIFS mount. |
 | positional `hostPath` | absolute host path | yes | none | The mount point to create on the Terrarium host. |
-| positional `address` | share address | yes | none | The SMB share address, usually `//server/share`. |
+| positional `address` | share address | yes | none | The SMB share address, `//server/share`. Hetzner Storage Box main accounts usually use `//u12345.your-storagebox.de/backup`; subaccounts usually use `//u12345-sub1.your-storagebox.de/u12345-sub1`. |
 | positional `username` | username | yes | none | The SMB/CIFS username written to the managed credentials file. |
 | `-p`, `--password` | password | no | prompt if omitted | The SMB/CIFS password. Omit it to let Terrarium prompt securely instead of putting it in shell history. |
 | `--password-file` | path | no | none | Reads the SMB/CIFS password from a root-readable file for non-interactive runs without putting it in shell history or process args. |
@@ -533,6 +533,12 @@ Example:
 
 ```bash
 terrariumctl mount add cifs /srv/shared/storage-box //u12345.your-storagebox.de/backup u12345
+```
+
+For a Hetzner Storage Box subaccount:
+
+```bash
+terrariumctl mount add cifs /srv/shared/storage-box //u12345-sub1.your-storagebox.de/u12345-sub1 u12345-sub1
 ```
 
 Attach the share to a container in the same step:
