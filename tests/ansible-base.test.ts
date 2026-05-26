@@ -161,4 +161,13 @@ describe("terrariumctl mount defaults", () => {
     expect(mount).toContain("passwordFile?: string");
     expect(mount).toContain("readFileSync(options.passwordFile");
   });
+
+  test("rejects malformed CIFS shares and replaces stale host-path blocks", () => {
+    const mount = readFileSync(join(repoRoot, "scripts/ctl/mount.ts"), "utf8");
+
+    expect(mount).toContain("share address must include a server and share name");
+    expect(mount).toContain("//server/share");
+    expect(mount).toContain(".filter((mount) => mount.hostPath === hostPath)");
+    expect(mount).toContain(".reduce((current, mount) => stripManagedBlock(current, mount.marker), fstabCurrent)");
+  });
 });

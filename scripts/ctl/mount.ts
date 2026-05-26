@@ -52,10 +52,12 @@ function normalizeShareAddress(address: string): string {
   if (!trimmed) {
     throw new Error("share address is required");
   }
-  if (trimmed.startsWith("//")) {
-    return trimmed;
+  const normalized = trimmed.startsWith("//") ? trimmed : `//${trimmed.replace(/^\/+/, "")}`;
+  const [, server = "", share = ""] = normalized.match(/^\/\/([^/]+)\/([^/]+)/) ?? [];
+  if (!server || !share) {
+    throw new Error("share address must include a server and share name, for example //server/share");
   }
-  return `//${trimmed.replace(/^\/+/, "")}`;
+  return normalized;
 }
 
 /** Prevents users from accidentally creating relative mount points on the host. */
@@ -364,7 +366,10 @@ export async function mountAddCmd(
   chmodSync(credentialsPath, 0o600);
 
   const fstabCurrent = existsSync(FSTAB_PATH) ? readFileSync(FSTAB_PATH, "utf8") : "";
-  writeFileSync(FSTAB_PATH, replaceManagedBlock(fstabCurrent, marker, block), "utf8");
+  const withoutPreviousHostPathBlocks = parseManagedMounts(fstabCurrent)
+    .filter((mount) => mount.hostPath === hostPath)
+    .reduce((current, mount) => stripManagedBlock(current, mount.marker), fstabCurrent);
+  writeFileSync(FSTAB_PATH, replaceManagedBlock(withoutPreviousHostPathBlocks, marker, block), "utf8");
 
   const mounted = await runAllowFailure(["mountpoint", "-q", hostPath]);
   if (mounted.exitCode === 0) {
