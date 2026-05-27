@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { assertNewRestoreTargetIsUnused, rewriteRecoveredBackupMetadata } from "./backup";
-import { chooseLatestExportSnapshot, isRetriableS3ExportError } from "../terrarium-s3-export";
+import { assertNewRestoreTargetIsUnused, rewriteRecoveredBackupMetadata, rollbackSnapshotsForDatasetTree } from "./backup";
+import { chooseLatestExportSnapshot, isRetriableS3ExportError, zfsReplicationSendCommand } from "../terrarium-s3-export";
 
 describe("backup restore metadata", () => {
   test("classifies transient S3 export errors for retry", () => {
@@ -25,6 +25,13 @@ describe("backup restore metadata", () => {
         "terrarium/containers/app"
       )
     ).toBe("terrarium/containers/app@manual-keep");
+  });
+
+  test("exports recursive ZFS replication streams so child rootfs datasets are included", () => {
+    expect(zfsReplicationSendCommand("terrarium/containers/app@manual-keep")).toBe("zfs send -R 'terrarium/containers/app@manual-keep'");
+    expect(zfsReplicationSendCommand("terrarium/containers/app@manual-keep", "terrarium/containers/app@manual-base")).toBe(
+      "zfs send -R -I 'terrarium/containers/app@manual-base' 'terrarium/containers/app@manual-keep'"
+    );
   });
 
   test("renames restored LXD metadata and removes generated identity", () => {
@@ -112,6 +119,22 @@ describe("backup restore metadata", () => {
 });
 
 describe("backup restore target safety", () => {
+  test("rolls back descendant snapshots before the parent container dataset", () => {
+    expect(
+      rollbackSnapshotsForDatasetTree("terrarium/containers/app@manual-keep", [
+        "terrarium/containers/app@manual-keep",
+        "terrarium/containers/app/rootfs@manual-keep",
+        "terrarium/containers/app/rootfs/nested@manual-keep",
+        "terrarium/containers/app/rootfs@other",
+        "terrarium/containers/other/rootfs@manual-keep"
+      ])
+    ).toEqual([
+      "terrarium/containers/app/rootfs/nested@manual-keep",
+      "terrarium/containers/app/rootfs@manual-keep",
+      "terrarium/containers/app@manual-keep"
+    ]);
+  });
+
   test("rejects restore-as-new when the target LXD instance already exists", async () => {
     await expect(
       assertNewRestoreTargetIsUnused("victim", "terrarium/containers/victim", async (cmd) => {

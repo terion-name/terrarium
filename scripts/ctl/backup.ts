@@ -339,6 +339,35 @@ async function zfsSnapshotExists(snapshot: string): Promise<boolean> {
   return (await runAllowFailure(["zfs", "list", "-H", "-t", "snapshot", snapshot])).exitCode === 0;
 }
 
+export function rollbackSnapshotsForDatasetTree(snapshot: string, availableSnapshots: string[]): string[] {
+  const snapshotMarker = snapshot.indexOf("@");
+  if (snapshotMarker === -1) {
+    throw new Error(`invalid ZFS snapshot name: ${snapshot}`);
+  }
+
+  const dataset = snapshot.slice(0, snapshotMarker);
+  const snapshotSuffix = snapshot.slice(snapshotMarker);
+  const descendants = availableSnapshots
+    .map((item) => item.trim())
+    .filter((item) => item.startsWith(`${dataset}/`) && item.endsWith(snapshotSuffix))
+    .sort((left, right) => right.split("/").length - left.split("/").length || right.localeCompare(left));
+
+  return [...descendants, snapshot];
+}
+
+async function rollbackDatasetTreeToSnapshot(snapshot: string): Promise<void> {
+  const snapshotMarker = snapshot.indexOf("@");
+  if (snapshotMarker === -1) {
+    throw new Error(`invalid ZFS snapshot name: ${snapshot}`);
+  }
+
+  const dataset = snapshot.slice(0, snapshotMarker);
+  const snapshots = await runText(["zfs", "list", "-H", "-t", "snapshot", "-o", "name", "-r", dataset], PREFIX);
+  for (const item of rollbackSnapshotsForDatasetTree(snapshot, snapshots.split("\n"))) {
+    await runText(["zfs", "rollback", "-r", item], PREFIX);
+  }
+}
+
 function restoreTempDatasetName(targetDataset: string, label: string): string {
   const suffix = `${label}-${process.pid}-${Date.now()}`.replace(/[^A-Za-z0-9_.:-]/g, "-");
   return `${targetDataset}-${suffix}`;
@@ -452,7 +481,7 @@ async function restoreLocal(
   if (mode === "in-place") {
     await confirmDestructive(`Rollback ${instance} in place to ${snapshot}?`);
     await stopInstanceForRestore(instance);
-    await runText(["zfs", "rollback", "-r", snapshot], PREFIX);
+    await rollbackDatasetTreeToSnapshot(snapshot);
     console.log(success(`Rolled back ${instance} to ${snapshot}`));
     console.log(`${label("Next:")} ${value(`lxc start ${instance}`)}`);
     return;

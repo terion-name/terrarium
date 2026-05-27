@@ -58,6 +58,13 @@ async function latestSnapshot(dataset: string): Promise<string> {
   return chooseLatestExportSnapshot(stdout.split("\n"), dataset);
 }
 
+export function zfsReplicationSendCommand(latestSnapshot: string, parentSnapshot = ""): string {
+  if (parentSnapshot) {
+    return `zfs send -R -I ${shellEscape(parentSnapshot)} ${shellEscape(latestSnapshot)}`;
+  }
+  return `zfs send -R ${shellEscape(latestSnapshot)}`;
+}
+
 export function isRetriableS3ExportError(message: string): boolean {
   const lowered = message.toLowerCase();
   return [
@@ -161,8 +168,8 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
 
     const streamSource =
       last && (await runAllowFailure(["zfs", "list", "-H", "-t", "snapshot", last])).exitCode === 0
-        ? `zfs send -I ${shellEscape(last)} ${shellEscape(latest)}`
-        : `zfs send ${shellEscape(latest)}`;
+        ? zfsReplicationSendCommand(latest, last)
+        : zfsReplicationSendCommand(latest);
 
     await runRetriableS3Command(
       `${streamSource} | zstd -T0 | ${awsBase.map(shellEscape).join(" ")} s3 cp - ${shellEscape(`s3://${bucket}/${objectKey}`)}`,
