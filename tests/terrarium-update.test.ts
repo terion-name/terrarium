@@ -24,8 +24,11 @@ describe("terrarium update command", () => {
     expect(update).toContain("chmodSync(GITHUB_CLI_APT_KEYRING, 0o644)");
     expect(update).toContain('"chown", "root:root", GITHUB_CLI_APT_SOURCE');
     expect(update).toContain("chmodSync(GITHUB_CLI_APT_SOURCE, 0o644)");
-    expect(update).toContain('"git", "gh", "ansible", "python3", "jq", "unzip"');
+    expect(update).toContain('"git", "gh", "python3", "python3-venv", "jq", "unzip"');
     expect(update).toContain('"gh", "attestation", "verify", "--help"');
+    expect(update).toContain("ensureAnsibleRuntime");
+    expect(update).toContain("ansible==${TERRARIUM_ANSIBLE_VERSION}");
+    expect(update).toContain("TERRARIUM_ANSIBLE_GALAXY");
     expect(update).toContain("SHA256SUMS");
     expect(update).toContain('const RELEASE_ATTESTATION_BUNDLE = "terrarium-release-attestation.sigstore.json"');
     expect(update).toContain("verifyReleaseChecksum");

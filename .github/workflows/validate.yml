@@ -15,7 +15,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible
+          sudo apt-get install -y python3-venv
+          python3 -m venv .ansible-venv
+          .ansible-venv/bin/python -m pip install --upgrade pip
+          .ansible-venv/bin/python -m pip install --upgrade ansible==13.7.0
+          echo "$PWD/.ansible-venv/bin" >> "$GITHUB_PATH"
+          export PATH="$PWD/.ansible-venv/bin:$PATH"
           bun install
           bun run build
           bun run docs:build

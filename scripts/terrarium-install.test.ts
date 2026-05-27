@@ -95,9 +95,11 @@ describe("terrarium install CLI parsing", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
 
     expect(source).toContain("const ANSIBLE_GALAXY_ATTEMPTS = 4");
+    expect(source).toContain("async function ensureAnsibleRuntime()");
+    expect(source).toContain("ansible==${TERRARIUM_ANSIBLE_VERSION}");
     expect(source).toContain("async function installAnsibleCollections()");
-    expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ansible-galaxy collection install -r requirements.yml');
-    expect(source).toContain("ansible-galaxy collection install -r requirements.yml");
+    expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ${TERRARIUM_ANSIBLE_GALAXY} collection install -r requirements.yml');
+    expect(source).toContain("collection install -r requirements.yml");
     expect(source).toContain("failed on attempt ${attempt}/${ANSIBLE_GALAXY_ATTEMPTS}; retrying");
     expect(source).toContain("failed after ${ANSIBLE_GALAXY_ATTEMPTS} attempts");
   });
@@ -108,7 +110,7 @@ describe("terrarium install CLI parsing", () => {
     expect(source).toContain('BUNDLE_DIR && existsSync(join(BUNDLE_DIR, "ansible", "site.yml"))');
     expect(source).toContain("syncInstallBundle(BUNDLE_DIR, REPO_DIR)");
     expect(source).toContain("installing Terrarium release bundle into ${REPO_DIR}");
-    expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ansible-playbook -i inventory.ini site.yml');
+    expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ${TERRARIUM_ANSIBLE_PLAYBOOK} -i inventory.ini site.yml');
   });
 
   test("interactive install offers update when an existing Terrarium config is present", () => {

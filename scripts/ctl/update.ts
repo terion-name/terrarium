@@ -17,6 +17,12 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runText } from "../lib/common";
+import {
+  TERRARIUM_ANSIBLE_GALAXY,
+  TERRARIUM_ANSIBLE_PYTHON,
+  TERRARIUM_ANSIBLE_VERSION,
+  TERRARIUM_ANSIBLE_VENV
+} from "./ansible-runtime";
 import { reconfigureCmd } from "./system";
 
 const PREFIX = "terrariumctl update";
@@ -194,7 +200,7 @@ async function installAnsibleCollections(): Promise<void> {
   let lastOutput = "";
   for (let attempt = 1; attempt <= ANSIBLE_GALAXY_ATTEMPTS; attempt += 1) {
     const result = Bun.spawn({
-      cmd: ["ansible-galaxy", "collection", "install", "-r", "requirements.yml"],
+      cmd: [TERRARIUM_ANSIBLE_GALAXY, "collection", "install", "-r", "requirements.yml"],
       cwd: join(REPO_DIR, "ansible"),
       stdout: "pipe",
       stderr: "pipe"
@@ -230,8 +236,14 @@ async function ensureUpdateDependencies(): Promise<void> {
   await runText(["chown", "root:root", GITHUB_CLI_APT_SOURCE], PREFIX);
   chmodSync(GITHUB_CLI_APT_SOURCE, 0o644);
   await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "update", "-y"], PREFIX);
-  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "git", "gh", "ansible", "python3", "jq", "unzip"], PREFIX);
+  await runText(["apt-get", "-o", "DPkg::Lock::Timeout=900", "install", "-y", "git", "gh", "python3", "python3-venv", "jq", "unzip"], PREFIX);
   await runText(["gh", "attestation", "verify", "--help"], PREFIX);
+}
+
+async function ensureAnsibleRuntime(): Promise<void> {
+  await runText(["python3", "-m", "venv", TERRARIUM_ANSIBLE_VENV], PREFIX);
+  await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", "pip"], PREFIX);
+  await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", `ansible==${TERRARIUM_ANSIBLE_VERSION}`], PREFIX);
 }
 
 function trmAliasIsManaged(): boolean {
@@ -280,6 +292,7 @@ export async function updateCmd(options: UpdateOptions = {}): Promise<void> {
       syncTree(downloadedBundle, REPO_DIR);
     }
 
+    await ensureAnsibleRuntime();
     await installAnsibleCollections();
 
     if (options.reconfigure !== false) {

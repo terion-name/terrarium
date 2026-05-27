@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TERRARIUM_ANSIBLE_PLAYBOOK } from "./ansible-runtime";
 import { CONFIG_PATH, PREFIX } from "./context";
 import { runInteractive } from "../lib/common";
 import { exportClusterStoreToConfigFile } from "../lib/config-store";
@@ -52,7 +53,7 @@ export async function reconfigureCmd(options: ReconfigureOptions = {}): Promise<
       ansibleConfigPath = CONFIG_PATH;
     }
 
-    const args = ["ansible-playbook", "-i", "inventory.ini", "site.yml", "-e", `@${ansibleConfigPath}`];
+    const args = [TERRARIUM_ANSIBLE_PLAYBOOK, "-i", "inventory.ini", "site.yml", "-e", `@${ansibleConfigPath}`];
     if (options.applyHardening === false) {
       args.push("-e", "terrarium_apply_hardening=false");
     }

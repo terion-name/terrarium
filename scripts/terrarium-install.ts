@@ -8,6 +8,13 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
 import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
+import {
+  TERRARIUM_ANSIBLE_GALAXY,
+  TERRARIUM_ANSIBLE_PLAYBOOK,
+  TERRARIUM_ANSIBLE_PYTHON,
+  TERRARIUM_ANSIBLE_VERSION,
+  TERRARIUM_ANSIBLE_VENV
+} from "./ctl/ansible-runtime";
 import { CONFIG_PATH } from "./ctl/context";
 import { updateCmd } from "./ctl/update";
 import { verifyOidcConfig, verifyS3Config } from "./ctl/verify";
@@ -266,7 +273,13 @@ function ensureOs(): void {
 
 async function ensureDeps(): Promise<void> {
   await $`apt-get -o DPkg::Lock::Timeout=900 update -y`;
-  await $`apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl git ansible python3 jq unzip`;
+  await $`apt-get -o DPkg::Lock::Timeout=900 install -y ca-certificates curl git python3 python3-venv jq unzip`;
+}
+
+async function ensureAnsibleRuntime(): Promise<void> {
+  await $`python3 -m venv ${TERRARIUM_ANSIBLE_VENV}`;
+  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade pip`;
+  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade ansible==${TERRARIUM_ANSIBLE_VERSION}`;
 }
 
 function syncBundleArtifacts(bundleDir: string, repoDir: string): void {
@@ -326,7 +339,7 @@ function syncInstallBundle(bundleDir: string, repoDir: string): void {
 async function installAnsibleCollections(): Promise<void> {
   let lastOutput = "";
   for (let attempt = 1; attempt <= ANSIBLE_GALAXY_ATTEMPTS; attempt += 1) {
-    const result = await $`cd ${join(REPO_DIR, "ansible")}; ansible-galaxy collection install -r requirements.yml`.nothrow();
+    const result = await $`cd ${join(REPO_DIR, "ansible")}; ${TERRARIUM_ANSIBLE_GALAXY} collection install -r requirements.yml`.nothrow();
     if (result.exitCode === 0) {
       return;
     }
@@ -367,6 +380,7 @@ async function prepareRepo(ref: string): Promise<void> {
     fail("compiled Terrarium binaries are missing from the installed bundle");
   }
 
+  await ensureAnsibleRuntime();
   await installAnsibleCollections();
 }
 
@@ -1229,7 +1243,7 @@ function buildSecretConfig(options: InstallOptions): string {
 }
 
 async function runPlaybook(configPath: string, secretConfigPath: string): Promise<void> {
-  await $`cd ${join(REPO_DIR, "ansible")}; ansible-playbook -i inventory.ini site.yml -e @${configPath} -e @${secretConfigPath}`;
+  await $`cd ${join(REPO_DIR, "ansible")}; ${TERRARIUM_ANSIBLE_PLAYBOOK} -i inventory.ini site.yml -e @${configPath} -e @${secretConfigPath}`;
 }
 
 function printDnsGuidance(options: InstallOptions): void {

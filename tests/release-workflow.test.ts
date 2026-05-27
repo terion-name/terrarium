@@ -21,6 +21,10 @@ describe("release workflow", () => {
     const source = readFileSync(join(repoRoot, ".github/workflows/validate.yml"), "utf8");
 
     expect(source).toContain("cd ansible");
+    expect(source).toContain("python3 -m venv .ansible-venv");
+    expect(source).toContain("ansible==13.7.0");
+    expect(source).toContain('echo "$PWD/.ansible-venv/bin" >> "$GITHUB_PATH"');
+    expect(source).toContain('export PATH="$PWD/.ansible-venv/bin:$PATH"');
     expect(source).toContain("for attempt in 1 2 3 4; do");
     expect(source).toContain("ansible-galaxy collection install -r requirements.yml");
     expect(source).toContain('if [ "$attempt" -eq 4 ]; then');
