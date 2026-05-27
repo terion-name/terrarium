@@ -10,9 +10,9 @@ import { stringify } from "yaml";
 import { TERRARIUM_SPLASH, TERRARIUM_VERSION } from "./generated/build-info";
 import {
   TERRARIUM_ANSIBLE_GALAXY,
+  TERRARIUM_ANSIBLE_PIP_PACKAGES,
   TERRARIUM_ANSIBLE_PLAYBOOK,
   TERRARIUM_ANSIBLE_PYTHON,
-  TERRARIUM_ANSIBLE_VERSION,
   TERRARIUM_ANSIBLE_VENV
 } from "./ctl/ansible-runtime";
 import { CONFIG_PATH } from "./ctl/context";
@@ -279,7 +279,7 @@ async function ensureDeps(): Promise<void> {
 async function ensureAnsibleRuntime(): Promise<void> {
   await $`python3 -m venv ${TERRARIUM_ANSIBLE_VENV}`;
   await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade pip`;
-  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade ansible==${TERRARIUM_ANSIBLE_VERSION}`;
+  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade ${TERRARIUM_ANSIBLE_PIP_PACKAGES}`;
 }
 
 function syncBundleArtifacts(bundleDir: string, repoDir: string): void {

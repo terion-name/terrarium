@@ -96,7 +96,7 @@ describe("terrarium install CLI parsing", () => {
 
     expect(source).toContain("const ANSIBLE_GALAXY_ATTEMPTS = 4");
     expect(source).toContain("async function ensureAnsibleRuntime()");
-    expect(source).toContain("ansible==${TERRARIUM_ANSIBLE_VERSION}");
+    expect(source).toContain("TERRARIUM_ANSIBLE_PIP_PACKAGES");
     expect(source).toContain("async function installAnsibleCollections()");
     expect(source).toContain('cd ${join(REPO_DIR, "ansible")}; ${TERRARIUM_ANSIBLE_GALAXY} collection install -r requirements.yml');
     expect(source).toContain("collection install -r requirements.yml");

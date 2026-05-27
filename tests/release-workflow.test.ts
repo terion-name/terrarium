@@ -22,7 +22,7 @@ describe("release workflow", () => {
 
     expect(source).toContain("cd ansible");
     expect(source).toContain("python3 -m venv .ansible-venv");
-    expect(source).toContain("ansible==13.7.0");
+    expect(source).toContain("ansible==13.7.0 passlib==1.7.4");
     expect(source).toContain('echo "$PWD/.ansible-venv/bin" >> "$GITHUB_PATH"');
     expect(source).toContain('export PATH="$PWD/.ansible-venv/bin:$PATH"');
     expect(source).toContain("for attempt in 1 2 3 4; do");

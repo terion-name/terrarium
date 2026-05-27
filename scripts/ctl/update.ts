@@ -19,8 +19,8 @@ import { join, resolve } from "node:path";
 import { runText } from "../lib/common";
 import {
   TERRARIUM_ANSIBLE_GALAXY,
+  TERRARIUM_ANSIBLE_PIP_PACKAGES,
   TERRARIUM_ANSIBLE_PYTHON,
-  TERRARIUM_ANSIBLE_VERSION,
   TERRARIUM_ANSIBLE_VENV
 } from "./ansible-runtime";
 import { reconfigureCmd } from "./system";
@@ -243,7 +243,7 @@ async function ensureUpdateDependencies(): Promise<void> {
 async function ensureAnsibleRuntime(): Promise<void> {
   await runText(["python3", "-m", "venv", TERRARIUM_ANSIBLE_VENV], PREFIX);
   await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", "pip"], PREFIX);
-  await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", `ansible==${TERRARIUM_ANSIBLE_VERSION}`], PREFIX);
+  await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", ...TERRARIUM_ANSIBLE_PIP_PACKAGES], PREFIX);
 }
 
 function trmAliasIsManaged(): boolean {
