@@ -68,6 +68,10 @@ describe("docs config", () => {
     expect(guides).not.toContain("lxc exec hermes --user 1000");
     expect(guides).not.toContain("lxc exec devbox --user 1000");
     expect(guides).not.toContain("lxc exec my-stack --user 1000");
+    expect(guides).toContain("sudo hermes gateway install --system");
+    expect(guides).toContain('user.proxy "https://hermes.example.com:8642@auth"');
+    expect(guides).toContain("Hermes Gateway Auth");
+    expect(guides).toContain("Terrarium SSO with OAuth2-Proxy");
     expect(sharedData).toContain("/home/terrarium/.codex");
     expect(sharedData).toContain("lxc exec hermes -- chown -R terrarium:terrarium /home/terrarium/.codex");
     expect(sharedData).not.toContain("/root/.codex");

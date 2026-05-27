@@ -45,7 +45,7 @@ Finally, start the interactive setup to configure your API keys (like OpenRouter
 hermes setup
 ```
 
-## 3. Expose the Hermes API
+## 3. Enable the Hermes API and Service
 
 Hermes includes a built-in API server that you can publish to the internet. 
 
@@ -63,19 +63,40 @@ API_SERVER_CORS_ORIGINS=https://hermes.example.com
 EOF
 ```
 
-Start the API server:
+Hermes manages its own systemd units, so do not create a custom Terrarium unit. For a VPS or headless Terrarium container, install the boot-time system service:
 ```bash
-hermes gateway
+sudo hermes gateway install --system
+sudo hermes gateway start --system
+sudo hermes gateway status --system
 ```
+
+To follow logs:
+```bash
+journalctl -u hermes-gateway -f
+```
+
+For a user service instead:
+```bash
+hermes gateway install
+hermes gateway start
+hermes gateway status
+journalctl --user -u hermes-gateway -f
+```
+
+Use the system service for containers you expect to survive logout and restart cleanly after host reboots. Avoid keeping both the user service and the system service installed for the same Hermes home unless you intentionally want two separate gateway processes.
 
 Now, exit the container:
 ```bash
 exit
 ```
 
-## 4. Publish the Route with Terrarium
+## 4. Choose How the Public Route Is Authenticated
 
-Now that Hermes is running inside the private network on port `8642`, let's publish it securely to the public internet using Terrarium's `user.proxy` label.
+Now that Hermes is running inside the private network on port `8642`, decide which layer should authenticate public requests.
+
+### Option A: Hermes Gateway Auth
+
+Use this when you want API clients, scripts, or integrations to call Hermes directly with Hermes' own API key.
 
 Run this on the host:
 ```bash
@@ -87,39 +108,27 @@ Terrarium will instantly:
 - Provision a Let's Encrypt SSL certificate for `hermes.example.com`.
 - Route traffic from that domain directly to your Hermes API server.
 
-## 5. Keep Hermes Running Automatically (Systemd)
+Hermes is responsible for request authorization in this mode. Keep `API_SERVER_KEY` set to a long random value and use that key from your clients.
 
-If your server reboots, you want Hermes to start back up automatically.
+Hermes' messaging gateway also has its own access model for chat platforms. Use Hermes allowlists, pairing, and admin/user settings for Telegram, Discord, Slack, and other messaging adapters. Those checks happen inside Hermes after the platform delivers a message.
 
-Go back inside the container:
+### Option B: Terrarium SSO with OAuth2-Proxy
+
+Use this when the public Hermes endpoint is mainly for humans in a browser and you want the same Terrarium SSO gate used by Cockpit, LXD, and protected app routes.
+
+Run this on the host:
 ```bash
-trm exec hermes
+lxc config set hermes user.proxy "https://hermes.example.com:8642@auth"
+terrariumctl proxy sync
 ```
 
-Create a systemd service:
+To restrict access to a group emitted by your OIDC provider:
 ```bash
-sudo tee /etc/systemd/system/hermes-gateway.service > /dev/null <<'EOF'
-[Unit]
-Description=Hermes API gateway
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=terrarium
-Environment=HOME=/home/terrarium
-WorkingDirectory=/home/terrarium
-ExecStart=/bin/bash -lc 'source ~/.bashrc && hermes gateway'
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now hermes-gateway.service
+lxc config set hermes user.proxy "https://hermes.example.com:8642@auth:agents"
+terrariumctl proxy sync
 ```
+
+In this mode Terrarium's oauth2-proxy handles the browser login before traffic reaches Hermes. You can still keep `API_SERVER_KEY` enabled as a second application-level guard, especially if you also expect non-browser API clients.
 
 ## Advanced: Store Memories externally
 
