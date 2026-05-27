@@ -28,6 +28,8 @@ describe("docs config", () => {
       "docs/guides/hermes.md",
       "docs/guides/vscode.md",
       "docs/guides/compose.md",
+      "docs/guides/auth-protection.md",
+      "docs/guides/dokploy.md",
       "docs/guides/coolify.md"
     ];
     const guides = guidePaths.map((path) => readRepoFile(path)).join("\n");
@@ -68,10 +70,33 @@ describe("docs config", () => {
     expect(guides).not.toContain("lxc exec hermes --user 1000");
     expect(guides).not.toContain("lxc exec devbox --user 1000");
     expect(guides).not.toContain("lxc exec my-stack --user 1000");
-    expect(guides).toContain("sudo hermes gateway install --system");
-    expect(guides).toContain('user.proxy "https://hermes.example.com:8642@auth"');
-    expect(guides).toContain("Hermes Gateway Auth");
-    expect(guides).toContain("Terrarium SSO with OAuth2-Proxy");
+    expect(guides).toContain("sudo loginctl enable-linger terrarium");
+    expect(guides).toContain("hermes gateway setup");
+    expect(guides).toContain("hermes gateway install");
+    expect(guides).toContain("journalctl --user -u hermes-gateway -f");
+    expect(guides).toContain('HERMES_BIN="$(command -v hermes)"');
+    expect(guides).toContain('sudo "$HERMES_BIN" gateway install --system');
+    expect(guides).toContain("OpenAI-compatible clients expect API-key style authentication");
+    expect(guides).toContain('user.proxy "https://hermes-api.example.com:8642,https://hermes-dashboard.example.com:9119@auth"');
+    expect(guides).toContain("With an external provider such as ZITADEL Cloud, add the dashboard callback URL to that provider manually");
+    expect(guides).toContain("https://hermes-dashboard.example.com/oauth2/callback");
+    expect(guides).not.toContain("https://hermes-api.example.com:8642@auth");
+    expect(guides).toContain('user.proxy "https://code.example.com:8080@auth"');
+    expect(guides).toContain("https://code.example.com/oauth2/callback");
+    expect(guides).not.toContain('user.proxy "https://code.example.com:8080"');
+    expect(guides).toContain('user.proxy "https://openclaw.your-domain.com:18789@auth"');
+    expect(guides).toContain("https://openclaw.your-domain.com/oauth2/callback");
+    expect(guides).not.toContain('user.proxy "https://openclaw.your-domain.com:18789"');
+    expect(guides).toContain("https://dokploy.example.com/oauth2/callback");
+    expect(guides).toContain("https://coolify-setup.example.com/oauth2/callback");
+    expect(guides).toContain("https://coolify.example.com/oauth2/callback");
+    expect(guides).toContain("including published-route callback URLs in the local ZITADEL app");
+    expect(guides).not.toContain("generates a unique \"Callback URL\"");
+    expect(guides).not.toContain("grep -R -E '^(redirect_url)'");
+    expect(guides).toContain("hermes-dashboard.service");
+    expect(guides).toContain("hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure --tui");
+    expect(guides).toContain('user.proxy "https://hermes-api.example.com:8642,https://hermes-dashboard.example.com:9119@auth:admins"');
+    expect(guides).toContain("/home/terrarium/.hermes/memories");
     expect(sharedData).toContain("/home/terrarium/.codex");
     expect(sharedData).toContain("lxc exec hermes -- chown -R terrarium:terrarium /home/terrarium/.codex");
     expect(sharedData).not.toContain("/root/.codex");
@@ -122,6 +147,8 @@ describe("docs config", () => {
     }
 
     expect(domainsAndAuth).toContain("Published App Route Labels");
+    expect(domainsAndAuth).toContain("Keep route-auth callback URLs in the managed ZITADEL app up to date when you run `terrariumctl proxy sync`");
+    expect(domainsAndAuth).toContain("For external providers, including ZITADEL Cloud, Terrarium does not mutate your provider app automatically");
     expect(domainsAndAuth).toContain("go to **Configuration**, choose **Edit YAML**");
     expect(domainsAndAuth).toContain('lxc config set admin-ui user.proxy "https://*.example.com:3000@auth:admins~auth.example.com"');
     expect(reference).toContain("Traefik supports one DNS challenge provider per instance");

@@ -99,32 +99,64 @@ describe("terrarium route auth generation", () => {
     expect(isZitadelNoChangesResponse(400, '{"code":3,"message":"invalid argument"}')).toBe(false);
   });
 
-  test("deduplicates oauth2-proxy profiles by host and group policy", () => {
+  test("creates path-aware oauth2-proxy profiles and rejects conflicting path policies", () => {
     const { profiles, errors } = buildRouteAuthProfiles(
       [
         container("admin", "https://app.example.test:8080/admin@auth:admins"),
-        container("agents", "https://app.example.test:8081/agents@auth:agents"),
-        container("signed-in", "https://app.example.test:8082/signed-in@auth")
+        container("other-admin", "https://app.example.test:8081/other-admin@auth:admins"),
+        container("agents", "https://agents.example.test:8082/agents@auth:agents")
       ],
       routeAuthConfig
     );
 
     expect(errors).toEqual([]);
     expect(profiles).toHaveLength(3);
-    expect(profiles.map((profile) => profile.host)).toEqual(["app.example.test", "app.example.test", "app.example.test"]);
-    expect(profiles.map((profile) => profile.groups)).toEqual([[], ["admins"], ["agents"]]);
-    expect(new Set(profiles.map((profile) => profile.key)).size).toBe(3);
-    expect(new Set(profiles.map((profile) => profile.callbackPath)).size).toBe(3);
-    expect(new Set(profiles.map((profile) => profile.containerName)).size).toBe(3);
-    expect(new Set(profiles.map((profile) => profile.serviceName)).size).toBe(3);
-    expect(new Set(profiles.map((profile) => profile.middlewareName)).size).toBe(3);
+    expect(profiles.map((profile) => profile.host)).toEqual(["agents.example.test", "app.example.test", "app.example.test"]);
+    expect(profiles.map((profile) => profile.path)).toEqual(["/agents", "/admin", "/other-admin"]);
+    expect(profiles.map((profile) => profile.groups)).toEqual([["agents"], ["admins"], ["admins"]]);
+    expect(profiles.map((profile) => profile.callbackPath)).toEqual([
+      "/oauth2/agents/callback",
+      "/oauth2/admin/callback",
+      "/oauth2/other-admin/callback"
+    ]);
+    expect(profiles.map((profile) => profile.containerName)).toEqual([
+      "route-agents-example-test-agents",
+      "route-app-example-test-admin",
+      "route-app-example-test-other-admin"
+    ]);
+
+    const conflict = buildRouteAuthProfiles(
+      [
+        container("admin", "https://app.example.test:8080/admin@auth:admins"),
+        container("agents", "https://app.example.test:8081/admin@auth:agents")
+      ],
+      routeAuthConfig
+    );
+    expect(conflict.profiles).toHaveLength(1);
+    expect(conflict.errors).toContain("agents: auth-protected routes for app.example.test/admin must use one group policy; found admins and agents");
+  });
+
+  test("allows managed auth routes under the management parent domain when root domain is not saved", () => {
+    const { profiles, errors } = buildRouteAuthProfiles(
+      [container("hermes", "https://nokt-kernel.agents.terion.dev:9119@auth:admins,https://nokt-kernel-api.agents.terion.dev:8642")],
+      {
+        ...routeAuthConfig,
+        terrarium_root_domain: "",
+        terrarium_manage_domain: "manage.agents.terion.dev"
+      }
+    );
+
+    expect(errors).toEqual([]);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].host).toBe("nokt-kernel.agents.terion.dev");
+    expect(profiles[0].groups).toEqual(["admins"]);
   });
 
   test("writes group policy into oauth2-proxy config instead of compose labels or environment", () => {
     const { profiles } = buildRouteAuthProfiles(
       [
         container("admin", "https://app.example.test:8080/admin@auth:admins"),
-        container("signed-in", "https://app.example.test:8082/signed-in@auth")
+        container("signed-in", "https://signed.example.test:8082/signed-in@auth")
       ],
       routeAuthConfig
     );
@@ -228,7 +260,7 @@ describe("terrarium route auth generation", () => {
     const { dynamicYaml, authProfiles, errors } = buildDynamicConfig(
       [
         container("admin", "https://app.example.test:8080/admin@auth:admins"),
-        container("agents", "https://app.example.test:8081/agents@auth:agents")
+        container("agents", "https://agents.example.test:8081/agents@auth:agents")
       ],
       routeAuthConfig
     );
@@ -251,7 +283,6 @@ describe("terrarium route auth generation", () => {
         .filter((router) => router.service === profile.serviceName)
         .map((router) => router.rule);
       expect(oauthRules.some((rule) => rule.includes(`PathPrefix(\`${profile.proxyPrefix}/\`)`))).toBe(true);
-      expect(oauthRules.some((rule) => rule.includes("PathPrefix(`/oauth2/`)"))).toBe(false);
     }
   });
 
@@ -326,11 +357,11 @@ describe("terrarium route auth generation", () => {
     expect(Object.values(dynamic.http.services)[0].loadBalancer.servers[0].url).toBe("http://127.0.0.1:18081");
   });
 
-  test("external ZITADEL redirect URIs include exact generated route callback paths", () => {
+  test("external ZITADEL redirect URIs include predictable route callback paths", () => {
     const { redirectUris, errors } = buildRouteAuthRedirectUris(
       [
         "https://app.example.test:8080/admin@auth:admins",
-        "https://app.example.test:8081/agents@auth:agents"
+        "https://agents.example.test:8081/agents@auth:agents"
       ],
       routeAuthConfig
     );
@@ -360,11 +391,10 @@ describe("terrarium route auth generation", () => {
         ["legacy.example.test"]
       )
     ).toContain("https://legacy.example.test/oauth2/callback");
-    for (const redirectUri of redirectUris) {
-      expect(redirectUri).toMatch(/^https:\/\/app\.example\.test\/oauth2\/route\/.+\/callback$/);
-      expect(providerRedirectUris).toContain(redirectUri);
-    }
-    expect(providerRedirectUris).not.toContain("https://app.example.test/oauth2/callback");
+    expect(redirectUris).toEqual(["https://agents.example.test/oauth2/agents/callback", "https://app.example.test/oauth2/admin/callback"]);
+    expect(providerRedirectUris).toContain("https://agents.example.test/oauth2/agents/callback");
+    expect(providerRedirectUris).toContain("https://app.example.test/oauth2/admin/callback");
+    expect(providerRedirectUris).not.toContain("https://app.example.test/oauth2/route/app-example-test-admins/callback");
   });
 });
 

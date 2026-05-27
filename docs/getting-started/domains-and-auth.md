@@ -164,6 +164,7 @@ Terrarium will automatically:
 - Provision the necessary management role.
 - Grant that role to the bootstrap admin user.
 - Emit a flat `groups` claim for `oauth2-proxy` and LXD to read.
+- Keep route-auth callback URLs in the managed ZITADEL app up to date when you run `terrariumctl proxy sync`.
 
 ### Mode 2: External OIDC (`--idp oidc`)
 
@@ -180,7 +181,9 @@ You must configure your provider to allow the following callback URLs:
 - `https://<manage-domain>/oauth2/callback`
 - `https://<proxy-domain>/oauth2/callback`
 - `https://<lxd-domain>/oidc/callback`
-- If you plan to protect published app routes with `@auth`, you must also allow each generated app callback: `https://<route-host>/oauth2/route/<generated-route-id>/callback`
+- If you plan to protect published app routes with `@auth`, you must also allow each route callback. A root route uses `https://<route-host>/oauth2/callback`; a path route like `/admin` uses `https://<route-host>/oauth2/admin/callback`.
+
+For external providers, including ZITADEL Cloud, Terrarium does not mutate your provider app automatically. Add new published-route callback URLs manually before or when you create the protected route.
 
 Additionally, the external provider must emit a `groups` claim as a JSON string array containing the configured admin group. A provider-side role assignment is not enough unless the issued ID token or userinfo response actually contains that value in `groups`. Check your IDP documentation to set this up properly.
 

@@ -594,8 +594,9 @@ export function externalOidcSetupInstructions(options: {
     "If your provider will not allow the LXD and web callbacks on one client,",
     "create a separate LXD client and enter it at the optional LXD prompts.",
     "",
-    "Published @auth routes add their own /oauth2/route/.../callback URLs;",
-    "add those later when you create protected routes.",
+    "Published @auth routes add route callbacks later when you create protected routes.",
+    "Use https://<route-host>/oauth2/callback for a root route, or",
+    "https://<route-host>/oauth2/<path>/callback for a path route such as /admin.",
     ""
   ].join("\n");
 }

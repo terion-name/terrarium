@@ -39,6 +39,11 @@ lxc config set dokploy user.proxy "https://dokploy.example.com:3000@auth"
 terrariumctl proxy sync
 ```
 
+If your Terrarium install uses the local managed ZITADEL, `terrariumctl proxy sync` also updates the route-auth callback URL in ZITADEL automatically. With an external provider such as ZITADEL Cloud, add this callback URL to that provider manually:
+```text
+https://dokploy.example.com/oauth2/callback
+```
+
 Head to `https://dokploy.example.com` and create your first admin account.
 
 ---

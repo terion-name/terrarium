@@ -146,7 +146,9 @@ describe("terrarium install CLI parsing", () => {
     expect(instructions).toContain("grantProjectId !== terrariumProjectId");
     expect(instructions).toContain("Pre Userinfo creation");
     expect(instructions).toContain("Pre access token creation");
-    expect(instructions).toContain("/oauth2/route/.../callback");
+    expect(instructions).toContain("https://<route-host>/oauth2/callback");
+    expect(instructions).toContain("https://<route-host>/oauth2/<path>/callback");
+    expect(instructions).not.toContain("/oauth2/route/.../callback");
   });
 
   test("ZITADEL Cloud groups action ignores roles from unrelated projects", () => {

@@ -42,6 +42,11 @@ lxc config set coolify user.proxy "https://coolify-setup.example.com:8000@auth"
 terrariumctl proxy sync
 ```
 
+If your Terrarium install uses the local managed ZITADEL, `terrariumctl proxy sync` also updates the route-auth callback URL in ZITADEL automatically. With an external provider such as ZITADEL Cloud, add this setup callback URL to that provider manually:
+```text
+https://coolify-setup.example.com/oauth2/callback
+```
+
 Go to `https://coolify-setup.example.com`, pass the SSO gate, and create your Coolify admin account. 
 
 Once inside Coolify, go to **Settings** and set your official dashboard domain (e.g., `http://coolify.example.com`). Then, tell Terrarium to route traffic to Coolify's internal proxy on port `80`:
@@ -49,6 +54,11 @@ Once inside Coolify, go to **Settings** and set your official dashboard domain (
 ```bash
 lxc config set coolify user.proxy "https://coolify.example.com:80@auth"
 terrariumctl proxy sync
+```
+
+With an external provider, add the final dashboard callback too:
+```text
+https://coolify.example.com/oauth2/callback
 ```
 
 ---

@@ -44,27 +44,38 @@ terrariumctl proxy sync
 ```
 In this example, a user must successfully log in **AND** belong to either the `admins` or `devops` group to gain access. 
 
-*(If you're using Terrarium's built-in ZITADEL login, you can create these groups right inside the `auth.<your-domain>` dashboard.)*
+With Terrarium's built-in ZITADEL, these are project roles that Terrarium emits as the OIDC `groups` claim. With an external provider, make sure the provider emits a flat `groups` claim containing the same names.
 
 ---
 
 ## Important Rules for External OIDC
 
-If you installed Terrarium using `--idp=local`, everything above works instantly. Terrarium manages all the wiring for you.
+If you installed Terrarium using `--idp=local`, everything above works instantly. Terrarium manages all the wiring for you, including published-route callback URLs in the local ZITADEL app when you run `terrariumctl proxy sync`.
 
-However, if you configured Terrarium to use an **External Identity Provider** (like Auth0, Google, or GitHub), there is one extra step you must do manually.
+However, if you configured Terrarium to use an **External Identity Provider** (like ZITADEL Cloud, Auth0, Google, or GitHub), there is one extra step you must do manually.
 
-When Terrarium creates a protected route, it generates a unique "Callback URL" that your identity provider needs to know about. 
+When Terrarium creates a protected route, your identity provider must allow that route's callback URL.
 
-**1. Find the generated callback URLs:**
+For a root route:
 ```bash
-grep -R -E '^(redirect_url)' /var/lib/terrarium/oauth2-proxy-routes/*.cfg
+lxc config set my-app user.proxy "https://app.example.com:3000@auth"
 ```
 
-**2. Add them to your Provider:**
-You must log into your Auth0/Google/GitHub developer console and add that exact callback URL to your authorized redirect list. Otherwise, the login flow will fail.
+Add this callback to the external provider:
+```text
+https://app.example.com/oauth2/callback
+```
 
-**3. Group Claims:**
+For a path route:
+```bash
+lxc config set my-app user.proxy "https://app.example.com:3000/admin@auth:admins"
+```
+
+Add this callback to the external provider:
+```text
+https://app.example.com/oauth2/admin/callback
+```
+
 If you are using the `@auth:groupname` feature, you must also ensure your external provider is configured to send a `groups` claim inside the authentication token, or Terrarium won't know which groups the user belongs to.
 
 ---

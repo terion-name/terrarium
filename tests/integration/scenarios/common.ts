@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
@@ -92,32 +92,23 @@ export function expectedRouteAuthRedirectUris(routeLabels: string[]): string[] {
 
     const parsed = new URL(route);
     const callbackIndex = suffix.indexOf("~");
-    const policySuffix = callbackIndex === -1 ? suffix : suffix.slice(0, callbackIndex);
     const callbackHost = callbackIndex === -1 ? parsed.hostname : suffix.slice(callbackIndex + 1);
-    const groups = [
-      ...new Set(
-        policySuffix.includes(":")
-          ? policySuffix
-              .slice(policySuffix.indexOf(":") + 1)
-              .split(",")
-              .map((group) => group.trim())
-              .filter(Boolean)
-          : []
-      )
-    ].sort();
-    const key = `${parsed.hostname}\n${callbackHost}\n${groups.join("\n")}`;
+    const routePath = normalizedRouteAuthPath(parsed.pathname);
+    const key = `${parsed.hostname}\n${callbackHost}\n${routePath}`;
     if (profiles.has(key)) {
       continue;
     }
     profiles.add(key);
 
-    const policy = groups.length > 0 ? groups.join("-") : "authenticated";
-    const base = slugify(`${parsed.hostname}-${policy}`);
-    const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
-    const hash = createHash("sha256").update(key).digest("hex").slice(0, 10);
-    redirectUris.push(`https://${callbackHost}/oauth2/route/${trimmed || "route"}-${hash}/callback`);
+    const proxyPrefix = routePath === "/" ? "/oauth2" : `/oauth2${routePath}`;
+    redirectUris.push(`https://${callbackHost}${proxyPrefix}/callback`);
   }
   return redirectUris.sort();
+}
+
+function normalizedRouteAuthPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  return segments.length === 0 ? "/" : `/${segments.join("/")}`;
 }
 
 /** Creates a Hetzner host and optionally attaches a raw block volume for Terrarium. */
@@ -807,10 +798,6 @@ export async function installSyncoidKey(
 
 function shellArg(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
-}
-
-function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "route";
 }
 
 async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath: string, timeoutMs: number): Promise<void> {

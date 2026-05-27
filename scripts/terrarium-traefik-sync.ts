@@ -104,6 +104,7 @@ export type ProxyBackendTarget = {
 type RouteAuthProfile = {
   key: string;
   host: string;
+  path: string;
   callbackHost: string;
   wildcardBaseHost?: string;
   groups: string[];
@@ -1013,26 +1014,67 @@ async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ target
 
 function routeHostAllowedForManagedAuth(host: string, rootDomain: string, manageDomain: string): boolean {
   const baseHost = host.startsWith("*.") ? host.slice(2) : host;
-  if (!rootDomain) {
-    return baseHost === manageDomain;
+  const effectiveRootDomain = rootDomain || parentDomain(manageDomain);
+  if (!effectiveRootDomain) {
+    return Boolean(manageDomain && baseHost === manageDomain);
   }
-  return baseHost === rootDomain || baseHost.endsWith(`.${rootDomain}`);
+  return baseHost === effectiveRootDomain || baseHost.endsWith(`.${effectiveRootDomain}`);
+}
+
+function routeAuthRootDomain(config: Record<string, unknown>): string {
+  return configString(config, "terrarium_root_domain") || parentDomain(configString(config, "terrarium_manage_domain"));
+}
+
+function routeAuthAllowedHostDescription(rootDomain: string, manageDomain: string): string {
+  const effectiveRootDomain = rootDomain || parentDomain(manageDomain);
+  if (effectiveRootDomain) {
+    return `${effectiveRootDomain} or a subdomain of it`;
+  }
+  return manageDomain || "<configured management domain>";
+}
+
+function parentDomain(host: string): string {
+  const parts = host.split(".").filter(Boolean);
+  if (parts.length <= 2) {
+    return "";
+  }
+  return parts.slice(1).join(".");
 }
 
 function normalizedRouteAuthGroups(groups: string[]): string[] {
   return [...new Set(groups)].sort();
 }
 
-function routeAuthProfileKey(host: string, groups: string[], callbackHost = host): string {
-  return `${host}\n${callbackHost}\n${normalizedRouteAuthGroups(groups).join("\n")}`;
+function normalizedRouteAuthPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  return segments.length === 0 ? "/" : `/${segments.join("/")}`;
 }
 
-function routeAuthProfileSuffix(host: string, groups: string[], callbackHost = host): string {
-  const policy = groups.length > 0 ? groups.join("-") : "authenticated";
-  const base = slugify(`${host}-${policy}`);
+function routeAuthProfileKey(host: string, callbackHost = host, path = "/"): string {
+  return `${host}\n${callbackHost}\n${normalizedRouteAuthPath(path)}`;
+}
+
+function routeAuthProxyPrefix(path: string): string {
+  const normalizedPath = normalizedRouteAuthPath(path);
+  return normalizedPath === "/" ? "/oauth2" : `/oauth2${normalizedPath}`;
+}
+
+function routeAuthProfileSuffix(host: string, callbackHost = host, path = "/"): string {
+  const normalizedPath = normalizedRouteAuthPath(path);
+  const pathSuffix = normalizedPath === "/" ? "" : `-${normalizedPath.split("/").filter(Boolean).join("-")}`;
+  const base = slugify(`${callbackHost || host}${pathSuffix}`);
   const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
-  const hash = createHash("sha256").update(routeAuthProfileKey(host, groups, callbackHost)).digest("hex").slice(0, 10);
-  return `${trimmed || "route"}-${hash}`;
+  return trimmed || "route";
+}
+
+function sameRouteAuthGroups(left: string[], right: string[]): boolean {
+  const normalizedLeft = normalizedRouteAuthGroups(left);
+  const normalizedRight = normalizedRouteAuthGroups(right);
+  return normalizedLeft.length === normalizedRight.length && normalizedLeft.every((value, index) => value === normalizedRight[index]);
+}
+
+function describeRouteAuthGroups(groups: string[]): string {
+  return groups.length > 0 ? groups.join(",") : "authenticated";
 }
 
 function routeAuthList(values: string[]): string {
@@ -1086,10 +1128,10 @@ function validateWildcardRoute(item: HttpProxyItem, rawItem: string, dnsProvider
 }
 
 export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record<string, unknown>): { profiles: RouteAuthProfile[]; errors: string[] } {
-  const rootDomain = configString(config, "terrarium_root_domain");
+  const rootDomain = routeAuthRootDomain(config);
   const manageDomain = configString(config, "terrarium_manage_domain");
   const dnsProvider = configString(config, "terrarium_acme_dns_provider");
-  const profilePolicies = new Map<string, { host: string; callbackHost: string; wildcardBaseHost?: string; groups: string[] }>();
+  const profilePolicies = new Map<string, { host: string; path: string; callbackHost: string; wildcardBaseHost?: string; groups: string[] }>();
   const errors: string[] = [];
 
   for (const container of containers) {
@@ -1118,14 +1160,24 @@ export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record
       }
 
       if (!routeHostAllowedForManagedAuth(parsed.host, rootDomain, manageDomain)) {
-        errors.push(`${name}: auth-protected route host ${parsed.host} must be ${manageDomain} or a subdomain of ${rootDomain}`);
+        errors.push(`${name}: auth-protected route host ${parsed.host} must be ${routeAuthAllowedHostDescription(rootDomain, manageDomain)}`);
         continue;
       }
 
       const groups = normalizedRouteAuthGroups(parsed.auth.groups);
       const callbackHost = parsed.auth.callbackHost ?? parsed.host;
-      profilePolicies.set(routeAuthProfileKey(parsed.host, groups, callbackHost), {
+      const path = normalizedRouteAuthPath(parsed.path);
+      const profileKey = routeAuthProfileKey(parsed.host, callbackHost, path);
+      const existingPolicy = profilePolicies.get(profileKey);
+      if (existingPolicy && !sameRouteAuthGroups(existingPolicy.groups, groups)) {
+        errors.push(
+          `${name}: auth-protected routes for ${callbackHost}${path} must use one group policy; found ${describeRouteAuthGroups(existingPolicy.groups)} and ${describeRouteAuthGroups(groups)}`
+        );
+        continue;
+      }
+      profilePolicies.set(profileKey, {
         host: parsed.host,
+        path,
         callbackHost,
         ...(parsed.wildcardBaseHost ? { wildcardBaseHost: parsed.wildcardBaseHost } : {}),
         groups
@@ -1138,14 +1190,16 @@ export function buildRouteAuthProfiles(containers: LxcInstance[], config: Record
     (left, right) =>
       left.host.localeCompare(right.host) ||
       left.callbackHost.localeCompare(right.callbackHost) ||
+      left.path.localeCompare(right.path) ||
       left.groups.join(",").localeCompare(right.groups.join(","))
   );
   for (const [index, policy] of sortedPolicies.entries()) {
-    const suffix = routeAuthProfileSuffix(policy.host, policy.groups, policy.callbackHost);
-    const proxyPrefix = `/oauth2/route/${suffix}`;
+    const suffix = routeAuthProfileSuffix(policy.host, policy.callbackHost, policy.path);
+    const proxyPrefix = routeAuthProxyPrefix(policy.path);
     profiles.push({
-      key: routeAuthProfileKey(policy.host, policy.groups, policy.callbackHost),
+      key: routeAuthProfileKey(policy.host, policy.callbackHost, policy.path),
       host: policy.host,
+      path: policy.path,
       callbackHost: policy.callbackHost,
       ...(policy.wildcardBaseHost ? { wildcardBaseHost: policy.wildcardBaseHost } : {}),
       groups: policy.groups,
@@ -1509,6 +1563,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
 
     oauthProfileSchemes.set(profile.key, scheme);
     const rule = `Host(\`${profile.callbackHost}\`) && PathPrefix(\`${profile.proxyPrefix}/\`)`;
+    const priority = 550 + profile.proxyPrefix.length;
     const httpRouterName = `${profile.serviceName}-oauth2-http`;
     if (scheme === "https") {
       httpRouters[httpRouterName] = {
@@ -1516,14 +1571,14 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
         rule,
         service: profile.serviceName,
         middlewares: ["terrarium-redirect-to-https"],
-        priority: 550
+        priority
       };
       httpRouters[`${profile.serviceName}-oauth2-https`] = {
         entryPoints: ["websecure"],
         rule,
         service: profile.serviceName,
         tls: { certResolver: "letsencrypt" },
-        priority: 550
+        priority
       };
       return;
     }
@@ -1532,7 +1587,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
       entryPoints: ["web"],
       rule,
       service: profile.serviceName,
-      priority: 550
+      priority
     };
   };
 
@@ -1581,7 +1636,7 @@ export function buildDynamicConfig(containers: LxcInstance[], config: Record<str
           continue;
         }
 
-        const authProfile = item.auth.enabled ? authProfileByKey.get(routeAuthProfileKey(item.host, item.auth.groups, item.auth.callbackHost ?? item.host)) : undefined;
+        const authProfile = item.auth.enabled ? authProfileByKey.get(routeAuthProfileKey(item.host, item.auth.callbackHost ?? item.host, item.path)) : undefined;
         if (item.auth.enabled && !authProfile) {
           continue;
         }

@@ -89,15 +89,20 @@ Your editor is now running privately on port `8080` inside the container. Let's 
 
 On the Terrarium host, run:
 ```bash
-lxc config set devbox user.proxy "https://code.example.com:8080"
+lxc config set devbox user.proxy "https://code.example.com:8080@auth"
 terrariumctl proxy sync
 ```
 
-Terrarium will automatically grab an SSL certificate and route `code.example.com` to your new web IDE.
+Terrarium will automatically grab an SSL certificate, require SSO, and route `code.example.com` to your new web IDE.
+
+If your Terrarium install uses the local managed ZITADEL, `terrariumctl proxy sync` also updates the route-auth callback URL in ZITADEL automatically. With an external provider such as ZITADEL Cloud, add this callback URL to that provider manually:
+```text
+https://code.example.com/oauth2/callback
+```
 
 ## 5. How to Log In
 
-When you visit your new URL, VSCodium will ask for your Connection Token. 
+After SSO, VSCodium will ask for your Connection Token.
 
 To view your token, run this command on your Terrarium host:
 ```bash

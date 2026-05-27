@@ -85,10 +85,15 @@ exit
 
 **Back on the Terrarium host**, apply the routing label:
 ```bash
-lxc config set openclaw user.proxy "https://openclaw.your-domain.com:18789"
+lxc config set openclaw user.proxy "https://openclaw.your-domain.com:18789@auth"
 terrariumctl proxy sync
 ```
-Terrarium will automatically grab an SSL certificate and route your custom domain directly to the OpenClaw UI.
+Terrarium will automatically grab an SSL certificate, require SSO, and route your custom domain directly to the OpenClaw UI. Keep OpenClaw's own password enabled too; that protects the app even if you later remove the public route or access it over a private tunnel.
+
+If your Terrarium install uses the local managed ZITADEL, `terrariumctl proxy sync` also updates the route-auth callback URL in ZITADEL automatically. With an external provider such as ZITADEL Cloud, add this callback URL to that provider manually:
+```text
+https://openclaw.your-domain.com/oauth2/callback
+```
 
 ---
 
