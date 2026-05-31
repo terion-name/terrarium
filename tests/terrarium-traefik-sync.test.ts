@@ -120,9 +120,9 @@ describe("terrarium route auth generation", () => {
       "/oauth2/other-admin/callback"
     ]);
     expect(profiles.map((profile) => profile.containerName)).toEqual([
-      "route-agents-example-test-agents",
-      "route-app-example-test-admin",
-      "route-app-example-test-other-admin"
+      "route-agents-example-test-agents-676ac48e9b",
+      "route-app-example-test-admin-c8fe30d718",
+      "route-app-example-test-other-admin-453769d89f"
     ]);
 
     const conflict = buildRouteAuthProfiles(
@@ -134,6 +134,22 @@ describe("terrarium route auth generation", () => {
     );
     expect(conflict.profiles).toHaveLength(1);
     expect(conflict.errors).toContain("agents: auth-protected routes for app.example.test/admin must use one group policy; found admins and agents");
+  });
+
+  test("generates unique route-auth profile names for colliding slug paths", () => {
+    const { profiles, errors } = buildRouteAuthProfiles(
+      [
+        container("slash", "https://app.example.test:8080/a/b@auth"),
+        container("dash", "https://app.example.test:8081/a-b@auth:admins")
+      ],
+      routeAuthConfig
+    );
+
+    expect(errors).toEqual([]);
+    expect(profiles).toHaveLength(2);
+    expect(new Set(profiles.map((profile) => profile.containerName)).size).toBe(2);
+    expect(new Set(profiles.map((profile) => profile.middlewareName)).size).toBe(2);
+    expect(new Set(profiles.map((profile) => profile.serviceName)).size).toBe(2);
   });
 
   test("allows managed auth routes under the management parent domain when root domain is not saved", () => {

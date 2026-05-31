@@ -1064,7 +1064,9 @@ function routeAuthProfileSuffix(host: string, callbackHost = host, path = "/"): 
   const pathSuffix = normalizedPath === "/" ? "" : `-${normalizedPath.split("/").filter(Boolean).join("-")}`;
   const base = slugify(`${callbackHost || host}${pathSuffix}`);
   const trimmed = base.length > 56 ? base.slice(0, 56).replace(/-+$/g, "") : base;
-  return trimmed || "route";
+  const readable = trimmed || "route";
+  const hash = createHash("sha256").update(routeAuthProfileKey(host, callbackHost, path)).digest("hex").slice(0, 10);
+  return `${readable}-${hash}`;
 }
 
 function sameRouteAuthGroups(left: string[], right: string[]): boolean {
