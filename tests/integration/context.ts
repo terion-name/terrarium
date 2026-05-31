@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./lib/process";
 import { IntegrationLogger } from "./lib/logger";
 import { loadIntegrationConfig } from "./config";
+import { TERRARIUM_ANSIBLE_PIP_PACKAGES } from "../../scripts/ctl/ansible-runtime";
 import type {
   DomainBundle,
   ExternalOidcFixture,
@@ -35,6 +36,16 @@ function describeCleanupStep(step: CleanupStep): string {
     return `ZITADEL app ${step.appId}`;
   }
   return `ZITADEL project ${step.projectId}`;
+}
+
+function ansibleWheelhousePlatform(binaryTarget: string): string {
+  if (binaryTarget === "x64") {
+    return "manylinux2014_x86_64";
+  }
+  if (binaryTarget === "arm64") {
+    return "manylinux2014_aarch64";
+  }
+  throw new Error(`unsupported integration binary target for Ansible wheelhouse: ${binaryTarget}`);
 }
 
 /** Global per-run context shared by all integration scenarios. */
@@ -90,6 +101,31 @@ export class IntegrationContext {
       { cwd: this.config.repoRoot }
     );
 
+    const wheelhousePath = join(this.linuxBundleDir, "ansible-wheelhouse");
+    rmSync(wheelhousePath, { recursive: true, force: true });
+    mkdirSync(wheelhousePath, { recursive: true });
+    await run(
+      [
+        "python3",
+        "-m",
+        "pip",
+        "download",
+        "--dest",
+        wheelhousePath,
+        "--only-binary=:all:",
+        "--implementation",
+        "cp",
+        "--python-version",
+        "312",
+        "--abi",
+        "cp312",
+        "--platform",
+        ansibleWheelhousePlatform(this.config.hcloudBinaryTarget),
+        ...TERRARIUM_ANSIBLE_PIP_PACKAGES
+      ],
+      { cwd: this.config.repoRoot }
+    );
+
     await run(
       [
         "tar",
@@ -98,8 +134,14 @@ export class IntegrationContext {
         "--exclude=.git",
         "--exclude=node_modules",
         "--exclude=dist",
+        "--exclude=ansible-wheelhouse",
         "--exclude=tests/integration/output",
-        "."
+        "-C",
+        this.config.repoRoot,
+        ".",
+        "-C",
+        this.linuxBundleDir,
+        "ansible-wheelhouse"
       ],
       { cwd: this.config.repoRoot }
     );

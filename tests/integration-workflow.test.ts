@@ -56,4 +56,18 @@ describe("integration workflows", () => {
       expect(keygenStep?.run).toContain("HCLOUD_SSH_PUBLIC_KEY_FILE=");
     }
   });
+
+  test("integration source bundle carries the vendored Ansible runtime wheelhouse", () => {
+    const contextSource = readFileSync(join(repoRoot, "tests/integration/context.ts"), "utf8");
+
+    expect(contextSource).toContain("TERRARIUM_ANSIBLE_PIP_PACKAGES");
+    expect(contextSource).toContain("pip");
+    expect(contextSource).toContain("download");
+    expect(contextSource).toContain("--only-binary=:all:");
+    expect(contextSource).toContain("manylinux2014_x86_64");
+    expect(contextSource).toContain("manylinux2014_aarch64");
+    expect(contextSource).toContain("ansible-wheelhouse");
+    expect(contextSource).toContain("--exclude=ansible-wheelhouse");
+    expect(contextSource).toContain('"ansible-wheelhouse"');
+  });
 });
