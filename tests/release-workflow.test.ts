@@ -45,9 +45,16 @@ describe("release workflow", () => {
     expect(workflow.jobs.publish.needs).toContain("release_tag");
     expect(source).toContain("TERRARIUM_VERSION: ${{ needs.release_tag.outputs.value }}");
     expect(source).toContain("bun scripts/build.ts");
+    expect(source).toContain("Build vendored Ansible runtime wheelhouse");
+    expect(source).toContain('pip_platform="manylinux2014_x86_64"');
+    expect(source).toContain('pip_platform="manylinux2014_aarch64"');
+    expect(source).toContain("--only-binary=:all:");
+    expect(source).toContain("--python-version 312");
+    expect(source).toContain("ansible==13.7.0");
+    expect(source).toContain("passlib==1.7.4");
     expect(source).toContain("cp -a ansible release/ansible");
     expect(source).toContain("rm -rf release/ansible/.ansible");
-    expect(source).toContain('zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible');
+    expect(source).toContain('zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible ansible-wheelhouse');
     expect(source).toContain("id-token: write");
     expect(source).toContain("attestations: write");
     expect(source).toContain("actions/attest-build-provenance@v3");

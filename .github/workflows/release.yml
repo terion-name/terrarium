@@ -74,12 +74,30 @@ jobs:
           bun scripts/build.ts
           bun build --compile --target=bun-linux-${{ matrix.arch }} scripts/terrariumctl.ts --outfile release/dist/terrariumctl
 
+      - name: Build vendored Ansible runtime wheelhouse
+        run: |
+          case "${{ matrix.arch }}" in
+            x64) pip_platform="manylinux2014_x86_64" ;;
+            arm64) pip_platform="manylinux2014_aarch64" ;;
+            *) echo "unsupported release architecture: ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
+          mkdir -p release/ansible-wheelhouse
+          python3 -m pip download \
+            --dest release/ansible-wheelhouse \
+            --only-binary=:all: \
+            --implementation cp \
+            --python-version 312 \
+            --abi cp312 \
+            --platform "${pip_platform}" \
+            ansible==13.7.0 \
+            passlib==1.7.4
+
       - name: Package release bundle
         run: |
           cp -a ansible release/ansible
           rm -rf release/ansible/.ansible
           cd release
-          zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible
+          zip -rq "../terrarium-linux-${{ matrix.arch }}.zip" dist ansible ansible-wheelhouse
 
       - uses: actions/upload-artifact@v4
         with:

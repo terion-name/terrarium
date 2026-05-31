@@ -28,6 +28,9 @@ describe("terrarium update command", () => {
     expect(update).toContain('"gh", "attestation", "verify", "--help"');
     expect(update).toContain("ensureAnsibleRuntime");
     expect(update).toContain("TERRARIUM_ANSIBLE_PIP_PACKAGES");
+    expect(update).toContain("TERRARIUM_ANSIBLE_WHEELHOUSE");
+    expect(update).toContain('"--no-index", "--find-links", TERRARIUM_ANSIBLE_WHEELHOUSE');
+    expect(update).not.toContain('"pip", "install", "--upgrade", "pip"');
     expect(update).toContain("TERRARIUM_ANSIBLE_GALAXY");
     expect(update).toContain("SHA256SUMS");
     expect(update).toContain('const RELEASE_ATTESTATION_BUNDLE = "terrarium-release-attestation.sigstore.json"');

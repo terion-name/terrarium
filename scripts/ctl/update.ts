@@ -7,6 +7,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   renameSync,
@@ -21,7 +22,8 @@ import {
   TERRARIUM_ANSIBLE_GALAXY,
   TERRARIUM_ANSIBLE_PIP_PACKAGES,
   TERRARIUM_ANSIBLE_PYTHON,
-  TERRARIUM_ANSIBLE_VENV
+  TERRARIUM_ANSIBLE_VENV,
+  TERRARIUM_ANSIBLE_WHEELHOUSE
 } from "./ansible-runtime";
 import { reconfigureCmd } from "./system";
 
@@ -241,9 +243,14 @@ async function ensureUpdateDependencies(): Promise<void> {
 }
 
 async function ensureAnsibleRuntime(): Promise<void> {
+  if (!existsSync(TERRARIUM_ANSIBLE_WHEELHOUSE) || !readdirSync(TERRARIUM_ANSIBLE_WHEELHOUSE).some((name) => name.endsWith(".whl"))) {
+    throw new Error(`Terrarium release bundle is missing the vendored Ansible wheelhouse: ${TERRARIUM_ANSIBLE_WHEELHOUSE}`);
+  }
   await runText(["python3", "-m", "venv", TERRARIUM_ANSIBLE_VENV], PREFIX);
-  await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", "pip"], PREFIX);
-  await runText([TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--upgrade", ...TERRARIUM_ANSIBLE_PIP_PACKAGES], PREFIX);
+  await runText(
+    [TERRARIUM_ANSIBLE_PYTHON, "-m", "pip", "install", "--no-index", "--find-links", TERRARIUM_ANSIBLE_WHEELHOUSE, ...TERRARIUM_ANSIBLE_PIP_PACKAGES],
+    PREFIX
+  );
 }
 
 function trmAliasIsManaged(): boolean {

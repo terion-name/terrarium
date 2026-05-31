@@ -3,7 +3,7 @@ import { confirm, input, password, select } from "@inquirer/prompts";
 import type { CAC } from "cac";
 import chalk from "chalk";
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify } from "yaml";
@@ -13,7 +13,8 @@ import {
   TERRARIUM_ANSIBLE_PIP_PACKAGES,
   TERRARIUM_ANSIBLE_PLAYBOOK,
   TERRARIUM_ANSIBLE_PYTHON,
-  TERRARIUM_ANSIBLE_VENV
+  TERRARIUM_ANSIBLE_VENV,
+  TERRARIUM_ANSIBLE_WHEELHOUSE
 } from "./ctl/ansible-runtime";
 import { CONFIG_PATH } from "./ctl/context";
 import { updateCmd } from "./ctl/update";
@@ -277,9 +278,11 @@ async function ensureDeps(): Promise<void> {
 }
 
 async function ensureAnsibleRuntime(): Promise<void> {
+  if (!existsSync(TERRARIUM_ANSIBLE_WHEELHOUSE) || !readdirSync(TERRARIUM_ANSIBLE_WHEELHOUSE).some((name) => name.endsWith(".whl"))) {
+    fail(`Terrarium release bundle is missing the vendored Ansible wheelhouse: ${TERRARIUM_ANSIBLE_WHEELHOUSE}`);
+  }
   await $`python3 -m venv ${TERRARIUM_ANSIBLE_VENV}`;
-  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade pip`;
-  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --upgrade ${TERRARIUM_ANSIBLE_PIP_PACKAGES}`;
+  await $`${TERRARIUM_ANSIBLE_PYTHON} -m pip install --no-index --find-links ${TERRARIUM_ANSIBLE_WHEELHOUSE} ${TERRARIUM_ANSIBLE_PIP_PACKAGES}`;
 }
 
 function syncBundleArtifacts(bundleDir: string, repoDir: string): void {
