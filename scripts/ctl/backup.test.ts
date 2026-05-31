@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assertNewRestoreTargetIsUnused, rewriteRecoveredBackupMetadata, rollbackSnapshotsForDatasetTree } from "./backup";
-import { chooseLatestExportSnapshot, isRetriableS3ExportError, zfsReplicationSendCommand } from "../terrarium-s3-export";
+import { chooseLatestExportSnapshot, isRetriableS3ExportError, planS3SnapshotExport, zfsReplicationSendCommand } from "../terrarium-s3-export";
 
 describe("backup restore metadata", () => {
   test("classifies transient S3 export errors for retry", () => {
@@ -32,6 +32,37 @@ describe("backup restore metadata", () => {
     expect(zfsReplicationSendCommand("terrarium/containers/app@manual-keep", "terrarium/containers/app@manual-base")).toBe(
       "zfs send -R -I 'terrarium/containers/app@manual-base' 'terrarium/containers/app@manual-keep'"
     );
+  });
+
+  test("forces a full recursive S3 baseline for legacy last-snapshot state", () => {
+    expect(planS3SnapshotExport("terrarium/containers/app@s2", "terrarium/containers/app@s1", "", true)).toEqual({
+      skip: false,
+      parentSnapshot: "",
+      full: true
+    });
+    expect(planS3SnapshotExport("terrarium/containers/app@s2", "terrarium/containers/app@s2", "", true)).toEqual({
+      skip: false,
+      parentSnapshot: "",
+      full: true
+    });
+  });
+
+  test("uses S3 incremental parents only after recursive state has been recorded", () => {
+    expect(planS3SnapshotExport("terrarium/containers/app@s2", "terrarium/containers/app@s1", "zfs-recursive-v1", true)).toEqual({
+      skip: false,
+      parentSnapshot: "terrarium/containers/app@s1",
+      full: false
+    });
+    expect(planS3SnapshotExport("terrarium/containers/app@s2", "terrarium/containers/app@s2", "zfs-recursive-v1", true)).toEqual({
+      skip: true,
+      parentSnapshot: "",
+      full: false
+    });
+    expect(planS3SnapshotExport("terrarium/containers/app@s2", "terrarium/containers/app@s1", "zfs-recursive-v1", false)).toEqual({
+      skip: false,
+      parentSnapshot: "",
+      full: true
+    });
   });
 
   test("renames restored LXD metadata and removes generated identity", () => {

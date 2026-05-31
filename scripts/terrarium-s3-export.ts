@@ -14,7 +14,8 @@ import {
 
 const PREFIX = "terrariumctl backup export";
 const DEFAULT_CONFIG_PATH = process.env.TERRARIUM_CONFIG_PATH ?? "/etc/terrarium/config.yaml";
-const STATE_DIR = "/var/lib/terrarium";
+const STATE_DIR = process.env.TERRARIUM_STATE_DIR ?? "/var/lib/terrarium";
+const S3_SNAPSHOT_STATE_FORMAT = "zfs-recursive-v1";
 const S3_EXPORT_ATTEMPTS = 4;
 const S3_EXPORT_RETRY_MS = 5000;
 
@@ -63,6 +64,21 @@ export function zfsReplicationSendCommand(latestSnapshot: string, parentSnapshot
     return `zfs send -R -I ${shellEscape(parentSnapshot)} ${shellEscape(latestSnapshot)}`;
   }
   return `zfs send -R ${shellEscape(latestSnapshot)}`;
+}
+
+export function planS3SnapshotExport(
+  latestSnapshot: string,
+  lastSnapshot: string,
+  stateFormat: string,
+  parentSnapshotExists: boolean
+): { skip: boolean; parentSnapshot: string; full: boolean } {
+  const recursiveState = stateFormat === S3_SNAPSHOT_STATE_FORMAT;
+  if (recursiveState && lastSnapshot === latestSnapshot) {
+    return { skip: true, parentSnapshot: "", full: false };
+  }
+
+  const parentSnapshot = recursiveState && lastSnapshot && parentSnapshotExists ? lastSnapshot : "";
+  return { skip: false, parentSnapshot, full: !parentSnapshot };
 }
 
 export function isRetriableS3ExportError(message: string): boolean {
@@ -154,8 +170,15 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
     }
 
     const stateFile = join(STATE_DIR, "lastsnapshots", `${instance.name}.txt`);
+    const stateFormatFile = join(STATE_DIR, "lastsnapshots", `${instance.name}.format`);
     const last = existsSync(stateFile) ? readFileSync(stateFile, "utf8").trim() : "";
-    if (last === latest) {
+    const stateFormat = existsSync(stateFormatFile) ? readFileSync(stateFormatFile, "utf8").trim() : "";
+    const parentSnapshotExists =
+      stateFormat === S3_SNAPSHOT_STATE_FORMAT && last
+        ? (await runAllowFailure(["zfs", "list", "-H", "-t", "snapshot", last])).exitCode === 0
+        : false;
+    const exportPlan = planS3SnapshotExport(latest, last, stateFormat, parentSnapshotExists);
+    if (exportPlan.skip) {
       continue;
     }
 
@@ -166,10 +189,7 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
     const manifestPath = join(manifestDir, `${snapName}.json`);
     mkdirSync(manifestDir, { recursive: true });
 
-    const streamSource =
-      last && (await runAllowFailure(["zfs", "list", "-H", "-t", "snapshot", last])).exitCode === 0
-        ? zfsReplicationSendCommand(latest, last)
-        : zfsReplicationSendCommand(latest);
+    const streamSource = zfsReplicationSendCommand(latest, exportPlan.parentSnapshot);
 
     await runRetriableS3Command(
       `${streamSource} | zstd -T0 | ${awsBase.map(shellEscape).join(" ")} s3 cp - ${shellEscape(`s3://${bucket}/${objectKey}`)}`,
@@ -181,9 +201,9 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
       instance: instance.name,
       dataset,
       snapshot: latest,
-      parent_snapshot: last,
+      parent_snapshot: exportPlan.parentSnapshot,
       object_key: objectKey,
-      full: !last,
+      full: exportPlan.full,
       created_at: new Date().toISOString()
     };
     writeJsonFile(manifestPath, manifest);
@@ -193,5 +213,6 @@ export async function backupExportCmd(configPath = DEFAULT_CONFIG_PATH): Promise
       `S3 manifest upload for ${instance.name}@${snapName}`
     );
     writeFileSync(stateFile, `${latest}\n`, "utf8");
+    writeFileSync(stateFormatFile, `${S3_SNAPSHOT_STATE_FORMAT}\n`, "utf8");
   }
 }
