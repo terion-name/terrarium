@@ -26,6 +26,7 @@ type ImageCreateIdentity = {
 };
 
 type LxdConfig = {
+  config?: Record<string, string>;
   devices?: Record<string, { type?: string }>;
 };
 
@@ -80,28 +81,38 @@ export function buildImageCreatePlan(
   };
 }
 
-async function proxyDeviceNames(instance: string): Promise<string[]> {
-  const raw = await runAllowFailure([LXC, "config", "show", instance, "--format=json"]);
-  if (raw.exitCode !== 0) {
-    return [];
-  }
-
-  let parsed: LxdConfig;
+async function readLxdConfig(instance: string): Promise<LxdConfig> {
+  const raw = await runText([LXC, "config", "show", instance, "--format=json"], PREFIX);
   try {
-    parsed = JSON.parse(raw.stdout) as LxdConfig;
-  } catch {
-    return [];
+    return JSON.parse(raw || "{}") as LxdConfig;
+  } catch (error) {
+    throw new Error(`failed to parse LXD config for temporary image source ${instance}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
 
-  return Object.entries(parsed.devices ?? {})
+function proxyDeviceNames(config: LxdConfig): string[] {
+  return Object.entries(config.devices ?? {})
     .filter(([, device]) => device?.type === "proxy")
     .map(([name]) => name);
 }
 
 async function sanitizeImageSource(instance: string): Promise<void> {
-  await runAllowFailure([LXC, "config", "unset", instance, "user.proxy"]);
-  for (const device of await proxyDeviceNames(instance)) {
-    await runAllowFailure([LXC, "config", "device", "remove", instance, device]);
+  const before = await readLxdConfig(instance);
+  if ((before.config?.["user.proxy"] ?? "").trim()) {
+    await runText([LXC, "config", "unset", instance, "user.proxy"], PREFIX);
+  }
+  for (const device of proxyDeviceNames(before)) {
+    await runText([LXC, "config", "device", "remove", instance, device], PREFIX);
+  }
+
+  const after = await readLxdConfig(instance);
+  const inheritedProxyLabel = (after.config?.["user.proxy"] ?? "").trim();
+  if (inheritedProxyLabel) {
+    throw new Error(`temporary image source ${instance} still has user.proxy after sanitization`);
+  }
+  const inheritedProxyDevices = proxyDeviceNames(after);
+  if (inheritedProxyDevices.length > 0) {
+    throw new Error(`temporary image source ${instance} still has proxy devices after sanitization: ${inheritedProxyDevices.join(", ")}`);
   }
 }
 
