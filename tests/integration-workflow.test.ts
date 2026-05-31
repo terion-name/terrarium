@@ -68,6 +68,8 @@ describe("integration workflows", () => {
     expect(contextSource).toContain("manylinux2014_aarch64");
     expect(contextSource).toContain("ansible-wheelhouse");
     expect(contextSource).toContain("--exclude=ansible-wheelhouse");
+    expect(contextSource).toContain('"-rf"');
+    expect(contextSource).toContain('"gzip"');
     expect(contextSource).toContain('"ansible-wheelhouse"');
   });
 });

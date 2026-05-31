@@ -126,11 +126,14 @@ export class IntegrationContext {
       { cwd: this.config.repoRoot }
     );
 
+    const sourceTarPath = join(this.linuxBundleDir, "terrarium-src.tar");
+    rmSync(sourceTarPath, { force: true });
+    rmSync(this.sourceArchivePath, { force: true });
     await run(
       [
         "tar",
-        "-czf",
-        this.sourceArchivePath,
+        "-cf",
+        sourceTarPath,
         "--exclude=.git",
         "--exclude=node_modules",
         "--exclude=dist",
@@ -138,13 +141,22 @@ export class IntegrationContext {
         "--exclude=tests/integration/output",
         "-C",
         this.config.repoRoot,
-        ".",
+        "."
+      ],
+      { cwd: this.config.repoRoot }
+    );
+    await run(
+      [
+        "tar",
+        "-rf",
+        sourceTarPath,
         "-C",
         this.linuxBundleDir,
         "ansible-wheelhouse"
       ],
       { cwd: this.config.repoRoot }
     );
+    await run(["gzip", "-f", sourceTarPath], { cwd: this.config.repoRoot });
   }
 
   domainBundle(prefix: string, ip: string): DomainBundle {
