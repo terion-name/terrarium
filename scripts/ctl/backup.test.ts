@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { assertNewRestoreTargetIsUnused, rewriteRecoveredBackupMetadata, rollbackSnapshotsForDatasetTree } from "./backup";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  assertNewRestoreTargetIsUnused,
+  cloneRootfsSnapshotIfPresent,
+  mountRootfsDatasetForLxdRecover,
+  prepareRootfsDirectoryForLxdRecover,
+  rewriteRecoveredBackupMetadata,
+  rollbackSnapshotsForDatasetTree
+} from "./backup";
 import { chooseLatestExportSnapshot, isRetriableS3ExportError, planS3SnapshotExport, zfsReplicationSendCommand } from "../terrarium-s3-export";
 
 describe("backup restore metadata", () => {
@@ -146,6 +156,129 @@ describe("backup restore metadata", () => {
         devices: {}
       }
     ]);
+  });
+});
+
+
+describe("backup restore rootfs datasets", () => {
+  test("clones a source child rootfs snapshot into the target child dataset", async () => {
+    const commands: string[] = [];
+
+    const cloned = await cloneRootfsSnapshotIfPresent(
+      "terrarium/containers/source",
+      "terrarium/containers/source@manual-keep",
+      "terrarium/containers/restored",
+      "/var/snap/lxd/common/lxd/storage-pools/terrarium/containers/restored",
+      {
+        run: async (cmd) => {
+          commands.push(cmd.join(" "));
+          if (cmd.join(" ") === "zfs list -H -t snapshot terrarium/containers/source/rootfs@manual-keep") {
+            return { exitCode: 0, stdout: "terrarium/containers/source/rootfs@manual-keep\n", stderr: "" };
+          }
+          return { exitCode: 1, stdout: "", stderr: "not found" };
+        },
+        runRequired: async (cmd) => {
+          commands.push(cmd.join(" "));
+          return "";
+        }
+      }
+    );
+
+    expect(cloned).toBe(true);
+    expect(commands).toEqual([
+      "zfs list -H -t snapshot terrarium/containers/source/rootfs@manual-keep",
+      "zfs clone -o mountpoint=/var/snap/lxd/common/lxd/storage-pools/terrarium/containers/restored/rootfs terrarium/containers/source/rootfs@manual-keep terrarium/containers/restored/rootfs"
+    ]);
+    expect(commands.some((cmd) => cmd.includes("rsync"))).toBe(false);
+    expect(commands).not.toContain("zfs destroy -r terrarium/containers/restored/rootfs");
+  });
+
+  test("leaves legacy flattened local restores to the directory fallback when no rootfs snapshot exists", async () => {
+    const commands: string[] = [];
+
+    const cloned = await cloneRootfsSnapshotIfPresent(
+      "terrarium/containers/source",
+      "terrarium/containers/source@manual-keep",
+      "terrarium/containers/restored",
+      "/var/snap/lxd/common/lxd/storage-pools/terrarium/containers/restored",
+      {
+        run: async (cmd) => {
+          commands.push(cmd.join(" "));
+          return { exitCode: 1, stdout: "", stderr: "not found" };
+        },
+        runRequired: async (cmd) => {
+          commands.push(cmd.join(" "));
+          return "";
+        }
+      }
+    );
+
+    expect(cloned).toBe(false);
+    expect(commands).toEqual(["zfs list -H -t snapshot terrarium/containers/source/rootfs@manual-keep"]);
+  });
+
+  test("mounts an existing recovered child rootfs dataset instead of materializing it", async () => {
+    const commands: string[] = [];
+
+    await mountRootfsDatasetForLxdRecover(
+      "terrarium/containers/restored/rootfs",
+      "/var/snap/lxd/common/lxd/storage-pools/terrarium/containers/restored/rootfs",
+      {
+        run: async (cmd) => {
+          commands.push(cmd.join(" "));
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+        runRequired: async (cmd) => {
+          commands.push(cmd.join(" "));
+          return "";
+        },
+        directoryHasEntries: () => true
+      }
+    );
+
+    expect(commands).toEqual([
+      "mkdir -p /var/snap/lxd/common/lxd/storage-pools/terrarium/containers/restored/rootfs",
+      "zfs unmount terrarium/containers/restored/rootfs",
+      "zfs set mountpoint=/var/snap/lxd/common/lxd/storage-pools/terrarium/containers/restored/rootfs terrarium/containers/restored/rootfs",
+      "zfs mount terrarium/containers/restored/rootfs"
+    ]);
+    expect(commands.some((cmd) => cmd.includes("rsync"))).toBe(false);
+    expect(commands).not.toContain("zfs destroy -r terrarium/containers/restored/rootfs");
+  });
+
+  test("moves legacy flattened rootfs contents only when rootfs is not already populated", () => {
+    const mountPath = mkdtempSync(join(tmpdir(), "terrarium-legacy-rootfs-"));
+    try {
+      writeFileSync(join(mountPath, "backup.yaml"), "container: {}\n");
+      mkdirSync(join(mountPath, "etc"));
+      writeFileSync(join(mountPath, "etc", "os-release"), "NAME=test\n");
+
+      prepareRootfsDirectoryForLxdRecover(mountPath);
+
+      expect(existsSync(join(mountPath, "backup.yaml"))).toBe(true);
+      expect(existsSync(join(mountPath, "rootfs", "etc", "os-release"))).toBe(true);
+      expect(readdirSync(join(mountPath, "rootfs"))).toEqual(["etc"]);
+    } finally {
+      rmSync(mountPath, { recursive: true, force: true });
+    }
+  });
+
+  test("does not move parent dataset files when rootfs is already populated", () => {
+    const mountPath = mkdtempSync(join(tmpdir(), "terrarium-child-rootfs-"));
+    try {
+      writeFileSync(join(mountPath, "backup.yaml"), "container: {}\n");
+      mkdirSync(join(mountPath, "etc"));
+      writeFileSync(join(mountPath, "etc", "parent-owned"), "kept in parent\n");
+      mkdirSync(join(mountPath, "rootfs"));
+      writeFileSync(join(mountPath, "rootfs", "child-owned"), "kept in child\n");
+
+      prepareRootfsDirectoryForLxdRecover(mountPath);
+
+      expect(existsSync(join(mountPath, "etc", "parent-owned"))).toBe(true);
+      expect(existsSync(join(mountPath, "rootfs", "child-owned"))).toBe(true);
+    } finally {
+      rmSync(mountPath, { recursive: true, force: true });
+    }
   });
 });
 

@@ -76,6 +76,24 @@ async function stopInstanceForRestore(instance: string): Promise<void> {
 }
 
 type CommandRunner = typeof runAllowFailure;
+type RunRequiredCommand = (cmd: string[]) => Promise<string>;
+type RestoreCommandRunners = {
+  run?: CommandRunner;
+  runRequired?: RunRequiredCommand;
+  directoryHasEntries?: (path: string) => boolean;
+};
+
+function restoreCommandRunners(runners: RestoreCommandRunners): {
+  run: CommandRunner;
+  runRequired: RunRequiredCommand;
+  directoryHasEntries: (path: string) => boolean;
+} {
+  return {
+    run: runners.run ?? runAllowFailure,
+    runRequired: runners.runRequired ?? ((cmd) => runText(cmd, PREFIX)),
+    directoryHasEntries: runners.directoryHasEntries ?? directoryHasEntries
+  };
+}
 
 export async function assertNewRestoreTargetIsUnused(instance: string, targetDataset: string, runCommand: CommandRunner = runAllowFailure): Promise<void> {
   const instanceCheck = await runCommand(["lxc", "info", instance]);
@@ -257,7 +275,7 @@ function directoryHasEntries(path: string): boolean {
   return existsSync(path) && readdirSync(path).length > 0;
 }
 
-function prepareRootfsDirectoryForLxdRecover(mountPath: string): void {
+export function prepareRootfsDirectoryForLxdRecover(mountPath: string): void {
   const rootfsPath = join(mountPath, "rootfs");
   if (directoryHasEntries(rootfsPath)) {
     return;
@@ -300,21 +318,30 @@ async function prepareDatasetForLxdRecover(pool: string, targetDataset: string, 
   if (mount.exitCode !== 0 && !`${mount.stderr}\n${mount.stdout}`.toLowerCase().includes("already mounted")) {
     throw new Error(`failed to mount recovered dataset at ${mountPath}: ${mount.stderr.trim() || mount.stdout.trim()}`);
   }
-  if ((await zfsDatasetExists(rootfsDataset))) {
-    await materializeRootfsDataset(rootfsDataset, rootfsPath);
+  const hasRootfsDataset = await zfsDatasetExists(rootfsDataset);
+  if (hasRootfsDataset) {
+    await mountRootfsDatasetForLxdRecover(rootfsDataset, rootfsPath);
   }
   rewriteBackupYaml(mountPath, oldName, newName);
-  prepareRootfsDirectoryForLxdRecover(mountPath);
+  if (!hasRootfsDataset) {
+    prepareRootfsDirectoryForLxdRecover(mountPath);
+  }
   return mountPath;
 }
 
 async function mountRecoveredDataset(targetDataset: string, mountPath: string): Promise<void> {
   const rootfsPath = join(mountPath, "rootfs");
+  const rootfsDataset = `${targetDataset}/rootfs`;
   await runText(["mkdir", "-p", mountPath], PREFIX);
   await runText(["zfs", "set", `mountpoint=${mountPath}`, targetDataset], PREFIX);
   const mount = await runAllowFailure(["zfs", "mount", targetDataset]);
   if (mount.exitCode !== 0 && !`${mount.stderr}\n${mount.stdout}`.toLowerCase().includes("already mounted")) {
     throw new Error(`failed to remount recovered dataset at ${mountPath}: ${mount.stderr.trim() || mount.stdout.trim()}`);
+  }
+
+  if (await zfsDatasetExists(rootfsDataset)) {
+    await mountRootfsDatasetForLxdRecover(rootfsDataset, rootfsPath);
+    return;
   }
 
   if (!directoryHasEntries(rootfsPath)) {
@@ -331,12 +358,12 @@ async function mountRecoveredDataset(targetDataset: string, mountPath: string): 
   }
 }
 
-async function zfsDatasetExists(dataset: string): Promise<boolean> {
-  return (await runAllowFailure(["zfs", "list", "-H", dataset])).exitCode === 0;
+async function zfsDatasetExists(dataset: string, runCommand: CommandRunner = runAllowFailure): Promise<boolean> {
+  return (await runCommand(["zfs", "list", "-H", dataset])).exitCode === 0;
 }
 
-async function zfsSnapshotExists(snapshot: string): Promise<boolean> {
-  return (await runAllowFailure(["zfs", "list", "-H", "-t", "snapshot", snapshot])).exitCode === 0;
+async function zfsSnapshotExists(snapshot: string, runCommand: CommandRunner = runAllowFailure): Promise<boolean> {
+  return (await runCommand(["zfs", "list", "-H", "-t", "snapshot", snapshot])).exitCode === 0;
 }
 
 export function rollbackSnapshotsForDatasetTree(snapshot: string, availableSnapshots: string[]): string[] {
@@ -368,65 +395,57 @@ async function rollbackDatasetTreeToSnapshot(snapshot: string): Promise<void> {
   }
 }
 
-function restoreTempDatasetName(targetDataset: string, label: string): string {
-  const suffix = `${label}-${process.pid}-${Date.now()}`.replace(/[^A-Za-z0-9_.:-]/g, "-");
-  return `${targetDataset}-${suffix}`;
-}
+export async function mountRootfsDatasetForLxdRecover(
+  rootfsDataset: string,
+  rootfsPath: string,
+  runners: RestoreCommandRunners = {}
+): Promise<void> {
+  const { run, runRequired, directoryHasEntries: hasEntries } = restoreCommandRunners(runners);
+  await runRequired(["mkdir", "-p", rootfsPath]);
+  await run(["zfs", "unmount", rootfsDataset]);
+  await runRequired(["zfs", "set", `mountpoint=${rootfsPath}`, rootfsDataset]);
+  const rootfsMount = await run(["zfs", "mount", rootfsDataset]);
+  if (rootfsMount.exitCode !== 0 && !`${rootfsMount.stderr}\n${rootfsMount.stdout}`.toLowerCase().includes("already mounted")) {
+    throw new Error(`failed to mount recovered rootfs dataset at ${rootfsPath}: ${rootfsMount.stderr.trim() || rootfsMount.stdout.trim()}`);
+  }
 
-async function makeTempMountPath(): Promise<string> {
-  return (await runText(["mktemp", "-d", "/var/tmp/terrarium-rootfs.XXXXXX"], PREFIX)).trim();
-}
-
-async function copyMountedRootfs(sourceMountPath: string, rootfsPath: string): Promise<void> {
-  await runText(["mkdir", "-p", rootfsPath], PREFIX);
-  await runText(["rsync", "-aHAX", "--numeric-ids", `${sourceMountPath}/`, `${rootfsPath}/`], PREFIX);
-}
-
-async function materializeRootfsDataset(rootfsDataset: string, rootfsPath: string): Promise<void> {
-  const tempMountPath = await makeTempMountPath();
-  try {
-    await runAllowFailure(["zfs", "unmount", rootfsDataset]);
-    await runText(["zfs", "set", `mountpoint=${tempMountPath}`, rootfsDataset], PREFIX);
-    const rootfsMount = await runAllowFailure(["zfs", "mount", rootfsDataset]);
-    if (rootfsMount.exitCode !== 0 && !`${rootfsMount.stderr}\n${rootfsMount.stdout}`.toLowerCase().includes("already mounted")) {
-      throw new Error(`failed to mount recovered rootfs dataset at ${tempMountPath}: ${rootfsMount.stderr.trim() || rootfsMount.stdout.trim()}`);
-    }
-    await copyMountedRootfs(tempMountPath, rootfsPath);
-  } finally {
-    await runAllowFailure(["zfs", "unmount", rootfsDataset]);
-    await runAllowFailure(["zfs", "destroy", "-r", rootfsDataset]);
-    await runAllowFailure(["rm", "-rf", tempMountPath]);
+  if (!hasEntries(rootfsPath)) {
+    const datasetState = await run(["zfs", "get", "-H", "-o", "property,value", "mounted,mountpoint,canmount", rootfsDataset]);
+    throw new Error(
+      [
+        `recovered LXD rootfs dataset is mounted but missing contents at ${rootfsPath}`,
+        datasetState.stdout.trim() ? `zfs state:\n${datasetState.stdout.trim()}` : "",
+        datasetState.stderr.trim() ? `zfs stderr:\n${datasetState.stderr.trim()}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    );
   }
 }
 
-async function materializeRootfsSnapshotIfPresent(
+export async function cloneRootfsSnapshotIfPresent(
   sourceDataset: string,
   snapshot: string,
   targetDataset: string,
-  targetMountPath: string
-): Promise<void> {
+  targetMountPath: string,
+  runners: RestoreCommandRunners = {}
+): Promise<boolean> {
   const snapshotMarker = snapshot.indexOf("@");
   if (snapshotMarker === -1) {
     throw new Error(`invalid ZFS snapshot name: ${snapshot}`);
   }
 
+  const { run, runRequired } = restoreCommandRunners(runners);
   const childSnapshot = `${sourceDataset}/rootfs${snapshot.slice(snapshotMarker)}`;
-  if (!(await zfsSnapshotExists(childSnapshot))) {
-    return;
+  if (!(await zfsSnapshotExists(childSnapshot, run))) {
+    return false;
   }
 
-  const tempDataset = restoreTempDatasetName(targetDataset, "rootfs-stage");
-  const tempMountPath = await makeTempMountPath();
+  const rootfsDataset = `${targetDataset}/rootfs`;
   const rootfsPath = join(targetMountPath, "rootfs");
-  try {
-    await runText(["zfs", "clone", "-o", `mountpoint=${tempMountPath}`, childSnapshot, tempDataset], PREFIX);
-    await copyMountedRootfs(tempMountPath, rootfsPath);
-    console.log(success(`Materialized rootfs from ${childSnapshot} into ${rootfsPath}`));
-  } finally {
-    await runAllowFailure(["zfs", "unmount", tempDataset]);
-    await runAllowFailure(["zfs", "destroy", "-r", tempDataset]);
-    await runAllowFailure(["rm", "-rf", tempMountPath]);
-  }
+  await runRequired(["zfs", "clone", "-o", `mountpoint=${rootfsPath}`, childSnapshot, rootfsDataset]);
+  console.log(success(`Cloned rootfs snapshot ${childSnapshot} to ${rootfsDataset}`));
+  return true;
 }
 
 async function recoverAsNewInstance(pool: string, sourceName: string, targetDataset: string, newName: string): Promise<void> {
@@ -496,7 +515,7 @@ async function restoreLocal(
   const targetMountPath = join(lxdStorageRoot(pool), "containers", newName);
   await runText(["mkdir", "-p", targetMountPath], PREFIX);
   await runText(["zfs", "clone", "-o", `mountpoint=${targetMountPath}`, snapshot, targetDataset], PREFIX);
-  await materializeRootfsSnapshotIfPresent(dataset, snapshot, targetDataset, targetMountPath);
+  await cloneRootfsSnapshotIfPresent(dataset, snapshot, targetDataset, targetMountPath);
   console.log(success(`Cloned ${snapshot} to ${targetDataset}`));
   await recoverAsNewInstance(pool, instance, targetDataset, newName);
 }
