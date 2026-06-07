@@ -47,9 +47,17 @@ type LxcNetwork = {
   addresses?: LxcAddress[];
 };
 
-type LxcInstance = {
+type LxdDevice = {
+  type?: string;
+  listen?: string;
+  connect?: string;
+};
+
+export type LxcInstance = {
   name?: string;
   config?: Record<string, string>;
+  devices?: Record<string, LxdDevice>;
+  expanded_devices?: Record<string, LxdDevice>;
   state?: {
     network?: Record<string, LxcNetwork>;
   };
@@ -84,7 +92,7 @@ type TransportProxyItem = { kind: "tcp" | "udp"; hostPort: number; containerPort
 
 type ProxyBackendProtocol = "tcp" | "udp";
 
-type ProxyBackendSpec = {
+export type ProxyBackendSpec = {
   key: string;
   containerName: string;
   proto: ProxyBackendProtocol;
@@ -92,8 +100,15 @@ type ProxyBackendSpec = {
   deviceName: string;
 };
 
-type ProxyBackendStateEntry = ProxyBackendSpec & {
+export type ProxyBackendStateEntry = ProxyBackendSpec & {
   hostPort: number;
+};
+
+export type ExistingProxyBackendDevice = {
+  containerName: string;
+  deviceName: string;
+  listen?: string;
+  hostPort?: number;
 };
 
 export type ProxyBackendTarget = {
@@ -797,7 +812,7 @@ function proxyBackendDeviceName(key: string, proto: ProxyBackendProtocol, target
   return `${PROXY_BACKEND_DEVICE_PREFIX}-${proto}-${targetPort}-${hash}`;
 }
 
-function collectDesiredProxyBackendSpecs(containers: LxcInstance[]): ProxyBackendSpec[] {
+export function collectDesiredProxyBackendSpecs(containers: LxcInstance[]): ProxyBackendSpec[] {
   const specs = new Map<string, ProxyBackendSpec>();
 
   for (const container of containersWithProxyLabels(containers)) {
@@ -827,6 +842,166 @@ function collectDesiredProxyBackendSpecs(containers: LxcInstance[]): ProxyBacken
   }
 
   return [...specs.values()].sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function validProxyBackendHostPort(port: number | undefined): port is number {
+  return (
+    typeof port === "number" &&
+    Number.isInteger(port) &&
+    port >= PROXY_BACKEND_BASE_PORT &&
+    port <= PROXY_BACKEND_MAX_PORT
+  );
+}
+
+export function parseProxyListenPort(listen: unknown): number | null {
+  if (typeof listen !== "string") {
+    return null;
+  }
+
+  const match = listen.match(/^(?:tcp|udp):.+:(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const port = Number(match[1]);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+export function collectExistingProxyBackendDevices(containers: LxcInstance[]): ExistingProxyBackendDevice[] {
+  const devices = new Map<string, ExistingProxyBackendDevice>();
+
+  for (const container of containers) {
+    if (!container.name) {
+      continue;
+    }
+
+    for (const deviceMap of [container.devices, container.expanded_devices]) {
+      if (!deviceMap) {
+        continue;
+      }
+
+      for (const [deviceName, device] of Object.entries(deviceMap)) {
+        if (!deviceName.startsWith(`${PROXY_BACKEND_DEVICE_PREFIX}-`) || device?.type !== "proxy") {
+          continue;
+        }
+
+        const listenPort = parseProxyListenPort(device.listen);
+        devices.set(`${container.name}\0${deviceName}`, {
+          containerName: container.name,
+          deviceName,
+          listen: device.listen,
+          ...(listenPort === null ? {} : { hostPort: listenPort })
+        });
+      }
+    }
+  }
+
+  return [...devices.values()].sort(
+    (left, right) => left.containerName.localeCompare(right.containerName) || left.deviceName.localeCompare(right.deviceName)
+  );
+}
+
+function proxyBackendDeviceNamesByContainer(specs: ProxyBackendSpec[]): Map<string, Set<string>> {
+  const names = new Map<string, Set<string>>();
+
+  for (const spec of specs) {
+    let containerNames = names.get(spec.containerName);
+    if (!containerNames) {
+      containerNames = new Set<string>();
+      names.set(spec.containerName, containerNames);
+    }
+    containerNames.add(spec.deviceName);
+  }
+
+  return names;
+}
+
+export function findStaleExistingProxyBackendDevices(
+  existingDevices: ExistingProxyBackendDevice[],
+  specs: ProxyBackendSpec[]
+): ExistingProxyBackendDevice[] {
+  const desiredNamesByContainer = proxyBackendDeviceNamesByContainer(specs);
+  return existingDevices.filter((device) => {
+    const desiredNames = desiredNamesByContainer.get(device.containerName);
+    return desiredNames !== undefined && !desiredNames.has(device.deviceName);
+  });
+}
+
+function proxyBackendDeviceIdentity(device: { containerName: string; deviceName: string }): string {
+  return `${device.containerName}\0${device.deviceName}`;
+}
+
+export function planProxyBackendEntries(
+  specs: ProxyBackendSpec[],
+  previous: ProxyBackendStateEntry[],
+  keptExistingDevices: ExistingProxyBackendDevice[]
+): { entries: ProxyBackendStateEntry[]; errors: string[] } {
+  const previousByKey = new Map<string, ProxyBackendStateEntry>();
+  const existingByDesiredKey = new Map<string, ExistingProxyBackendDevice>();
+  const desiredKeyByDevice = new Map(specs.map((spec) => [proxyBackendDeviceIdentity(spec), spec.key]));
+  const keptDevicesByPort = new Map<number, ExistingProxyBackendDevice[]>();
+  const usedPorts = new Set<number>();
+
+  for (const entry of previous) {
+    if (!previousByKey.has(entry.key)) {
+      previousByKey.set(entry.key, entry);
+    }
+    if (validProxyBackendHostPort(entry.hostPort)) {
+      usedPorts.add(entry.hostPort);
+    }
+  }
+
+  for (const device of keptExistingDevices) {
+    if (validProxyBackendHostPort(device.hostPort)) {
+      usedPorts.add(device.hostPort);
+      const devices = keptDevicesByPort.get(device.hostPort) ?? [];
+      devices.push(device);
+      keptDevicesByPort.set(device.hostPort, devices);
+    }
+
+    const desiredKey = desiredKeyByDevice.get(proxyBackendDeviceIdentity(device));
+    if (desiredKey && !existingByDesiredKey.has(desiredKey)) {
+      existingByDesiredKey.set(desiredKey, device);
+    }
+  }
+
+  const entries: ProxyBackendStateEntry[] = [];
+  const errors: string[] = [];
+
+  const portAvailableForSpec = (port: number, spec: ProxyBackendSpec): boolean => {
+    const devices = keptDevicesByPort.get(port) ?? [];
+    return devices.every((device) => device.containerName === spec.containerName && device.deviceName === spec.deviceName);
+  };
+
+  for (const spec of specs) {
+    const previousEntry = previousByKey.get(spec.key);
+    const existingDevice = existingByDesiredKey.get(spec.key);
+    let hostPort =
+      previousEntry?.hostPort &&
+      validProxyBackendHostPort(previousEntry.hostPort) &&
+      portAvailableForSpec(previousEntry.hostPort, spec) &&
+      !entries.some((entry) => entry.hostPort === previousEntry.hostPort)
+        ? previousEntry.hostPort
+        : undefined;
+
+    if (!hostPort && validProxyBackendHostPort(existingDevice?.hostPort) && !entries.some((entry) => entry.hostPort === existingDevice.hostPort)) {
+      hostPort = existingDevice.hostPort;
+    }
+
+    if (!hostPort) {
+      try {
+        hostPort = allocateProxyBackendPort(usedPorts);
+      } catch (error) {
+        errors.push(`${spec.containerName}: ${String(error).replace(/^Error: /, "")}`);
+        continue;
+      }
+    }
+
+    usedPorts.add(hostPort);
+    entries.push({ ...spec, hostPort });
+  }
+
+  return { entries, errors };
 }
 
 function isProxyBackendStateEntry(value: unknown): value is ProxyBackendStateEntry {
@@ -879,7 +1054,7 @@ async function readLxdProxyDeviceValue(containerName: string, deviceName: string
   return result.stdout.trim();
 }
 
-async function removeLxdProxyDevice(entry: ProxyBackendStateEntry): Promise<string | null> {
+async function removeLxdProxyDevice(entry: { containerName: string; deviceName: string }): Promise<string | null> {
   const result = await runAllowFailure([
     "timeout",
     "30s",
@@ -940,6 +1115,19 @@ async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ target
   const previousByKey = new Map<string, ProxyBackendStateEntry>();
   const errors: string[] = [];
 
+  const existingDevices = collectExistingProxyBackendDevices(containers);
+  const staleExistingDevices = findStaleExistingProxyBackendDevices(existingDevices, specs);
+  const staleDeviceIdentities = new Set(staleExistingDevices.map(proxyBackendDeviceIdentity));
+  const failedStaleDeviceRemovals = new Set<string>();
+
+  for (const device of staleExistingDevices) {
+    const removeError = await removeLxdProxyDevice(device);
+    if (removeError) {
+      errors.push(removeError);
+      failedStaleDeviceRemovals.add(proxyBackendDeviceIdentity(device));
+    }
+  }
+
   for (const entry of previous) {
     if (!previousByKey.has(entry.key)) {
       previousByKey.set(entry.key, entry);
@@ -952,33 +1140,19 @@ async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ target
     }
   }
 
-  const usedPorts = new Set(
-    previous
-      .map((entry) => entry.hostPort)
-      .filter((port) => Number.isInteger(port) && port >= PROXY_BACKEND_BASE_PORT && port <= PROXY_BACKEND_MAX_PORT)
-  );
+  const keptExistingDevices = existingDevices.filter((device) => {
+    const identity = proxyBackendDeviceIdentity(device);
+    return !staleDeviceIdentities.has(identity) || failedStaleDeviceRemovals.has(identity);
+  });
+  const { entries: plannedEntries, errors: allocationErrors } = planProxyBackendEntries(specs, previous, keptExistingDevices);
+  errors.push(...allocationErrors);
+
   const next: ProxyBackendStateEntry[] = [];
 
-  for (const spec of specs) {
-    const previousEntry = previousByKey.get(spec.key);
-    let hostPort =
-      previousEntry?.hostPort &&
-      previousEntry.hostPort >= PROXY_BACKEND_BASE_PORT &&
-      previousEntry.hostPort <= PROXY_BACKEND_MAX_PORT &&
-      !next.some((entry) => entry.hostPort === previousEntry.hostPort)
-        ? previousEntry.hostPort
-        : undefined;
-    if (!hostPort) {
-      try {
-        hostPort = allocateProxyBackendPort(usedPorts);
-      } catch (error) {
-        errors.push(`${spec.containerName}: ${String(error).replace(/^Error: /, "")}`);
-        continue;
-      }
-    }
-    usedPorts.add(hostPort);
+  for (const entry of plannedEntries) {
+    const previousEntry = previousByKey.get(entry.key);
 
-    if (previousEntry && previousEntry.deviceName !== spec.deviceName) {
+    if (previousEntry && previousEntry.deviceName !== entry.deviceName) {
       const removeError = await removeLxdProxyDevice(previousEntry);
       if (removeError) {
         errors.push(removeError);
@@ -986,7 +1160,6 @@ async function syncLxdProxyBackends(containers: LxcInstance[]): Promise<{ target
       }
     }
 
-    const entry: ProxyBackendStateEntry = { ...spec, hostPort };
     const deviceError = await ensureLxdProxyDevice(entry);
     if (deviceError) {
       errors.push(deviceError);

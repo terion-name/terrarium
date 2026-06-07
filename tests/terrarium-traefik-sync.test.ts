@@ -8,9 +8,14 @@ import {
   buildRouteAuthComposeArtifacts,
   buildRouteAuthProfiles,
   buildRouteAuthRedirectUris,
+  collectDesiredProxyBackendSpecs,
+  collectExistingProxyBackendDevices,
+  findStaleExistingProxyBackendDevices,
   formatRouteAuthReadinessError,
   isZitadelNoChangesResponse,
-  parseZitadelHttpOutput
+  parseProxyListenPort,
+  parseZitadelHttpOutput,
+  planProxyBackendEntries
 } from "../scripts/terrarium-traefik-sync";
 import { buildZitadelCloudRedirectUris } from "./integration/provider/zitadel-cloud";
 
@@ -411,6 +416,118 @@ describe("terrarium route auth generation", () => {
     expect(providerRedirectUris).toContain("https://agents.example.test/oauth2/agents/callback");
     expect(providerRedirectUris).toContain("https://app.example.test/oauth2/admin/callback");
     expect(providerRedirectUris).not.toContain("https://app.example.test/oauth2/route/app-example-test-admins/callback");
+  });
+});
+
+describe("terrarium LXD proxy backend reconciliation", () => {
+  test("discovers managed proxy devices from instance device maps and parses listen ports", () => {
+    const devices = collectExistingProxyBackendDevices([
+      {
+        name: "app",
+        devices: {
+          "terrarium-proxy-tcp-8080-local": {
+            type: "proxy",
+            listen: "tcp:127.0.0.1:18081",
+            connect: "tcp:127.0.0.1:8080"
+          },
+          "terrarium-proxy-tcp-8080-disk": {
+            type: "disk",
+            listen: "tcp:127.0.0.1:18082"
+          },
+          unrelated: {
+            type: "proxy",
+            listen: "tcp:127.0.0.1:18083"
+          }
+        },
+        expanded_devices: {
+          "terrarium-proxy-udp-5353-expanded": {
+            type: "proxy",
+            listen: "udp:127.0.0.1:18084",
+            connect: "udp:127.0.0.1:5353"
+          },
+          "terrarium-proxy-tcp-invalid": {
+            type: "proxy",
+            listen: "tcp:127.0.0.1:not-a-port"
+          }
+        }
+      }
+    ]);
+
+    expect(parseProxyListenPort("tcp:127.0.0.1:18081")).toBe(18081);
+    expect(parseProxyListenPort("udp:127.0.0.1:18082")).toBe(18082);
+    expect(parseProxyListenPort("tcp:127.0.0.1:not-a-port")).toBeNull();
+    expect(devices).toEqual([
+      {
+        containerName: "app",
+        deviceName: "terrarium-proxy-tcp-8080-local",
+        listen: "tcp:127.0.0.1:18081",
+        hostPort: 18081
+      },
+      {
+        containerName: "app",
+        deviceName: "terrarium-proxy-tcp-invalid",
+        listen: "tcp:127.0.0.1:not-a-port"
+      },
+      {
+        containerName: "app",
+        deviceName: "terrarium-proxy-udp-5353-expanded",
+        listen: "udp:127.0.0.1:18084",
+        hostPort: 18084
+      }
+    ]);
+  });
+
+  test("marks inherited managed devices stale when desired device names change", () => {
+    const copiedContainer = {
+      ...container("alfred", "https://alfred.example.test:8080"),
+      devices: {
+        "terrarium-proxy-tcp-8080-sourcehash": {
+          type: "proxy",
+          listen: "tcp:127.0.0.1:18081",
+          connect: "tcp:127.0.0.1:8080"
+        }
+      }
+    };
+    const specs = collectDesiredProxyBackendSpecs([copiedContainer]);
+    const existingDevices = collectExistingProxyBackendDevices([copiedContainer]);
+
+    expect(specs).toHaveLength(1);
+    expect(specs[0].deviceName).not.toBe("terrarium-proxy-tcp-8080-sourcehash");
+    expect(findStaleExistingProxyBackendDevices(existingDevices, specs).map((device) => device.deviceName)).toEqual([
+      "terrarium-proxy-tcp-8080-sourcehash"
+    ]);
+  });
+
+  test("reuses matching discovered devices and reserves ports from kept discovered devices", () => {
+    const specs = collectDesiredProxyBackendSpecs([
+      container("app", "https://app.example.test:8080"),
+      container("worker", "tcp://9000:9000")
+    ]);
+    const appSpec = specs.find((spec) => spec.containerName === "app");
+    if (!appSpec) {
+      throw new Error("missing app proxy backend spec");
+    }
+
+    const { entries, errors } = planProxyBackendEntries(specs, [], [
+      {
+        containerName: "app",
+        deviceName: appSpec.deviceName,
+        listen: "tcp:127.0.0.1:18081",
+        hostPort: 18081
+      },
+      {
+        containerName: "legacy",
+        deviceName: "terrarium-proxy-tcp-9999-legacy",
+        listen: "tcp:127.0.0.1:18082",
+        hostPort: 18082
+      }
+    ]);
+
+    expect(errors).toEqual([]);
+    expect(entries.map((entry) => [entry.containerName, entry.hostPort])).toEqual([
+      ["app", 18081],
+      ["worker", 18083]
+    ]);
   });
 });
 
