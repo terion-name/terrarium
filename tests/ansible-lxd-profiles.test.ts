@@ -8,14 +8,40 @@ function readRepoFile(path: string): string {
   return readFileSync(join(repoRoot, path), "utf8");
 }
 
-function expectTerrariumUserProfile(content: string): void {
+const hermesPathExport = 'export PATH="$HOME/.venvs/hermes/bin:$PATH"';
+
+function expectTerrariumUserProfile(
+  content: string,
+  options: { allowsPasswordlessSudo?: boolean } = {},
+): void {
   expect(content).toContain("cloud-init.vendor-data: |");
   expect(content).toContain("name: terrarium");
   expect(content).toContain("gecos: Terrarium Container User");
   expect(content).toContain("lock_passwd: true");
   expect(content).toContain("shell: /bin/bash");
   expect(content).toContain("sudo: []");
-  expect(content).not.toContain("NOPASSWD");
+  if (options.allowsPasswordlessSudo) {
+    expect(content).toContain("NOPASSWD");
+  } else {
+    expect(content).not.toContain("NOPASSWD");
+  }
+
+  expect(content).toContain("packages:");
+  expect(content).toContain("- python3-full");
+  expect(content).toContain("- python3-venv");
+  expect(content).toContain("runcmd:");
+  expect(content).toContain("mkdir -p /home/terrarium/.venvs");
+  expect(content).toContain(
+    "test -x /home/terrarium/.venvs/hermes/bin/python || python3 -m venv /home/terrarium/.venvs/hermes",
+  );
+  expect(content).toContain("chown -R terrarium:terrarium /home/terrarium/.venvs");
+  expect(content).toContain(hermesPathExport);
+  expect(content).toContain(
+    `grep -qxF '${hermesPathExport}' /home/terrarium/.profile`,
+  );
+  expect(content).toContain(
+    `grep -qxF '${hermesPathExport}' /home/terrarium/.bashrc`,
+  );
 }
 
 describe("LXD profiles", () => {
@@ -62,6 +88,7 @@ describe("LXD profiles", () => {
     expect(strictProfile).toContain("network: {{ terrarium_lxd_network_name }}");
     expect(strictProfile).toContain("pool: {{ terrarium_lxd_pool_name }}");
 
+    expectTerrariumUserProfile(devProfile, { allowsPasswordlessSudo: true });
     expect(devProfile).toContain("name: dev");
     expect(devProfile).toContain("cloud-init.user-data: |");
     expect(devProfile).toContain("path: /etc/sudoers.d/90-terrarium-dev");
