@@ -8,7 +8,7 @@ function readRepoFile(path: string): string {
   return readFileSync(join(repoRoot, path), "utf8");
 }
 
-const hermesPathExport = 'export PATH="$HOME/.venvs/hermes/bin:$PATH"';
+const defaultPathExport = 'export PATH="$HOME/.venvs/default/bin:$PATH"';
 
 function expectTerrariumUserProfile(
   content: string,
@@ -32,15 +32,15 @@ function expectTerrariumUserProfile(
   expect(content).toContain("runcmd:");
   expect(content).toContain("mkdir -p /home/terrarium/.venvs");
   expect(content).toContain(
-    "test -x /home/terrarium/.venvs/hermes/bin/python || python3 -m venv /home/terrarium/.venvs/hermes",
+    "test -x /home/terrarium/.venvs/default/bin/python || python3 -m venv /home/terrarium/.venvs/default",
   );
   expect(content).toContain("chown -R terrarium:terrarium /home/terrarium/.venvs");
-  expect(content).toContain(hermesPathExport);
+  expect(content).toContain(defaultPathExport);
   expect(content).toContain(
-    `grep -qxF '${hermesPathExport}' /home/terrarium/.profile`,
+    `grep -qxF '${defaultPathExport}' /home/terrarium/.profile`,
   );
   expect(content).toContain(
-    `grep -qxF '${hermesPathExport}' /home/terrarium/.bashrc`,
+    `grep -qxF '${defaultPathExport}' /home/terrarium/.bashrc`,
   );
 }
 

@@ -13,10 +13,10 @@ config:
       - python3-venv
     runcmd:
       - mkdir -p /home/terrarium/.venvs
-      - test -x /home/terrarium/.venvs/hermes/bin/python || python3 -m venv /home/terrarium/.venvs/hermes
+      - test -x /home/terrarium/.venvs/default/bin/python || python3 -m venv /home/terrarium/.venvs/default
       - chown -R terrarium:terrarium /home/terrarium/.venvs
-      - grep -qxF 'export PATH="$HOME/.venvs/hermes/bin:$PATH"' /home/terrarium/.profile || printf '%s\n' 'export PATH="$HOME/.venvs/hermes/bin:$PATH"' >> /home/terrarium/.profile
-      - grep -qxF 'export PATH="$HOME/.venvs/hermes/bin:$PATH"' /home/terrarium/.bashrc || printf '%s\n' 'export PATH="$HOME/.venvs/hermes/bin:$PATH"' >> /home/terrarium/.bashrc
+      - grep -qxF 'export PATH="$HOME/.venvs/default/bin:$PATH"' /home/terrarium/.profile || printf '%s\n' 'export PATH="$HOME/.venvs/default/bin:$PATH"' >> /home/terrarium/.profile
+      - grep -qxF 'export PATH="$HOME/.venvs/default/bin:$PATH"' /home/terrarium/.bashrc || printf '%s\n' 'export PATH="$HOME/.venvs/default/bin:$PATH"' >> /home/terrarium/.bashrc
   cloud-init.user-data: |
     #cloud-config
     write_files:
