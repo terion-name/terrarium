@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 6 ]; then
-  echo "usage: $0 <name> <source-ref> <target-ref> <expected-source-index-digest> <expected-target-index-digest|auto> <required-arches>" >&2
+if [ "$#" -ne 10 ]; then
+  echo "usage: $0 <name> <source-ref> <target-ref> <expected-source-index-digest> <expected-target-index-digest|auto> <required-arches> <description> <original-ref> <original-url> <source-repo-url>" >&2
   exit 2
 fi
 
@@ -12,6 +12,10 @@ target_ref="$3"
 expected_source_digest="$4"
 expected_target_digest="$5"
 required_arches_csv="$6"
+description="$7"
+original_ref="$8"
+original_url="$9"
+source_repo_url="${10}"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -50,6 +54,17 @@ echo "::group::copy ${name}"
 skopeo copy --retry-times 3 --all "docker://${source_ref}" "docker://${target_ref}"
 echo "::endgroup::"
 
+echo "::group::annotate target ${name}"
+docker buildx imagetools create \
+  --annotation "index:org.opencontainers.image.description=${description}" \
+  --annotation "index:org.opencontainers.image.source=${source_repo_url}" \
+  --annotation "index:org.opencontainers.image.url=${original_url}" \
+  --annotation "index:io.terrarium.dhi.original-ref=${original_ref}" \
+  --annotation "index:io.terrarium.dhi.original-url=${original_url}" \
+  --tag "${target_ref}" \
+  "${target_ref}"
+echo "::endgroup::"
+
 echo "::group::verify target ${name}"
 skopeo inspect --raw "docker://${target_ref}" >"$target_raw"
 target_digest="$(digest_file "$target_raw")"
@@ -58,6 +73,29 @@ if [ "$expected_target_digest" != "auto" ] && [ "$target_digest" != "$expected_t
   echo "target digest mismatch for ${name}: expected ${expected_target_digest}, got ${target_digest}" >&2
   exit 1
 fi
+
+if [ "$expected_target_digest" = "auto" ]; then
+  echo "::notice title=Final annotated GHCR digest::${target_ref}@${target_digest}"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo "| Image | Tag | Final annotated digest |"
+      echo "| --- | --- | --- |"
+      echo "| ${name} | ${target_ref} | ${target_digest} |"
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+fi
+
+jq -e \
+  --arg description "$description" \
+  --arg source_repo_url "$source_repo_url" \
+  --arg original_ref "$original_ref" \
+  --arg original_url "$original_url" \
+  '.annotations["org.opencontainers.image.description"] == $description
+    and .annotations["org.opencontainers.image.source"] == $source_repo_url
+    and .annotations["org.opencontainers.image.url"] == $original_url
+    and .annotations["io.terrarium.dhi.original-ref"] == $original_ref
+    and .annotations["io.terrarium.dhi.original-url"] == $original_url' \
+  "$target_raw" >/dev/null
 
 for arch in "${required_arches[@]}"; do
   source_arch_digest="$(jq -r --arg arch "$arch" '.manifests[] | select((.platform.os // "") == "linux" and (.platform.architecture // "") == $arch) | .digest' "$source_raw" | head -n1)"

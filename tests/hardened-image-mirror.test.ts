@@ -4,14 +4,32 @@ import { describe, expect, test } from "bun:test";
 
 const repoRoot = join(import.meta.dir, "..");
 
+const SOURCE_REPO_URL = "https://github.com/terion-name/terrarium";
 const OAUTH2_PROXY_DIGEST = "sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
-const OAUTH2_PROXY_MIRROR_DIGEST = "sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de";
-const POSTGRES_DIGEST = "sha256:53e316c761bfcaae02cdc6015c3a11a747fe9d0cde9cd0c3d4c871326862e7ed";
+const POSTGRES_DIGEST = "sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b";
+const OAUTH2_PROXY_DESCRIPTION =
+  "Mirror of Docker Hardened Image dhi.io/oauth2-proxy:7.15.2-debian13 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/oauth2-proxy";
+const POSTGRES_DESCRIPTION =
+  "Mirror of Docker Hardened Image dhi.io/postgres:17.10-alpine3.22 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/postgres";
+
+const workflowPath = join(repoRoot, ".github/workflows/mirror-hardened-images.yml");
+const scriptPath = join(repoRoot, ".github/scripts/mirror-dhi-image.sh");
+
+const readWorkflow = () => readFileSync(workflowPath, "utf8");
+const readScript = () => readFileSync(scriptPath, "utf8");
+
+const requiredAnnotationKeys = [
+  "org.opencontainers.image.description",
+  "org.opencontainers.image.source",
+  "org.opencontainers.image.url",
+  "io.terrarium.dhi.original-ref",
+  "io.terrarium.dhi.original-url",
+] as const;
 
 describe("Docker Hardened Image mirror workflow", () => {
   test("mirrors pinned multi-arch DHI indexes to GHCR with digest checks", () => {
-    const workflow = readFileSync(join(repoRoot, ".github/workflows/mirror-hardened-images.yml"), "utf8");
-    const script = readFileSync(join(repoRoot, ".github/scripts/mirror-dhi-image.sh"), "utf8");
+    const workflow = readWorkflow();
+    const script = readScript();
 
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("DOCKERHUB_USERNAME");
@@ -20,18 +38,19 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(workflow).toContain("workflow_dispatch");
     expect(workflow).toContain("skopeo login dhi.io");
     expect(workflow).toContain("skopeo login ghcr.io");
+    expect(workflow).toContain("docker login ghcr.io");
     expect(workflow).toContain("/user/packages/container/${PACKAGE_NAME}/visibility");
     expect(workflow).toContain("/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE_NAME}/visibility");
-    expect(workflow).toContain(`dhi.io/oauth2-proxy@${OAUTH2_PROXY_DIGEST}`);
-    expect(workflow).not.toContain(`dhi.io/oauth2-proxy:7.15.2-debian13@${OAUTH2_PROXY_DIGEST}`);
-    expect(workflow).toContain(`ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13`);
+    expect(workflow).toContain(`source: dhi.io/oauth2-proxy@${OAUTH2_PROXY_DIGEST}`);
+    expect(workflow).not.toContain(`source: dhi.io/oauth2-proxy:7.15.2-debian13@${OAUTH2_PROXY_DIGEST}`);
+    expect(workflow).toContain("target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13");
     expect(workflow).toContain(`source_digest: ${OAUTH2_PROXY_DIGEST}`);
-    expect(workflow).toContain(`target_digest: ${OAUTH2_PROXY_MIRROR_DIGEST}`);
-    expect(workflow).toContain(`dhi.io/postgres@${POSTGRES_DIGEST}`);
+    expect(workflow).toContain(`source: dhi.io/postgres@${POSTGRES_DIGEST}`);
     expect(workflow).not.toContain("17.9-alpine3.22-fips");
-    expect(workflow).toContain("target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22");
+    expect(workflow).not.toContain("target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22");
+    expect(workflow).toContain("target: ghcr.io/terion-name/terrarium-dhi-postgres:17.10-alpine3.22");
     expect(workflow).toContain(`source_digest: ${POSTGRES_DIGEST}`);
-    expect(workflow.match(/target_digest: sha256:de305976d6a81c4c1ad260861ec5028faafbb1be0bca68ab379eb2fb621abe34/g)).toHaveLength(1);
+    expect(workflow.match(/target_digest: auto/g)).toHaveLength(2);
     expect(workflow.match(/arches: amd64,arm64/g)).toHaveLength(2);
 
     expect(script).toContain("skopeo inspect --raw");
@@ -46,8 +65,75 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(script).toContain('(.platform.architecture // "") == $arch');
   });
 
+  test("defines explicit GHCR package metadata for each mirrored DHI image", () => {
+    const workflow = readWorkflow();
+    const descriptions = [...workflow.matchAll(/description: "([^"]+)"/g)].map((match) => match[1]);
+
+    expect(workflow).toContain(`description: "${OAUTH2_PROXY_DESCRIPTION}"`);
+    expect(workflow).toContain(`original_ref: dhi.io/oauth2-proxy:7.15.2-debian13@${OAUTH2_PROXY_DIGEST}`);
+    expect(workflow).toContain("original_url: https://hub.docker.com/hardened-images/catalog/dhi/oauth2-proxy");
+    expect(workflow).toContain(`source_repo_url: ${SOURCE_REPO_URL}`);
+    expect(workflow).toContain(`description: "${POSTGRES_DESCRIPTION}"`);
+    expect(workflow).toContain(`original_ref: dhi.io/postgres:17.10-alpine3.22@${POSTGRES_DIGEST}`);
+    expect(workflow).toContain("original_url: https://hub.docker.com/hardened-images/catalog/dhi/postgres");
+    expect(workflow.match(new RegExp(`source_repo_url: ${SOURCE_REPO_URL}`, "g"))).toHaveLength(2);
+
+    expect(descriptions).toHaveLength(2);
+    for (const description of descriptions) {
+      expect(description.length).toBeLessThan(512);
+      expect(description).toContain("Mirror of Docker Hardened Image");
+      expect(description).toContain("for pulling without Docker authentication");
+      expect(description).toContain("Original: https://hub.docker.com/hardened-images/catalog/dhi/");
+    }
+  });
+
+  test("sets up Buildx and passes the metadata contract to the mirror helper", () => {
+    const workflow = readWorkflow();
+    const invocation = workflow.match(/\.github\/scripts\/mirror-dhi-image\.sh[\s\S]*?\n\n      - name: Make GHCR package public when permitted/)?.[0] ?? "";
+
+    expect(workflow).toContain("uses: docker/setup-buildx-action@v3");
+    expect(invocation.match(/\$\{\{ matrix\./g)).toHaveLength(10);
+    expect(invocation).toContain('"${{ matrix.name }}"');
+    expect(invocation).toContain('"${{ matrix.source }}"');
+    expect(invocation).toContain('"${{ matrix.target }}"');
+    expect(invocation).toContain('"${{ matrix.source_digest }}"');
+    expect(invocation).toContain('"${{ matrix.target_digest }}"');
+    expect(invocation).toContain('"${{ matrix.arches }}"');
+    expect(invocation).toContain('"${{ matrix.description }}"');
+    expect(invocation).toContain('"${{ matrix.original_ref }}"');
+    expect(invocation).toContain('"${{ matrix.original_url }}"');
+    expect(invocation).toContain('"${{ matrix.source_repo_url }}"');
+  });
+
+  test("annotates the final GHCR index and verifies annotation metadata", () => {
+    const script = readScript();
+
+    expect(script).toContain('if [ "$#" -ne 10 ]; then');
+    expect(script).toContain("<description> <original-ref> <original-url> <source-repo-url>");
+    expect(script).toContain("docker buildx imagetools create");
+    expect(script).toContain('--tag "${target_ref}"');
+    expect(script).toContain('"${target_ref}"');
+    expect(script).toContain("skopeo inspect --raw \"docker://${target_ref}\" >\"$target_raw\"");
+    expect(script).toContain("jq -e");
+    for (const key of requiredAnnotationKeys) {
+      expect(script).toContain(`index:${key}`);
+      expect(script).toContain(`.annotations["${key}"]`);
+    }
+  });
+
+  test("reports auto target digests without failing and writes a summary", () => {
+    const script = readScript();
+
+    expect(script).toContain('if [ "$expected_target_digest" != "auto" ]');
+    expect(script).toContain('if [ "$expected_target_digest" = "auto" ]; then');
+    expect(script).toContain("::notice title=Final annotated GHCR digest::");
+    expect(script).toContain("GITHUB_STEP_SUMMARY");
+    expect(script).toContain("| Image | Tag | Final annotated digest |");
+    expect(script).toContain("| ${name} | ${target_ref} | ${target_digest} |");
+  });
+
   test("keeps the mirror helper executable for GitHub Actions", () => {
-    const mode = statSync(join(repoRoot, ".github/scripts/mirror-dhi-image.sh")).mode;
+    const mode = statSync(scriptPath).mode;
 
     expect(mode & 0o111).not.toBe(0);
   });

@@ -30,15 +30,23 @@ jobs:
             target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13
             package: terrarium-dhi-oauth2-proxy
             source_digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
-            target_digest: sha256:c5ec2ff7b486e72e7e6868efdc4c058f6280dba2ea472751c639d7b0e2bd43de
+            target_digest: auto
             arches: amd64,arm64
+            description: "Mirror of Docker Hardened Image dhi.io/oauth2-proxy:7.15.2-debian13 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/oauth2-proxy"
+            original_ref: dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
+            original_url: https://hub.docker.com/hardened-images/catalog/dhi/oauth2-proxy
+            source_repo_url: https://github.com/terion-name/terrarium
           - name: postgres
-            source: dhi.io/postgres@sha256:53e316c761bfcaae02cdc6015c3a11a747fe9d0cde9cd0c3d4c871326862e7ed
-            target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22
+            source: dhi.io/postgres@sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b
+            target: ghcr.io/terion-name/terrarium-dhi-postgres:17.10-alpine3.22
             package: terrarium-dhi-postgres
-            source_digest: sha256:53e316c761bfcaae02cdc6015c3a11a747fe9d0cde9cd0c3d4c871326862e7ed
-            target_digest: sha256:de305976d6a81c4c1ad260861ec5028faafbb1be0bca68ab379eb2fb621abe34
+            source_digest: sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b
+            target_digest: auto
             arches: amd64,arm64
+            description: "Mirror of Docker Hardened Image dhi.io/postgres:17.10-alpine3.22 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/postgres"
+            original_ref: dhi.io/postgres:17.10-alpine3.22@sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b
+            original_url: https://hub.docker.com/hardened-images/catalog/dhi/postgres
+            source_repo_url: https://github.com/terion-name/terrarium
     env:
       REGISTRY_AUTH_FILE: /tmp/terrarium-containers-auth.json
       HAS_DOCKERHUB_CREDS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
@@ -76,7 +84,13 @@ jobs:
 
       - name: Login to GHCR
         if: env.HAS_DOCKERHUB_CREDS == 'true'
-        run: skopeo login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          skopeo login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+          docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Set up Docker Buildx
+        if: env.HAS_DOCKERHUB_CREDS == 'true'
+        uses: docker/setup-buildx-action@v3
 
       - name: Mirror pinned image index
         if: env.HAS_DOCKERHUB_CREDS == 'true'
@@ -88,6 +102,10 @@ jobs:
           "${{ matrix.source_digest }}"
           "${{ matrix.target_digest }}"
           "${{ matrix.arches }}"
+          "${{ matrix.description }}"
+          "${{ matrix.original_ref }}"
+          "${{ matrix.original_url }}"
+          "${{ matrix.source_repo_url }}"
 
       - name: Make GHCR package public when permitted
         if: env.HAS_DOCKERHUB_CREDS == 'true'
