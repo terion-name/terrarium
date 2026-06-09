@@ -30,7 +30,7 @@ jobs:
             target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13
             package: terrarium-dhi-oauth2-proxy
             source_digest: sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
-            target_digest: auto
+            target_digest: sha256:e9e04c1aec93e395897ad62625f088bbb8230c440244a4561c76df1305f9b461
             arches: amd64,arm64
             description: "Mirror of Docker Hardened Image dhi.io/oauth2-proxy:7.15.2-debian13 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/oauth2-proxy"
             original_ref: dhi.io/oauth2-proxy:7.15.2-debian13@sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e
@@ -41,7 +41,7 @@ jobs:
             target: ghcr.io/terion-name/terrarium-dhi-postgres:17.10-alpine3.22
             package: terrarium-dhi-postgres
             source_digest: sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b
-            target_digest: auto
+            target_digest: sha256:9de93f210670e25bad3dd650ac435067c7628700cc7485fa0d4fe72b8e9d765d
             arches: amd64,arm64
             description: "Mirror of Docker Hardened Image dhi.io/postgres:17.10-alpine3.22 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/postgres"
             original_ref: dhi.io/postgres:17.10-alpine3.22@sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b

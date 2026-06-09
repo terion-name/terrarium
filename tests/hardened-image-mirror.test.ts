@@ -6,7 +6,9 @@ const repoRoot = join(import.meta.dir, "..");
 
 const SOURCE_REPO_URL = "https://github.com/terion-name/terrarium";
 const OAUTH2_PROXY_DIGEST = "sha256:8f4e89762735e7ec7c3f1bbdd5da4dcd55358db8c3278bfbc2e46a7f86ab7d9e";
+const OAUTH2_PROXY_TARGET_DIGEST = "sha256:e9e04c1aec93e395897ad62625f088bbb8230c440244a4561c76df1305f9b461";
 const POSTGRES_DIGEST = "sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b";
+const POSTGRES_TARGET_DIGEST = "sha256:9de93f210670e25bad3dd650ac435067c7628700cc7485fa0d4fe72b8e9d765d";
 const OAUTH2_PROXY_DESCRIPTION =
   "Mirror of Docker Hardened Image dhi.io/oauth2-proxy:7.15.2-debian13 for pulling without Docker authentication. Original: https://hub.docker.com/hardened-images/catalog/dhi/oauth2-proxy";
 const POSTGRES_DESCRIPTION =
@@ -45,12 +47,14 @@ describe("Docker Hardened Image mirror workflow", () => {
     expect(workflow).not.toContain(`source: dhi.io/oauth2-proxy:7.15.2-debian13@${OAUTH2_PROXY_DIGEST}`);
     expect(workflow).toContain("target: ghcr.io/terion-name/terrarium-dhi-oauth2-proxy:7.15.2-debian13");
     expect(workflow).toContain(`source_digest: ${OAUTH2_PROXY_DIGEST}`);
+    expect(workflow).toContain(`target_digest: ${OAUTH2_PROXY_TARGET_DIGEST}`);
     expect(workflow).toContain(`source: dhi.io/postgres@${POSTGRES_DIGEST}`);
     expect(workflow).not.toContain("17.9-alpine3.22-fips");
     expect(workflow).not.toContain("target: ghcr.io/terion-name/terrarium-dhi-postgres:17.9-alpine3.22");
     expect(workflow).toContain("target: ghcr.io/terion-name/terrarium-dhi-postgres:17.10-alpine3.22");
     expect(workflow).toContain(`source_digest: ${POSTGRES_DIGEST}`);
-    expect(workflow.match(/target_digest: auto/g)).toHaveLength(2);
+    expect(workflow).toContain(`target_digest: ${POSTGRES_TARGET_DIGEST}`);
+    expect(workflow).not.toContain("target_digest: auto");
     expect(workflow.match(/arches: amd64,arm64/g)).toHaveLength(2);
 
     expect(script).toContain("skopeo inspect --raw");
