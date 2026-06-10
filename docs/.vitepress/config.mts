@@ -12,10 +12,36 @@ function resolveBase(): string {
   return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
 }
 
+function resolveGoogleAnalyticsHead() {
+  const googleAnalyticsId = process.env.TERRARIUM_DOCS_GA_ID?.trim();
+  if (!googleAnalyticsId) {
+    return [];
+  }
+
+  return [
+    [
+      "script",
+      {
+        async: "",
+        src: `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(googleAnalyticsId)}`
+      }
+    ],
+    [
+      "script",
+      {},
+      `window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag("js", new Date());
+gtag("config", ${JSON.stringify(googleAnalyticsId)});`
+    ]
+  ];
+}
+
 export default defineConfig({
   title: "Terrarium",
   description: "Secure, rewindable VPS environments for agents, dev tools, and isolated apps.",
   base: resolveBase(),
+  head: resolveGoogleAnalyticsHead(),
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {
