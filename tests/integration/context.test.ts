@@ -166,7 +166,7 @@ describe("integration context external OIDC provider", () => {
         expect(context.config.idpProvider).toBe("logto");
         expect(context.externalOidcProvider).toBe(context.logtoCloud);
         expect(context.externalOidcProvider.provider).toBe("logto");
-        expect(context.externalOidcIssuer).toBe("https://logto.example.test");
+        expect(context.externalOidcIssuer).toBe("https://logto.example.test/oidc");
       }
     );
   });

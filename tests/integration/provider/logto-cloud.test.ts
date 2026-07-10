@@ -115,7 +115,7 @@ describe("Logto Cloud provider", () => {
     const provider: IntegrationOidcProvider = createProvider({ logtoTenantEndpoint: "https://tenant.logto.test///", logtoManagementApiResource: "" });
 
     expect(provider.provider).toBe("logto");
-    expect(provider.issuer).toBe("https://tenant.logto.test");
+    expect(provider.issuer).toBe("https://tenant.logto.test/oidc");
   });
 
   test("requests client-credentials tokens with Basic auth and reuses them until near expiry", async () => {
@@ -138,6 +138,7 @@ describe("Logto Cloud provider", () => {
 
     const tokenCalls = calls.filter((call) => callPath(call) === "/oidc/token");
     expect(tokenCalls).toHaveLength(2);
+    expect(String(tokenCalls[0].input)).toBe("https://tenant.logto.test/oidc/token");
     const tokenHeaders = new Headers(tokenCalls[0].init?.headers);
     expect(tokenCalls[0].init?.method).toBe("POST");
     expect(Buffer.from(tokenHeaders.get("authorization")!.replace("Basic ", ""), "base64").toString("utf8")).toBe("m2m-client:m2m-secret");
@@ -159,6 +160,7 @@ describe("Logto Cloud provider", () => {
     expect(callUrl(calls[1]).searchParams.get("page")).toBe("1");
     expect(callUrl(calls[1]).searchParams.get("page_size")).toBe("1");
     expect(calls[1].init?.method).toBe("GET");
+    expect(String(calls[1].input)).toBe("https://tenant.logto.test/api/applications?page=1&page_size=1");
     expect(new Headers(calls[1].init?.headers).get("authorization")).toBe("Bearer token-1");
   });
 

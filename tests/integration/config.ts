@@ -34,6 +34,10 @@ loadDotEnvFile();
 
 const INTEGRATION_IDP_PROVIDERS = ["zitadel", "logto"] as const satisfies readonly IntegrationIdpProvider[];
 
+function normalizeEndpoint(endpoint: string): string {
+  return endpoint.replace(/\/+$/, "");
+}
+
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -116,10 +120,11 @@ export function loadIntegrationConfig(options: IntegrationCliOptions): Integrati
   const idpProvider = selectIntegrationIdpProvider();
   const zitadelCloudIssuer = idpProvider === "zitadel" ? requiredEnv("ZITADEL_CLOUD_ISSUER") : optionalEnv("ZITADEL_CLOUD_ISSUER");
   const zitadelCloudPat = idpProvider === "zitadel" ? requiredEnv("ZITADEL_CLOUD_PAT") : optionalEnv("ZITADEL_CLOUD_PAT");
-  const logtoTenantEndpoint = idpProvider === "logto" ? requiredEnv("LOGTO_TENANT_ENDPOINT") : optionalEnv("LOGTO_TENANT_ENDPOINT");
-  const logtoManagementApiResource = optionalEnv(
-    "LOGTO_MANAGEMENT_API_RESOURCE",
-    logtoTenantEndpoint ? `${logtoTenantEndpoint}/api` : ""
+  const logtoTenantEndpoint = normalizeEndpoint(
+    idpProvider === "logto" ? requiredEnv("LOGTO_TENANT_ENDPOINT") : optionalEnv("LOGTO_TENANT_ENDPOINT")
+  );
+  const logtoManagementApiResource = normalizeEndpoint(
+    optionalEnv("LOGTO_MANAGEMENT_API_RESOURCE", logtoTenantEndpoint ? `${logtoTenantEndpoint}/api` : "")
   );
 
   return {
@@ -141,7 +146,7 @@ export function loadIntegrationConfig(options: IntegrationCliOptions): Integrati
     sshUser: optionalEnv("HCLOUD_SSH_USER", "root"),
     ipDnsDomain: optionalEnv("TERRARIUM_INTEGRATION_IP_DNS_DOMAIN", "nip.io"),
     idpProvider,
-    externalOidcIssuer: idpProvider === "zitadel" ? zitadelCloudIssuer : logtoTenantEndpoint,
+    externalOidcIssuer: idpProvider === "zitadel" ? zitadelCloudIssuer : `${logtoTenantEndpoint}/oidc`,
     zitadelCloudIssuer,
     zitadelCloudPat,
     zitadelCloudOrgId: optionalEnv("ZITADEL_CLOUD_ORG_ID"),

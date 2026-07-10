@@ -164,14 +164,14 @@ describe("integration config", () => {
   test("uses explicit Logto provider selection without requiring ZITADEL vars", async () => {
     const config = await loadConfig({
       TERRARIUM_INTEGRATION_IDP_PROVIDER: "logto",
-      LOGTO_TENANT_ENDPOINT: "https://logto.example.test",
+      LOGTO_TENANT_ENDPOINT: "https://logto.example.test/",
       LOGTO_M2M_CLIENT_ID: "logto-client",
       LOGTO_M2M_CLIENT_SECRET: "logto-secret",
-      LOGTO_MANAGEMENT_API_RESOURCE: "https://management.example.test"
+      LOGTO_MANAGEMENT_API_RESOURCE: "https://management.example.test/"
     });
 
     expect(config.idpProvider).toBe("logto");
-    expect(config.externalOidcIssuer).toBe("https://logto.example.test");
+    expect(config.externalOidcIssuer).toBe("https://logto.example.test/oidc");
     expect(config.zitadelCloudIssuer).toBe("");
     expect(config.zitadelCloudPat).toBe("");
     expect(config.logtoTenantEndpoint).toBe("https://logto.example.test");
@@ -198,7 +198,7 @@ describe("integration config", () => {
     });
 
     expect(config.idpProvider).toBe("logto");
-    expect(config.externalOidcIssuer).toBe("https://logto.example.test");
+    expect(config.externalOidcIssuer).toBe("https://logto.example.test/oidc");
   });
 
   test("falls back to ZITADEL by default when required Logto vars are incomplete", async () => {
@@ -264,11 +264,12 @@ describe("integration config", () => {
   test("defaults Logto management API resource to the tenant API", async () => {
     const config = await loadConfig({
       TERRARIUM_INTEGRATION_IDP_PROVIDER: "logto",
-      LOGTO_TENANT_ENDPOINT: "https://logto.example.test",
+      LOGTO_TENANT_ENDPOINT: "https://logto.example.test/",
       LOGTO_M2M_CLIENT_ID: "logto-client",
       LOGTO_M2M_CLIENT_SECRET: "logto-secret"
     });
 
+    expect(config.logtoTenantEndpoint).toBe("https://logto.example.test");
     expect(config.logtoManagementApiResource).toBe("https://logto.example.test/api");
   });
 });

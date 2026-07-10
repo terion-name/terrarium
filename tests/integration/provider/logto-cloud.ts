@@ -172,6 +172,7 @@ export class LogtoCloudProvider implements IntegrationOidcProvider {
   readonly provider = "logto" as const;
   readonly issuer: string;
 
+  private readonly tenantEndpoint: string;
   private readonly managementApiBase: string;
   private readonly managementApiResource: string;
   private readonly m2mClientId: string;
@@ -185,9 +186,10 @@ export class LogtoCloudProvider implements IntegrationOidcProvider {
   private cachedToken?: { token: string; expiresAtMs: number };
 
   constructor(config: IntegrationConfig, logger: IntegrationLogger, deps: LogtoCloudProviderDeps = {}) {
-    this.issuer = normalizeEndpoint(config.logtoTenantEndpoint);
-    this.managementApiBase = `${this.issuer}/api`;
-    this.managementApiResource = normalizeEndpoint(config.logtoManagementApiResource || `${this.issuer}/api`);
+    this.tenantEndpoint = normalizeEndpoint(config.logtoTenantEndpoint);
+    this.issuer = `${this.tenantEndpoint}/oidc`;
+    this.managementApiBase = `${this.tenantEndpoint}/api`;
+    this.managementApiResource = normalizeEndpoint(config.logtoManagementApiResource || `${this.tenantEndpoint}/api`);
     this.m2mClientId = config.logtoM2mClientId;
     this.m2mClientSecret = config.logtoM2mClientSecret;
     this.logger = logger;
@@ -224,7 +226,7 @@ export class LogtoCloudProvider implements IntegrationOidcProvider {
     });
     const basicAuth = Buffer.from(`${this.m2mClientId}:${this.m2mClientSecret}`, "utf8").toString("base64");
     this.logger.info("logto POST /oidc/token");
-    const response = await this.fetchImpl(`${this.issuer}/oidc/token`, {
+    const response = await this.fetchImpl(`${this.tenantEndpoint}/oidc/token`, {
       method: "POST",
       headers: {
         authorization: `Basic ${basicAuth}`,
