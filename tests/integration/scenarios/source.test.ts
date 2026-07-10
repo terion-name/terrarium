@@ -26,11 +26,19 @@ describe("integration scenario IDP source wiring", () => {
     expect(common).not.toContain("context.config.zitadelCloudIssuer");
   });
 
-  test("public endpoint readiness uses provider-specific local auth discovery", () => {
+  test("public endpoint readiness checks provider-specific local auth discovery first", () => {
     const common = source("tests/integration/scenarios/common.ts");
     const smoke = source("tests/integration/scenarios/smoke.ts");
 
-    expect(common).toContain("localAuthDiscoveryUrl(host.domains.auth, localIdpProvider)");
+    const authDiscoveryProbe = common.indexOf("waitForHttpStatusResolved(localAuthDiscoveryUrl(host.domains.auth, localIdpProvider)");
+    const manageProbe = common.indexOf("waitForHttpStatusResolved(`https://${host.domains.manage}`");
+    const proxyProbe = common.indexOf("waitForHttpStatusResolved(`https://${host.domains.proxy}`");
+    const lxdProbe = common.indexOf("waitForHttpStatusResolved(`https://${host.domains.lxd}`");
+    expect(authDiscoveryProbe).toBeGreaterThanOrEqual(0);
+    expect(authDiscoveryProbe).toBeLessThan(manageProbe);
+    expect(authDiscoveryProbe).toBeLessThan(proxyProbe);
+    expect(manageProbe).toBeLessThan(proxyProbe);
+    expect(proxyProbe).toBeLessThan(lxdProbe);
     expect(common).toContain('provider === "logto" ? "/oidc/.well-known/openid-configuration"');
     expect(common).toContain(': "/.well-known/openid-configuration"');
     expect(smoke).toContain("waitForTerrariumPublicEndpoints(primary, true, context.config.idpProvider)");

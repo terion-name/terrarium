@@ -337,15 +337,16 @@ export async function waitForTerrariumPublicEndpoints(
   includeAuth: boolean,
   localIdpProvider: IntegrationIdpProvider
 ): Promise<void> {
-  await waitForHttpStatusResolved(`https://${host.domains.manage}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
-  await waitForHttpStatusResolved(`https://${host.domains.proxy}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
-  await waitForHttpStatusResolved(`https://${host.domains.lxd}`, [200, 302], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
   if (includeAuth) {
+    // Surface local IdP discovery/TLS readiness before oauth2-proxy turns those failures into 500s.
     await waitForHttpStatusResolved(localAuthDiscoveryUrl(host.domains.auth, localIdpProvider), [200], {
       timeoutMs: 300000,
       resolveIp: host.server.ipv4
     });
   }
+  await waitForHttpStatusResolved(`https://${host.domains.manage}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusResolved(`https://${host.domains.proxy}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
+  await waitForHttpStatusResolved(`https://${host.domains.lxd}`, [200, 302], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
 }
 
 /** Verifies the UI endpoints and auth gates for a Terrarium management surface. */
