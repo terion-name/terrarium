@@ -33,6 +33,8 @@ describe("Ansible Logto runtime role", () => {
     expect(defaults).toContain("terrarium_logto_instance_profile: terrarium");
     expect(defaults).toContain("terrarium_logto_core_port: 3001");
     expect(defaults).toContain("terrarium_logto_admin_port: 3002");
+    expect(defaults).toContain('terrarium_logto_admin_email: "{{ terrarium_email }}"');
+    expect(defaults).toContain("terrarium_logto_admin_username: terrarium_admin");
     expect(defaults).toContain('terrarium_logto_dir: "{{ terrarium_state_dir }}/logto"');
     expect(defaults).toContain('terrarium_logto_postgres_dir: "{{ terrarium_logto_dir }}/postgres"');
     expect(defaults).toContain('terrarium_logto_seed_dir: "{{ terrarium_logto_dir }}/seed"');
@@ -49,6 +51,7 @@ describe("Ansible Logto runtime role", () => {
     const tasks = roleFile("tasks/main.yml");
     const startServiceIndex = tasks.indexOf("Start or restart Logto compose service inside system instance");
     const proxyIndex = tasks.indexOf("Ensure host loopback proxies reach the Logto system instance");
+    const adminPasswordReadIndex = tasks.indexOf("Read Logto local admin password from system instance");
     const syncIndex = tasks.indexOf("Run Logto reconciliation");
     const disabledIndex = tasks.indexOf("- name: Disable self-hosted Logto service when not enabled");
     const disabledBlock = tasks.slice(disabledIndex);
@@ -73,11 +76,16 @@ describe("Ansible Logto runtime role", () => {
     expect(tasks).toContain("Generate Logto secrets inside system instance");
     expect(tasks).toContain("logto_postgres_password");
     expect(tasks).toContain("logto_secret_vault_kek");
+    expect(tasks).toContain("logto_admin_password");
+    expect(tasks).toContain("/etc/terrarium/secrets/logto_admin_password");
+    expect(tasks).toContain('pw="$(tr -dc "A-Z" </dev/urandom | head -c 1)$(tr -dc "a-z" </dev/urandom | head -c 1)$(tr -dc "0-9" </dev/urandom | head -c 1)!$(tr -dc "A-Za-z0-9" </dev/urandom | head -c 28)"');
     expect(tasks).toContain("Copy Docker registry credentials into Logto system instance when present");
     expect(tasks).toContain("Resolve Logto app image");
     expect(tasks).toContain("Resolve Logto Postgres image");
     expect(tasks).toContain("Read Logto Postgres password from system instance");
     expect(tasks).toContain("Read Logto secret vault KEK from system instance");
+    expect(tasks).toContain("Read Logto local admin password from system instance");
+    expect(tasks).toContain("register: terrarium_logto_admin_password_raw");
     expect(tasks).toContain("Render Logto compose stack for system instance");
     expect(tasks).toContain("Push Logto compose stack into system instance");
     expect(tasks).toContain("systemctl enable terrarium-logto.service");
@@ -87,16 +95,20 @@ describe("Ansible Logto runtime role", () => {
     expect(tasks).toContain("ensure_proxy terrarium-logto-admin {{ terrarium_logto_admin_port }}");
     expect(tasks).toContain("Run Logto reconciliation");
     expect(tasks).toContain("/usr/local/bin/terrariumctl idp sync");
-    expect(tasks).toContain("environment:\n        TERRARIUM_LOGTO_ADMIN_PASSWORD: \"{{ terrarium_root_password_plaintext | default('', true) }}\"");
+    expect(tasks).toContain("environment:\n        TERRARIUM_LOGTO_ADMIN_PASSWORD: \"{{ terrarium_logto_admin_password_raw.stdout }}\"");
+    expect(tasks).not.toContain("TERRARIUM_LOGTO_ADMIN_PASSWORD: \"{{ terrarium_root_password_plaintext");
+    expect(tasks.slice(adminPasswordReadIndex, syncIndex)).toContain("no_log: true");
     expect(tasks.slice(syncIndex, disabledIndex)).toContain("no_log: true");
     expect(tasks).toContain("register: terrarium_logto_sync");
     expect(tasks).toContain("until: terrarium_logto_sync.rc == 0");
     expect(tasks).toContain("retries: 6");
     expect(tasks).toContain("delay: 10");
     expect(proxyIndex).toBeGreaterThan(startServiceIndex);
+    expect(adminPasswordReadIndex).toBeGreaterThan(0);
     expect(syncIndex).toBeGreaterThan(proxyIndex);
+    expect(syncIndex).toBeGreaterThan(adminPasswordReadIndex);
     expect(disabledIndex).toBeGreaterThan(syncIndex);
-    expect(tasks.match(/no_log: true/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(tasks.match(/no_log: true/g)?.length).toBeGreaterThanOrEqual(8);
 
     expect(tasks).not.toContain("lxc delete");
     expect(disabledBlock).toContain("Stop and disable legacy host Logto compose service");

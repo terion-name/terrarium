@@ -63,7 +63,11 @@ describe("terrarium install CLI parsing", () => {
       "--lxd-oidc-scopes",
       "openid profile email lxd",
       "--local-idp-outputs-path",
-      "/etc/terrarium/idp-apps.json"
+      "/etc/terrarium/idp-apps.json",
+      "--logto-admin-email",
+      "owner@example.test",
+      "--logto-admin-username",
+      "owner_admin"
     ];
 
     try {
@@ -76,6 +80,8 @@ describe("terrarium install CLI parsing", () => {
       expect(readCliOption(parsed.options, "lxdOidcGroupsClaim", ["lxd-oidc-groups-claim"])).toBe("lxd_roles");
       expect(readCliOption(parsed.options, "lxdOidcScopes", ["lxd-oidc-scopes"])).toBe("openid profile email lxd");
       expect(readCliOption(parsed.options, "localIdpOutputsPath", ["local-idp-outputs-path"])).toBe("/etc/terrarium/idp-apps.json");
+      expect(readCliOption(parsed.options, "logtoAdminEmail", ["logto-admin-email"])).toBe("owner@example.test");
+      expect(readCliOption(parsed.options, "logtoAdminUsername", ["logto-admin-username"])).toBe("owner_admin");
     } finally {
       process.argv = originalArgv;
     }
@@ -135,6 +141,28 @@ describe("terrarium install CLI parsing", () => {
     expect(config.terrarium_local_idp_outputs_path).toBe("/etc/terrarium/idp-apps.json");
   });
 
+  test("adds Logto admin config keys when installer options are set", () => {
+    const options = defaultOptions();
+    options.logtoAdminEmail = " logto-admin@example.test ";
+    options.logtoAdminUsername = " logto_admin ";
+
+    const config = parse(buildConfig(options)) as Record<string, unknown>;
+
+    expect(config.terrarium_logto_admin_email).toBe(" logto-admin@example.test ");
+    expect(config.terrarium_logto_admin_username).toBe(" logto_admin ");
+  });
+
+  test("wires local Logto admin defaults and provider-aware bootstrap output through installer source", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
+
+    expect(source).toContain('const DEFAULT_LOGTO_ADMIN_USERNAME = "terrarium_admin"');
+    expect(source).toContain('options.logtoAdminEmail = options.logtoAdminEmail || options.email');
+    expect(source).toContain('options.logtoAdminUsername || DEFAULT_LOGTO_ADMIN_USERNAME');
+    expect(source).toContain('.option("--logto-admin-email <email>"');
+    expect(source).toContain('.option("--logto-admin-username <username>"');
+    expect(source).toContain('LOGTO_ADMIN_PASSWORD_PATH');
+  });
+
   test("uses provider-aware local issuer shape for local installs", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
 
@@ -149,6 +177,8 @@ describe("terrarium install CLI parsing", () => {
     expect(source).toContain('.option("--idp-provider <provider>"');
     expect(source).toContain('.option("--oidc-groups-claim <claim>"');
     expect(source).toContain('.option("--local-idp-outputs-path <path>"');
+    expect(source).toContain('.option("--logto-admin-email <email>"');
+    expect(source).toContain('.option("--logto-admin-username <username>"');
     expect(source).toContain('readCliOption(cliOptions, "idpProvider", ["idp-provider"])');
     expect(source).toContain("validatePublicIdpProvider(explicitProvider)");
     expect(source).toContain('resolveEffectiveIdpProvider("oidc", options.idpProvider)');

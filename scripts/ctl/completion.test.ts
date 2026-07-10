@@ -50,6 +50,8 @@ describe("terrariumctl completion", () => {
     expect(script).toContain("--profile --disk --memory --cpu --requirements --playbook --role --docker-compose --cloud-init --proxy");
     expect(script).toContain("--ref --skip-reconfigure --non-interactive");
     expect(script).toContain("--skip-reconfigure");
+    expect(script).toContain("--logto-admin-email");
+    expect(script).toContain("--logto-admin-username");
     expect(script).toContain("--storage-source");
     expect(script).toContain("local oidc");
     expect(script).toContain("provider");

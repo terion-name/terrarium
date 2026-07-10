@@ -18,7 +18,7 @@ const LOGTO_HTTP_STATUS_MARKER = "__terrarium_logto_http_status__:";
 const DEFAULT_SYSTEM_CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const TERRARIUM_SECRET_NAME = "terrarium";
 const LOGTO_ADMIN_PASSWORD_ENV = "TERRARIUM_LOGTO_ADMIN_PASSWORD";
-const LOGTO_ADMIN_USERNAME = "terrarium_admin";
+const DEFAULT_LOGTO_ADMIN_USERNAME = "terrarium_admin";
 const LOGTO_MANAGEMENT_APP_CANDIDATES_SQL = `
 create function pg_temp.terrarium_logto_management_app_candidates()
 returns table(app_id text, secret text)
@@ -1190,10 +1190,10 @@ async function findLogtoAdminUser(api: LogtoApiCall, email: string): Promise<Log
   return matches[0];
 }
 
-function buildLogtoAdminUserBody(email: string, password: string): Record<string, unknown> {
+function buildLogtoAdminUserBody(email: string, password: string, username: string): Record<string, unknown> {
   return {
     primaryEmail: email,
-    username: LOGTO_ADMIN_USERNAME,
+    username,
     name: "Terrarium Admin",
     password,
     emailVerified: true,
@@ -1207,33 +1207,35 @@ function buildLogtoAdminUserBody(email: string, password: string): Record<string
   };
 }
 
-function normalizeCreatedLogtoUser(user: LogtoUser, email: string): LogtoUser {
+function normalizeCreatedLogtoUser(user: LogtoUser, email: string, username: string): LogtoUser {
   return {
     ...user,
     primaryEmail: stringValue(user.primaryEmail) || stringValue(user.email) || email,
-    username: stringValue(user.username) || LOGTO_ADMIN_USERNAME
+    username: stringValue(user.username) || username
   };
 }
 
-async function ensureLogtoAdminUsername(api: LogtoApiCall, user: LogtoUser): Promise<LogtoUser> {
+async function ensureLogtoAdminUsername(api: LogtoApiCall, user: LogtoUser, username: string): Promise<LogtoUser> {
   if (stringValue(user.username) || !user.id) {
     return user;
   }
 
-  const patched = asRecord(
-    await api<unknown>("PATCH", `/api/users/${encodeURIComponent(user.id)}`, { username: LOGTO_ADMIN_USERNAME })
-  ) as LogtoUser;
+  const patched = asRecord(await api<unknown>("PATCH", `/api/users/${encodeURIComponent(user.id)}`, { username })) as LogtoUser;
   return {
     ...user,
     ...patched,
-    username: stringValue(patched.username) || LOGTO_ADMIN_USERNAME
+    username: stringValue(patched.username) || username
   };
 }
 
-export async function ensureLogtoAdminUser(api: LogtoApiCall, email: string): Promise<LogtoUser> {
+export async function ensureLogtoAdminUser(
+  api: LogtoApiCall,
+  email: string,
+  username = DEFAULT_LOGTO_ADMIN_USERNAME
+): Promise<LogtoUser> {
   const existing = await findLogtoAdminUser(api, email);
   if (existing) {
-    return ensureLogtoAdminUsername(api, existing);
+    return ensureLogtoAdminUsername(api, existing, username);
   }
 
   const password = process.env[LOGTO_ADMIN_PASSWORD_ENV] ?? "";
@@ -1242,8 +1244,9 @@ export async function ensureLogtoAdminUser(api: LogtoApiCall, email: string): Pr
   }
 
   const created = normalizeCreatedLogtoUser(
-    asRecord(await api<unknown>("POST", "/api/users", buildLogtoAdminUserBody(email, password))) as LogtoUser,
-    email
+    asRecord(await api<unknown>("POST", "/api/users", buildLogtoAdminUserBody(email, password, username))) as LogtoUser,
+    email,
+    username
   );
   if (created.id) {
     return created;
@@ -1253,14 +1256,19 @@ export async function ensureLogtoAdminUser(api: LogtoApiCall, email: string): Pr
   if (!refreshed?.id) {
     throw new Error(`failed to create Logto user for email ${email}`);
   }
-  return ensureLogtoAdminUsername(api, refreshed);
+  return ensureLogtoAdminUsername(api, refreshed, username);
 }
 
-export async function ensureLogtoAdminUserRole(api: LogtoApiCall, email: string, role: LogtoRole): Promise<void> {
+export async function ensureLogtoAdminUserRole(
+  api: LogtoApiCall,
+  email: string,
+  role: LogtoRole,
+  username = DEFAULT_LOGTO_ADMIN_USERNAME
+): Promise<void> {
   if (!role.id) {
     throw new Error(`Logto admin role ${role.name ?? "<unknown>"} is missing an id`);
   }
-  const user = await ensureLogtoAdminUser(api, email);
+  const user = await ensureLogtoAdminUser(api, email, username);
   if (!user.id) {
     throw new Error(`Logto user for email ${email} is missing an id`);
   }
@@ -1280,8 +1288,9 @@ async function ensureManagementGroupProvisioning(config: Record<string, unknown>
   }
   const role = await ensureLogtoAdminRole(api, adminGroup);
   const adminEmail = configString(config, "terrarium_logto_admin_email") || configString(config, "terrarium_email");
+  const adminUsername = configString(config, "terrarium_logto_admin_username", DEFAULT_LOGTO_ADMIN_USERNAME);
   if (adminEmail) {
-    await ensureLogtoAdminUserRole(api, adminEmail, role);
+    await ensureLogtoAdminUserRole(api, adminEmail, role, adminUsername);
   }
 }
 

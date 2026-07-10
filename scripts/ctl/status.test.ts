@@ -48,7 +48,7 @@ describe("terrariumctl status local IDP runtime", () => {
     ]);
   });
 
-  test("prints local Logto labels and service status without a ZITADEL bootstrap command", async () => {
+  test("prints local Logto labels, bootstrap command, and service status without a ZITADEL bootstrap command", async () => {
     const commands: string[][] = [];
     const lines: string[] = [];
 
@@ -69,6 +69,9 @@ describe("terrariumctl status local IDP runtime", () => {
     const output = lines.join("\n");
     expect(output).toContain("Logto: https://auth.example.test");
     expect(output).toContain("Logto instance: terrarium-idp");
+    expect(output).toContain(
+      "Logto bootstrap password: lxc exec terrarium-idp -- cat /etc/terrarium/secrets/logto_admin_password"
+    );
     expect(output).toContain("terrarium-logto.service in LXD: active");
     expect(output).not.toContain("ZITADEL bootstrap password");
     expect(output).not.toContain("terrarium-zitadel.service in LXD");

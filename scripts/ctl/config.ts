@@ -1,6 +1,6 @@
 import { input } from "@inquirer/prompts";
 import { stringify } from "yaml";
-import { normalizeOidcIssuer, validateEmail } from "../terrarium-install";
+import { normalizeOidcIssuer, validateEmail, validateLogtoAdminUsername } from "../terrarium-install";
 import {
   cliOption,
   CONFIG_PATH,
@@ -42,6 +42,7 @@ export type SetEmailsOptions = {
   email?: string;
   acmeEmail?: string;
   zitadelAdminEmail?: string;
+  logtoAdminEmail?: string;
 };
 
 /** Reusable option bag for `set idp`. */
@@ -63,6 +64,8 @@ export type SetIdpOptions = {
   lxdOidcScopes?: string;
   localIdpOutputsPath?: string;
   zitadelAdminEmail?: string;
+  logtoAdminEmail?: string;
+  logtoAdminUsername?: string;
 };
 
 /** Reusable option bag for `set s3`. */
@@ -285,8 +288,8 @@ export async function setDomainsCmd(
 /** Updates Terrarium contact, certificate, and local-IDP email settings. */
 export async function setEmailsCmd(options: SetEmailsOptions, actions: ReconcileActions): Promise<void> {
   const config = loadMutableConfig();
-  if (!options.email && !options.acmeEmail && !options.zitadelAdminEmail) {
-    throw new Error("set emails requires at least one of --email, --acme-email, or --zitadel-admin-email");
+  if (!options.email && !options.acmeEmail && !options.zitadelAdminEmail && !options.logtoAdminEmail) {
+    throw new Error("set emails requires at least one of --email, --acme-email, --zitadel-admin-email, or --logto-admin-email");
   }
   if (options.email) {
     setConfigValue(config, "terrarium_email", validateEmail(options.email, "--email"));
@@ -298,6 +301,9 @@ export async function setEmailsCmd(options: SetEmailsOptions, actions: Reconcile
   }
   if (options.zitadelAdminEmail) {
     setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email"));
+  }
+  if (options.logtoAdminEmail) {
+    setConfigValue(config, "terrarium_logto_admin_email", validateEmail(options.logtoAdminEmail, "--logto-admin-email"));
   }
 
   await persistAndReconcile(config, "Updated email settings", actions);
@@ -335,6 +341,11 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     if (localZitadelEnabled(config)) {
       const currentAdmin = options.zitadelAdminEmail || configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
       setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(currentAdmin, "--zitadel-admin-email"));
+    } else if (effectiveIdpProvider(config) === "logto") {
+      const currentEmail = options.logtoAdminEmail || configString(config, "terrarium_logto_admin_email") || configString(config, "terrarium_email");
+      const currentUsername = options.logtoAdminUsername || configString(config, "terrarium_logto_admin_username") || "terrarium_admin";
+      setConfigValue(config, "terrarium_logto_admin_email", validateEmail(currentEmail, "--logto-admin-email"));
+      setConfigValue(config, "terrarium_logto_admin_username", validateLogtoAdminUsername(currentUsername, "--logto-admin-username"));
     }
     return { summary: "Switched IDP mode to local" };
   } else {
@@ -469,7 +480,8 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
     emails: {
       email: cliOption(rawOptions, "email"),
       acmeEmail: cliOption(rawOptions, "acmeEmail", ["acme-email"]),
-      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
+      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"]),
+      logtoAdminEmail: cliOption(rawOptions, "logtoAdminEmail", ["logto-admin-email"])
     },
     idp: {
       provider: cliOption(rawOptions, "provider", ["idpProvider", "idp-provider"]),
@@ -491,7 +503,9 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
       lxdOidcGroupsClaim: cliOption(rawOptions, "lxdOidcGroupsClaim", ["lxd-oidc-groups-claim"]),
       lxdOidcScopes: cliOption(rawOptions, "lxdOidcScopes", ["lxd-oidc-scopes"]),
       localIdpOutputsPath: cliOption(rawOptions, "localIdpOutputsPath", ["local-idp-outputs-path"]),
-      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
+      zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"]),
+      logtoAdminEmail: cliOption(rawOptions, "logtoAdminEmail", ["logto-admin-email"]),
+      logtoAdminUsername: cliOption(rawOptions, "logtoAdminUsername", ["logto-admin-username"])
     },
     s3: {
       enable: Boolean(rawOptions.enable),

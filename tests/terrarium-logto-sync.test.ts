@@ -764,7 +764,55 @@ describe("terrarium local Logto sync", () => {
     ]);
   });
 
-  test("patches a missing username before assigning the admin role to an existing Logto user", async () => {
+  test("creates a missing Logto admin user with the configured username", async () => {
+    const previousPassword = process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
+    process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD = "root-password";
+    const calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string> }> = [];
+    const api: LogtoApiCall = async (method, path, body, query) => {
+      calls.push({ method, path, body, query });
+      if (method === "GET" && path === "/api/users") {
+        return [] as never;
+      }
+      if (method === "POST" && path === "/api/users") {
+        return { id: "user-created" } as never;
+      }
+      if (path === "/api/users/user-created/roles") {
+        if (method === "GET") {
+          return [] as never;
+        }
+        return {} as never;
+      }
+      throw new Error(`unexpected call: ${method} ${path}`);
+    };
+
+    try {
+      await ensureLogtoAdminUserRole(api, "admin@example.test", { id: "role-1", name: "terrarium-admins", type: "User" }, "configured_admin");
+    } finally {
+      if (previousPassword === undefined) {
+        delete process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
+      } else {
+        process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD = previousPassword;
+      }
+    }
+
+    expect(calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/users",
+      body: {
+        primaryEmail: "admin@example.test",
+        username: "configured_admin",
+        password: "root-password"
+      }
+    });
+    expect(calls).toContainEqual({
+      method: "POST",
+      path: "/api/users/user-created/roles",
+      body: { roleIds: ["role-1"] },
+      query: undefined
+    });
+  });
+
+  test("patches a missing username to the configured username before assigning the admin role to an existing Logto user", async () => {
     const previousPassword = process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
     delete process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
     const calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string> }> = [];
@@ -774,7 +822,7 @@ describe("terrarium local Logto sync", () => {
         return [{ id: "user-1", primaryEmail: "admin@example.test" }] as never;
       }
       if (method === "PATCH" && path === "/api/users/user-1") {
-        return { username: "terrarium_admin" } as never;
+        return { username: "configured_admin" } as never;
       }
       if (path === "/api/users/user-1/roles") {
         if (method === "GET") {
@@ -786,7 +834,7 @@ describe("terrarium local Logto sync", () => {
     };
 
     try {
-      await ensureLogtoAdminUserRole(api, "admin@example.test", { id: "role-1", name: "terrarium-admins", type: "User" });
+      await ensureLogtoAdminUserRole(api, "admin@example.test", { id: "role-1", name: "terrarium-admins", type: "User" }, "configured_admin");
     } finally {
       if (previousPassword === undefined) {
         delete process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
@@ -797,7 +845,7 @@ describe("terrarium local Logto sync", () => {
 
     expect(calls).toEqual([
       { method: "GET", path: "/api/users", body: undefined, query: { search: "admin@example.test" } },
-      { method: "PATCH", path: "/api/users/user-1", body: { username: "terrarium_admin" }, query: undefined },
+      { method: "PATCH", path: "/api/users/user-1", body: { username: "configured_admin" }, query: undefined },
       { method: "GET", path: "/api/users/user-1/roles", body: undefined, query: undefined },
       { method: "POST", path: "/api/users/user-1/roles", body: { roleIds: ["role-1"] }, query: undefined }
     ]);
@@ -830,7 +878,7 @@ describe("terrarium local Logto sync", () => {
     expect(calls).toEqual([{ method: "GET", path: "/api/users", body: undefined, query: { search: "admin@example.test" } }]);
   });
 
-  test("skips Logto user role assignment when the role is already present", async () => {
+  test("preserves a non-empty existing Logto admin username instead of patching it", async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string> }> = [];
     const api: LogtoApiCall = async (method, path, body, query) => {
       calls.push({ method, path, body, query });
@@ -843,7 +891,7 @@ describe("terrarium local Logto sync", () => {
       throw new Error(`unexpected call: ${method} ${path}`);
     };
 
-    await ensureLogtoAdminUserRole(api, "admin@example.test", { id: "role-1", name: "terrarium-admins", type: "User" });
+    await ensureLogtoAdminUserRole(api, "admin@example.test", { id: "role-1", name: "terrarium-admins", type: "User" }, "configured_admin");
     expect(calls).toEqual([
       { method: "GET", path: "/api/users", body: undefined, query: { search: "admin@example.test" } },
       { method: "GET", path: "/api/users/user-1/roles", body: undefined, query: undefined }

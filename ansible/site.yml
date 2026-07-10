@@ -65,6 +65,8 @@
     terrarium_logto_stage_dir: "{{ terrarium_state_dir }}/logto-container"
     terrarium_logto_core_port: 3001
     terrarium_logto_admin_port: 3002
+    terrarium_logto_admin_email: "{{ terrarium_email }}"
+    terrarium_logto_admin_username: terrarium_admin
     terrarium_local_idp_outputs_path: ""
     terrarium_local_idp_outputs_path_default: /etc/terrarium/idp-apps.json
     terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
@@ -139,6 +141,8 @@
       terrarium_logto_stage_dir: "{{ terrarium_logto_stage_dir }}"
       terrarium_logto_core_port: "{{ terrarium_logto_core_port }}"
       terrarium_logto_admin_port: "{{ terrarium_logto_admin_port }}"
+      terrarium_logto_admin_email: "{{ terrarium_logto_admin_email }}"
+      terrarium_logto_admin_username: "{{ terrarium_logto_admin_username }}"
       terrarium_local_idp_outputs_path: "{{ terrarium_local_idp_outputs_path_effective | default(terrarium_local_idp_outputs_path) }}"
       terrarium_zitadel_outputs_path: "{{ terrarium_zitadel_outputs_path_effective | default(terrarium_zitadel_outputs_path) }}"
       terrarium_oauth2_proxy_image: "{{ terrarium_oauth2_proxy_image_effective | default(terrarium_oauth2_proxy_image_fallback) }}"
@@ -390,6 +394,8 @@
               'terrarium_logto_stage_dir': terrarium_logto_stage_dir,
               'terrarium_logto_core_port': terrarium_logto_core_port,
               'terrarium_logto_admin_port': terrarium_logto_admin_port,
+              'terrarium_logto_admin_email': terrarium_logto_admin_email,
+              'terrarium_logto_admin_username': terrarium_logto_admin_username,
               'terrarium_logto_app_image': terrarium_logto_app_image_effective,
               'terrarium_logto_postgres_image': terrarium_logto_postgres_image_effective,
               'terrarium_local_idp_discovery_url': terrarium_local_idp_discovery_url_effective

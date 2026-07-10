@@ -258,6 +258,12 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
   await ssh.exec("test -L /usr/local/bin/trm && /usr/local/bin/trm status >/dev/null");
 }
 
+function terrariumConfigValue(config: string, key: string): string | undefined {
+  const match = config.match(new RegExp(`^${key}:\\s*(.+)\\s*$`, "m"));
+  const value = match?.[1]?.trim().replace(/^["']|["']$/g, "");
+  return value || undefined;
+}
+
 /** Returns the local ZITADEL bootstrap credentials from an installed Terrarium host. */
 export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: string; password: string }> {
   const configExport = await host.execAllowFailure(
@@ -285,16 +291,39 @@ export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: str
   };
 }
 
+/** Returns the local Logto bootstrap credentials from an installed Terrarium host. */
+export async function readLocalLogtoAdmin(
+  context: IntegrationContext,
+  host: SshHost
+): Promise<{ email: string; password: string }> {
+  const configExport = await host.execAllowFailure(
+    "terrariumctl config export >/dev/null && cat /etc/terrarium/config.yaml; rc=$?; rm -f /etc/terrarium/config.yaml; exit $rc"
+  );
+  if (configExport.exitCode !== 0) {
+    throw new Error(`failed to export Terrarium config: ${(configExport.stderr || configExport.stdout).trim()}`);
+  }
+  const config = configExport.stdout;
+  const email = terrariumConfigValue(config, "terrarium_logto_admin_email") || terrariumConfigValue(config, "terrarium_email") || baseEmail(context);
+  const instance = terrariumConfigValue(config, "terrarium_logto_instance_name") || "terrarium-idp";
+  const passwordResult = await host.execAllowFailure(
+    `if lxc info ${shellArg(instance)} >/dev/null 2>&1; then lxc exec ${shellArg(
+      instance
+    )} -- cat /etc/terrarium/secrets/logto_admin_password; else cat /etc/terrarium/secrets/logto_admin_password; fi`
+  );
+  const password = passwordResult.stdout.trim();
+  if (!password) {
+    throw new Error("failed to read local Logto bootstrap credentials");
+  }
+  return { email, password };
+}
+
 /** Returns the local management admin credentials for the configured local IDP provider. */
 export async function readLocalAdmin(context: IntegrationContext, host: SshHost): Promise<{ email: string; password: string }> {
   if (context.config.idpProvider === "zitadel") {
     return await readLocalZitadelAdmin(host);
   }
 
-  return {
-    email: baseEmail(context),
-    password: localInstallRootPassword(context)
-  };
+  return await readLocalLogtoAdmin(context, host);
 }
 
 export function localAuthDiscoveryUrl(authDomain: string, provider: IntegrationIdpProvider): string {

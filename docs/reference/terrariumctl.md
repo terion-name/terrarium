@@ -163,7 +163,7 @@ trm image delete golden-web
 | `--non-interactive` | none | no | interactive mode if omitted | Disables prompts and requires all needed config through flags. |
 | `--yes` | none | no | prompt before destructive actions | Auto-confirms destructive or confirmation prompts. |
 | `--ref` | git branch or tag | no | `main` when invoking `terrariumctl` directly; release-selected tag when run through `install.sh` | Installs a specific Terrarium release tag, or builds from a branch-like source ref such as `main`. |
-| `--email` | email address | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Sets the Terrarium contact/admin email and default ZITADEL bootstrap admin email. |
+| `--email` | email address | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Sets the Terrarium contact/admin email and the default local-provider bootstrap admin email. |
 | `--acme-email` | email address | no | falls back to `--email` | Sets the ACME account identity for Traefik and LXD certificate automation. |
 | `--domain` | root domain | no | service domains default to `<service>.<dashed-public-ip>.traefik.me` when omitted | Sets the root domain used to derive service subdomains. |
 | `--manage-domain` | domain | no | `manage.<domain>` when `--domain` is set, otherwise `manage.<dashed-public-ip>.traefik.me` | Overrides the Cockpit domain. |
@@ -185,6 +185,8 @@ trm image delete golden-web
 | `--lxd-oidc-groups-claim` | claim name | no | follows provider default unless set | Overrides the LXD OIDC groups/roles claim. |
 | `--lxd-oidc-scopes` | space-separated scopes | no | follows provider default unless set | Overrides the LXD OIDC scopes. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
+| `--logto-admin-email` | email address | no | falls back to `--email` for local Logto | Sets the bootstrap admin email for self-hosted Logto. |
+| `--logto-admin-username` | username | no | `terrarium_admin` for local Logto | Sets the bootstrap admin username for self-hosted Logto. Whitespace and control characters are rejected. |
 | `--generate-root-pwd` | none | yes in non-interactive mode when root has no usable local password unless `--root-pwd-file` is passed; no otherwise | none | Generates a strong Cockpit root password and saves it to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions. |
 | `--root-pwd-file` | path | yes in non-interactive mode when root has no usable local password unless `--generate-root-pwd` is passed; no otherwise | none | Reads the Cockpit root password from a local file. |
 | `--storage-mode` | `disk`, `partition`, or `file` | yes in non-interactive mode; no in interactive mode | prompted or auto-selected in interactive mode | Selects how the LXD ZFS pool is created. |
@@ -675,6 +677,7 @@ Behavior:
 | `--email` | email address | no | existing configured value | Updates the Terrarium contact/admin email. |
 | `--acme-email` | email address | no | existing configured value or falls back to `--email` | Updates the ACME account email. |
 | `--zitadel-admin-email` | email address | no | existing configured value or falls back to `--email` | Updates the self-hosted ZITADEL bootstrap admin email. |
+| `--logto-admin-email` | email address | no | existing configured value or falls back to `--email` when local Logto is selected | Updates the self-hosted Logto bootstrap admin email. |
 
 ## set idp
 
@@ -697,6 +700,8 @@ Behavior:
 | `--lxd-oidc-scopes` | space-separated scopes | no | follows provider default unless set | Overrides the LXD OIDC scopes. |
 | `--local-idp-outputs-path` | path | no | `/etc/terrarium/zitadel-apps.json` compatibility path | Overrides where local provider client outputs are read/written. |
 | `--zitadel-admin-email` | email address | no | existing configured value or `--email` | Updates the ZITADEL bootstrap admin email when mode is `local`. |
+| `--logto-admin-email` | email address | no | existing configured value or `--email` when provider is `logto` and mode is `local` | Updates the Logto bootstrap admin email when mode is `local`. |
+| `--logto-admin-username` | username | no | existing configured value or `terrarium_admin` when provider is `logto` and mode is `local` | Updates the Logto bootstrap admin username when mode is `local`. Whitespace and control characters are rejected. |
 
 External OIDC notes:
 
@@ -715,6 +720,7 @@ Local provider notes:
 - Local ZITADEL remains the default when mode is `local` and no provider is set. External OIDC remains generic when no provider is set.
 - Local ZITADEL runs in the `terrarium-idp` LXD system instance, so its data is part of the LXD/ZFS backup set instead of host Docker state.
 - Local Logto also runs in the managed `terrarium-idp` system instance. It starts Logto plus Postgres through `terrarium-logto.service`, seeds the database unattended, and provisions Terrarium clients during `terrariumctl idp sync`.
+- Local Logto bootstrap defaults use `terrarium_email` for `terrarium_logto_admin_email` and `terrarium_admin` for `terrarium_logto_admin_username`; override them with `--logto-admin-email` and `--logto-admin-username` during install or `terrariumctl set idp local --provider logto`.
 - Terrarium auto-provisions a management role named after `terrarium_admin_group`, defaulting to `terrarium-admins`.
 - The bootstrap admin is granted that role automatically when the selected provider can resolve that user.
 - ZITADEL flattens Terrarium role assignments into a `groups` claim. Logto uses its `roles` claim and `openid profile email roles` scopes by default.

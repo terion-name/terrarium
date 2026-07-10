@@ -35,14 +35,16 @@ export function localIdpRuntimeDescriptor(config: MutableConfig): LocalIdpRuntim
   }
 
   if (provider === "logto") {
+    const instanceName = configString(config, "terrarium_logto_instance_name", DEFAULT_IDP_INSTANCE);
     return {
       provider,
       label: "Logto",
       instanceConfigKey: "terrarium_logto_instance_name",
-      instanceName: configString(config, "terrarium_logto_instance_name", DEFAULT_IDP_INSTANCE),
+      instanceName,
       composeProject: "terrarium-logto",
       composePath: "/var/lib/terrarium/logto/docker-compose.yml",
-      serviceName: "terrarium-logto.service"
+      serviceName: "terrarium-logto.service",
+      bootstrapPasswordCommand: `lxc exec ${instanceName} -- cat /etc/terrarium/secrets/logto_admin_password`
     };
   }
 

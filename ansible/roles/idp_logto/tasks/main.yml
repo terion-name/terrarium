@@ -110,7 +110,11 @@
         'set -eu;
         umask 077;
         [ -f /etc/terrarium/secrets/logto_postgres_password ] || tr -dc "A-Za-z0-9" </dev/urandom | head -c 48 > /etc/terrarium/secrets/logto_postgres_password;
-        [ -f /etc/terrarium/secrets/logto_secret_vault_kek ] || openssl rand -base64 32 > /etc/terrarium/secrets/logto_secret_vault_kek'
+        [ -f /etc/terrarium/secrets/logto_secret_vault_kek ] || openssl rand -base64 32 > /etc/terrarium/secrets/logto_secret_vault_kek;
+        if [ ! -f /etc/terrarium/secrets/logto_admin_password ]; then
+          pw="$(tr -dc "A-Z" </dev/urandom | head -c 1)$(tr -dc "a-z" </dev/urandom | head -c 1)$(tr -dc "0-9" </dev/urandom | head -c 1)!$(tr -dc "A-Za-z0-9" </dev/urandom | head -c 28)";
+          printf "%s" "$pw" > /etc/terrarium/secrets/logto_admin_password;
+        fi'
       changed_when: false
       no_log: true
 
@@ -185,6 +189,12 @@
     - name: Read Logto secret vault KEK from system instance
       ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- cat /etc/terrarium/secrets/logto_secret_vault_kek"
       register: terrarium_logto_secret_vault_kek_raw
+      changed_when: false
+      no_log: true
+
+    - name: Read Logto local admin password from system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- cat /etc/terrarium/secrets/logto_admin_password"
+      register: terrarium_logto_admin_password_raw
       changed_when: false
       no_log: true
 
@@ -265,7 +275,7 @@
     - name: Run Logto reconciliation
       ansible.builtin.command: /usr/local/bin/terrariumctl idp sync
       environment:
-        TERRARIUM_LOGTO_ADMIN_PASSWORD: "{{ terrarium_root_password_plaintext | default('', true) }}"
+        TERRARIUM_LOGTO_ADMIN_PASSWORD: "{{ terrarium_logto_admin_password_raw.stdout }}"
       register: terrarium_logto_sync
       until: terrarium_logto_sync.rc == 0
       retries: 6

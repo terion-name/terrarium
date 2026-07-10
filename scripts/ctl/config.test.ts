@@ -58,6 +58,8 @@ describe("terrariumctl config reconciliation", () => {
 
     expect(ctlSource).toContain('.option("--provider <provider>"');
     expect(ctlSource).toContain('.option("--idp-provider <provider>"');
+    expect(ctlSource).toContain('.option("--logto-admin-email <email>"');
+    expect(ctlSource).toContain('.option("--logto-admin-username <username>"');
     expect(configSource).toContain('provider: cliOption(rawOptions, "provider", ["idpProvider", "idp-provider"])');
   });
 
@@ -68,7 +70,9 @@ describe("terrariumctl config reconciliation", () => {
       "oidc-scopes": "openid profile email roles",
       "lxd-oidc-groups-claim": "organization_roles",
       "lxd-oidc-scopes": "openid email organizations",
-      "local-idp-outputs-path": "/run/terrarium/idp-apps.json"
+      "local-idp-outputs-path": "/run/terrarium/idp-apps.json",
+      "logto-admin-email": "owner@example.test",
+      "logto-admin-username": "owner_admin"
     });
 
     expect(parsed.idp.provider).toBe("logto");
@@ -77,6 +81,16 @@ describe("terrariumctl config reconciliation", () => {
     expect(parsed.idp.lxdOidcGroupsClaim).toBe("organization_roles");
     expect(parsed.idp.lxdOidcScopes).toBe("openid email organizations");
     expect(parsed.idp.localIdpOutputsPath).toBe("/run/terrarium/idp-apps.json");
+    expect(parsed.idp.logtoAdminEmail).toBe("owner@example.test");
+    expect(parsed.idp.logtoAdminUsername).toBe("owner_admin");
+  });
+
+  test("parses Logto admin email set email flag", () => {
+    const parsed = parseSetCommandOptions({
+      "logto-admin-email": "owner@example.test"
+    });
+
+    expect(parsed.emails.logtoAdminEmail).toBe("owner@example.test");
   });
 
   test("syncs local IDP outputs before proxy config convergence finishes", async () => {
@@ -229,6 +243,37 @@ describe("terrariumctl config reconciliation", () => {
     expect(oidcScopes(config)).toBe("openid custom");
     expect(lxdOidcGroupsClaim(config)).toBe("lxd_groups");
     expect(lxdOidcScopes(config)).toBe("openid lxd");
+  });
+
+  test("defaults local Logto admin config when switching to local Logto", () => {
+    const config: Record<string, unknown> = {
+      terrarium_public_ip: "203.0.113.10",
+      terrarium_root_domain: "example.test",
+      terrarium_email: "admin@example.test"
+    };
+
+    applySetIdpConfig(config, { mode: "local", provider: "logto" });
+
+    expect(config.terrarium_logto_admin_email).toBe("admin@example.test");
+    expect(config.terrarium_logto_admin_username).toBe("terrarium_admin");
+  });
+
+  test("persists explicit local Logto admin config", () => {
+    const config: Record<string, unknown> = {
+      terrarium_public_ip: "203.0.113.10",
+      terrarium_root_domain: "example.test",
+      terrarium_email: "admin@example.test"
+    };
+
+    applySetIdpConfig(config, {
+      mode: "local",
+      provider: "logto",
+      logtoAdminEmail: " owner@example.test ",
+      logtoAdminUsername: " owner_admin "
+    });
+
+    expect(config.terrarium_logto_admin_email).toBe("owner@example.test");
+    expect(config.terrarium_logto_admin_username).toBe("owner_admin");
   });
 
   test("skips ZITADEL output stabilization for local Logto provider", async () => {

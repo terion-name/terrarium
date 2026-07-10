@@ -37,6 +37,8 @@ const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-na
 const REPO_DIR = process.env.TERRARIUM_REPO_DIR ?? "/opt/terrarium";
 const BUNDLE_DIR = process.env.TERRARIUM_BUNDLE_DIR ?? "";
 const GENERATED_ROOT_PASSWORD_PATH = "/etc/terrarium/secrets/cockpit_root_password";
+const LOGTO_ADMIN_PASSWORD_PATH = "/etc/terrarium/secrets/logto_admin_password";
+const DEFAULT_LOGTO_ADMIN_USERNAME = "terrarium_admin";
 const ANSIBLE_GALAXY_ATTEMPTS = 4;
 // CAC's string transform runs after numeric coercion; readCliOption recovers exact argv values instead.
 const STRING_OPTION = {};
@@ -97,6 +99,8 @@ type InstallOptions = {
   lxdOidcScopes: string;
   localIdpOutputsPath: string;
   zitadelAdminEmail: string;
+  logtoAdminEmail: string;
+  logtoAdminUsername: string;
   rootPassword: string;
   generateRootPassword: boolean;
   generatedRootPasswordPath: string;
@@ -176,6 +180,17 @@ export function validateEmail(email: string, fieldName: string): string {
   const domain = match[1].toLowerCase();
   if (RESERVED_EMAIL_DOMAINS.has(domain)) {
     fail(`${fieldName} must not use reserved example.* domains because ACME rejects them`);
+  }
+  return normalized;
+}
+
+export function validateLogtoAdminUsername(username: string, fieldName: string): string {
+  const normalized = username.trim();
+  if (!normalized) {
+    fail(`${fieldName} must not be empty`);
+  }
+  if (/[\s\x00-\x1f\x7f]/.test(normalized)) {
+    fail(`${fieldName} must not contain whitespace or control characters`);
   }
   return normalized;
 }
@@ -564,6 +579,23 @@ async function promptEmail(message: string, defaultValue = "", fieldName = "emai
       return true;
     }
   }).then((value) => validateEmail(value, fieldName));
+}
+
+async function promptLogtoAdminUsername(defaultValue = DEFAULT_LOGTO_ADMIN_USERNAME): Promise<string> {
+  return await input({
+    message: "Logto bootstrap admin username",
+    default: defaultValue,
+    validate: (value) => {
+      const normalized = value.trim();
+      if (!normalized) {
+        return "Enter a username";
+      }
+      if (/[\s\x00-\x1f\x7f]/.test(normalized)) {
+        return "Username must not contain whitespace or control characters";
+      }
+      return true;
+    }
+  }).then((value) => validateLogtoAdminUsername(value, "--logto-admin-username"));
 }
 
 async function promptConfirm(message: string, defaultValue: boolean, assumeYes: boolean): Promise<boolean> {
@@ -1018,6 +1050,13 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
         options.zitadelAdminEmail || options.email,
         "--zitadel-admin-email"
       );
+    } else {
+      options.logtoAdminEmail = await promptEmail(
+        "Logto bootstrap admin email",
+        options.logtoAdminEmail || options.email,
+        "--logto-admin-email"
+      );
+      options.logtoAdminUsername = await promptLogtoAdminUsername(options.logtoAdminUsername || DEFAULT_LOGTO_ADMIN_USERNAME);
     }
   } else {
     await promptAndVerifyExternalOidc(options);
@@ -1154,6 +1193,13 @@ function validateNonInteractive(options: InstallOptions): void {
     if (localProvider === "zitadel") {
       options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
       options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
+    } else {
+      options.logtoAdminEmail = options.logtoAdminEmail || options.email;
+      options.logtoAdminEmail = validateEmail(options.logtoAdminEmail, "--logto-admin-email");
+      options.logtoAdminUsername = validateLogtoAdminUsername(
+        options.logtoAdminUsername || DEFAULT_LOGTO_ADMIN_USERNAME,
+        "--logto-admin-username"
+      );
     }
     options.oidcClientId = "";
     options.oidcClientSecret = "";
@@ -1277,6 +1323,8 @@ export function buildConfig(options: InstallOptions): string {
     terrarium_lxd_oidc_client_id: options.lxdOidcClientId,
     terrarium_lxd_oidc_client_secret: options.lxdOidcClientSecret,
     terrarium_zitadel_admin_email: options.zitadelAdminEmail,
+    terrarium_logto_admin_email: options.logtoAdminEmail,
+    terrarium_logto_admin_username: options.logtoAdminUsername,
     terrarium_storage_mode: options.storageMode,
     terrarium_storage_source: options.storageSource,
     terrarium_storage_size: options.storageSize,
@@ -1373,6 +1421,8 @@ export function defaultOptions(): InstallOptions {
     lxdOidcScopes: "",
     localIdpOutputsPath: "",
     zitadelAdminEmail: "",
+    logtoAdminEmail: "",
+    logtoAdminUsername: "",
     rootPassword: "",
     generateRootPassword: false,
     generatedRootPasswordPath: "",
@@ -1504,8 +1554,11 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
   console.log(`${chalk.cyan("Traefik dashboard:")} ${chalk.white(`https://${options.proxyDomain}`)}`);
   console.log(`${chalk.cyan("LXD UI/API:")} ${chalk.white(`https://${options.lxdDomain}`)}`);
   if (options.idpMode === "local") {
-    console.log(`${chalk.cyan("ZITADEL:")} ${chalk.white(`https://${options.authDomain}`)}`);
-    console.log(`${chalk.cyan("ZITADEL bootstrap password:")} ${chalk.white("lxc exec terrarium-idp -- cat /etc/terrarium/secrets/zitadel_admin_password")}`);
+    const localProvider = resolveEffectiveIdpProvider("local", options.idpProvider);
+    const providerLabel = localProvider === "logto" ? "Logto" : "ZITADEL";
+    const passwordPath = localProvider === "logto" ? LOGTO_ADMIN_PASSWORD_PATH : "/etc/terrarium/secrets/zitadel_admin_password";
+    console.log(`${chalk.cyan(`${providerLabel}:`)} ${chalk.white(`https://${options.authDomain}`)}`);
+    console.log(`${chalk.cyan(`${providerLabel} bootstrap password:`)} ${chalk.white(`lxc exec terrarium-idp -- cat ${passwordPath}`)}`);
   }
   console.log(`${chalk.cyan("OIDC issuer:")} ${chalk.white(options.oidcIssuer)}`);
   console.log(`${chalk.cyan("Management admin group:")} ${chalk.white(options.adminGroup)}`);
@@ -1544,8 +1597,10 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--lxd-oidc-client <clientId>", "Optional separate OIDC client ID for LXD", STRING_OPTION)
     .option("--lxd-oidc-secret <clientSecret>", "Optional separate OIDC client secret for LXD", STRING_OPTION)
     .option("--lxd-oidc-secret-file <path>", "Read the optional LXD OIDC client secret from a root-readable file", STRING_OPTION)
-    .option("--auth-domain <domain>", "ZITADEL auth domain", STRING_OPTION)
+    .option("--auth-domain <domain>", "Local identity-provider auth domain", STRING_OPTION)
     .option("--zitadel-admin-email <email>", "Bootstrap admin email for self-hosted ZITADEL", STRING_OPTION)
+    .option("--logto-admin-email <email>", "Bootstrap admin email for self-hosted Logto", STRING_OPTION)
+    .option("--logto-admin-username <username>", "Bootstrap admin username for self-hosted Logto", STRING_OPTION)
     .option("--generate-root-pwd", "Generate the Cockpit root password and save it under /etc/terrarium/secrets")
     .option("--root-pwd-file <path>", "Read the root password used for Cockpit login from a root-readable file", STRING_OPTION)
     .option("--storage-mode <mode>", "Storage mode: disk, partition, or file", STRING_OPTION)
@@ -1602,6 +1657,8 @@ export function registerInstallCommand(cli: CAC): void {
       );
       options.authDomain = readCliOption(cliOptions, "authDomain", ["auth-domain"]);
       options.zitadelAdminEmail = readCliOption(cliOptions, "zitadelAdminEmail", ["zitadel-admin-email"]);
+      options.logtoAdminEmail = readCliOption(cliOptions, "logtoAdminEmail", ["logto-admin-email"]);
+      options.logtoAdminUsername = readCliOption(cliOptions, "logtoAdminUsername", ["logto-admin-username"]);
       options.generateRootPassword = Boolean(cliOptions.generateRootPwd || cliOptions["generate-root-pwd"]);
       if (options.generateRootPassword && readCliOption(cliOptions, "rootPwdFile", ["root-pwd-file"])) {
         fail("use only one of --generate-root-pwd or --root-pwd-file");
