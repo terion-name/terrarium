@@ -113,6 +113,9 @@ External OIDC provider selection:
 - The Logto M2M application must have Logto Management API access with `all`
   permissions. Running a local Logto runtime is out of scope for this harness.
 
+GitHub Actions release preflight sets `TERRARIUM_INTEGRATION_IDP_PROVIDER=logto`,
+so repository secrets must include the three required `LOGTO_*` variables above.
+
 Optional:
 
 - `HCLOUD_BINARY_TARGET` defaults to `x64`.

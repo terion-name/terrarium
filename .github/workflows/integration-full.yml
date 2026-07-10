@@ -39,10 +39,18 @@ on:
       HCLOUD_SSH_PUBLIC_KEY:
         required: true
       ZITADEL_CLOUD_ISSUER:
-        required: true
+        required: false
       ZITADEL_CLOUD_PAT:
-        required: true
+        required: false
       ZITADEL_CLOUD_ORG_ID:
+        required: false
+      LOGTO_TENANT_ENDPOINT:
+        required: true
+      LOGTO_M2M_CLIENT_ID:
+        required: true
+      LOGTO_M2M_CLIENT_SECRET:
+        required: true
+      LOGTO_MANAGEMENT_API_RESOURCE:
         required: false
       S3_ENDPOINT:
         required: true
@@ -81,9 +89,14 @@ jobs:
       HCLOUD_SERVER_TYPE: ${{ secrets.HCLOUD_SERVER_TYPE }}
       HCLOUD_SSH_PRIVATE_KEY: ${{ secrets.HCLOUD_SSH_PRIVATE_KEY }}
       HCLOUD_SSH_PUBLIC_KEY: ${{ secrets.HCLOUD_SSH_PUBLIC_KEY }}
+      TERRARIUM_INTEGRATION_IDP_PROVIDER: ${{ inputs.release_preflight && 'logto' || '' }}
       ZITADEL_CLOUD_ISSUER: ${{ secrets.ZITADEL_CLOUD_ISSUER }}
       ZITADEL_CLOUD_PAT: ${{ secrets.ZITADEL_CLOUD_PAT }}
       ZITADEL_CLOUD_ORG_ID: ${{ secrets.ZITADEL_CLOUD_ORG_ID }}
+      LOGTO_TENANT_ENDPOINT: ${{ secrets.LOGTO_TENANT_ENDPOINT }}
+      LOGTO_M2M_CLIENT_ID: ${{ secrets.LOGTO_M2M_CLIENT_ID }}
+      LOGTO_M2M_CLIENT_SECRET: ${{ secrets.LOGTO_M2M_CLIENT_SECRET }}
+      LOGTO_MANAGEMENT_API_RESOURCE: ${{ secrets.LOGTO_MANAGEMENT_API_RESOURCE }}
       S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
       S3_REGION: ${{ secrets.S3_REGION }}
@@ -122,6 +135,13 @@ jobs:
           else
             bun run tests/integration/index.ts --suite smoke
           fi
+      - name: Upload smoke integration output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-smoke-output
+          path: ${{ env.TERRARIUM_INTEGRATION_OUTPUT_DIR }}
+          if-no-files-found: warn
 
   post_smoke:
     name: post-smoke
@@ -137,9 +157,14 @@ jobs:
       HCLOUD_SERVER_TYPE: ${{ secrets.HCLOUD_SERVER_TYPE }}
       HCLOUD_SSH_PRIVATE_KEY: ${{ secrets.HCLOUD_SSH_PRIVATE_KEY }}
       HCLOUD_SSH_PUBLIC_KEY: ${{ secrets.HCLOUD_SSH_PUBLIC_KEY }}
+      TERRARIUM_INTEGRATION_IDP_PROVIDER: ${{ inputs.release_preflight && 'logto' || '' }}
       ZITADEL_CLOUD_ISSUER: ${{ secrets.ZITADEL_CLOUD_ISSUER }}
       ZITADEL_CLOUD_PAT: ${{ secrets.ZITADEL_CLOUD_PAT }}
       ZITADEL_CLOUD_ORG_ID: ${{ secrets.ZITADEL_CLOUD_ORG_ID }}
+      LOGTO_TENANT_ENDPOINT: ${{ secrets.LOGTO_TENANT_ENDPOINT }}
+      LOGTO_M2M_CLIENT_ID: ${{ secrets.LOGTO_M2M_CLIENT_ID }}
+      LOGTO_M2M_CLIENT_SECRET: ${{ secrets.LOGTO_M2M_CLIENT_SECRET }}
+      LOGTO_MANAGEMENT_API_RESOURCE: ${{ secrets.LOGTO_MANAGEMENT_API_RESOURCE }}
       S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
       S3_REGION: ${{ secrets.S3_REGION }}
@@ -178,3 +203,10 @@ jobs:
           else
             bun run tests/integration/index.ts --suite full --only full
           fi
+      - name: Upload post-smoke integration output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-post-smoke-output
+          path: ${{ env.TERRARIUM_INTEGRATION_OUTPUT_DIR }}
+          if-no-files-found: warn
