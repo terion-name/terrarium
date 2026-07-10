@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
 import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
@@ -42,6 +42,14 @@ type InstallOptions = {
 
 const LXD_API_POLL_TIMEOUT_MS = 90 * 1000;
 const LXD_API_VERIFY_TIMEOUT_MS = 2 * 60 * 1000;
+
+const DETACHED_COMMAND_LOG_TAIL_LINES = 200;
+const DETACHED_COMMAND_LOG_TAIL_MAX_CHARS = 64 * 1024;
+const DETACHED_COMMAND_LOG_TAIL_REFRESH_MS = 30 * 1000;
+
+type DetachedCommandWaitOptions = {
+  localTailPath?: string;
+};
 
 function baseEmail(ctx: IntegrationContext): string {
   return `terrarium+${ctx.config.slug}@${ctx.config.ipDnsDomain}`;
@@ -240,7 +248,9 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     args.join(" ")
   ].join(" && ");
   await ssh.execDetached(installCommand, remoteScriptPath, remoteStatusPath, remoteLogPath);
-  await waitForDetachedCommand(ssh, remoteStatusPath, remoteLogPath, 45 * 60 * 1000);
+  await waitForDetachedCommand(ssh, remoteStatusPath, remoteLogPath, 45 * 60 * 1000, {
+    localTailPath: join(context.localArtifactsDir, `${basename(remoteLogPath)}.tail`)
+  });
   await ssh.exec("test -L /usr/local/bin/trm && /usr/local/bin/trm status >/dev/null");
 }
 
@@ -802,29 +812,82 @@ function shellArg(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
-async function waitForDetachedCommand(host: SshHost, statusPath: string, logPath: string, timeoutMs: number): Promise<void> {
+function redactDetachedLogTail(log: string): string {
+  return log
+    .replace(/((?:password|passwd|secret|token|client_secret|access_key|secret_key)\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi, "$1<redacted>")
+    .replace(/(--(?:root-pwd|oidc-secret|lxd-oidc-secret|s3-secret-key)(?:-file)?\s+)("[^"]*"|'[^']*'|\S+)/gi, "$1<redacted>");
+}
+
+function boundDetachedLogTail(log: string): string {
+  if (log.length <= DETACHED_COMMAND_LOG_TAIL_MAX_CHARS) {
+    return log;
+  }
+  return `...[truncated to last ${DETACHED_COMMAND_LOG_TAIL_MAX_CHARS} chars]\n${log.slice(-DETACHED_COMMAND_LOG_TAIL_MAX_CHARS)}`;
+}
+
+function normalizeDetachedLogTail(log: string): string {
+  return boundDetachedLogTail(redactDetachedLogTail(log));
+}
+
+async function readDetachedLogTail(host: SshHost, logPath: string): Promise<string> {
+  const log = await host.execAllowFailure(`tail -n ${DETACHED_COMMAND_LOG_TAIL_LINES} ${shellArg(logPath)} 2>&1 || true`, { timeoutMs: 20000 });
+  return normalizeDetachedLogTail(log.stdout || log.stderr);
+}
+
+async function persistDetachedLogTail(localTailPath: string | undefined, logPath: string, reason: string, tail: string): Promise<void> {
+  if (!localTailPath) {
+    return;
+  }
+
+  mkdirSync(dirname(localTailPath), { recursive: true });
+  const body = [
+    `remote log: ${logPath}`,
+    `reason: ${reason}`,
+    `capturedAt: ${new Date().toISOString()}`,
+    "",
+    tail.trim() || "<empty>",
+    ""
+  ].join("\n");
+  await Bun.write(localTailPath, body);
+}
+
+export async function waitForDetachedCommand(
+  host: SshHost,
+  statusPath: string,
+  logPath: string,
+  timeoutMs: number,
+  options: DetachedCommandWaitOptions = {}
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let cachedTail = "";
+  let nextTailRefreshAt = 0;
   while (Date.now() < deadline) {
     const result = await host.execAllowFailure(`test -f ${shellArg(statusPath)} && cat ${shellArg(statusPath)}`, { timeoutMs: 20000 });
     if (result.exitCode === 0) {
       const exitCode = Number(result.stdout.trim() || "1");
       if (exitCode !== 0) {
-        const log = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`, { timeoutMs: 20000 });
-        throw new Error(`remote command failed with exit ${exitCode}\n${log.stdout || log.stderr}`);
+        const tail = await readDetachedLogTail(host, logPath).catch(() => cachedTail);
+        await persistDetachedLogTail(options.localTailPath, logPath, `remote command failed with exit ${exitCode}`, tail);
+        throw new Error(`remote command failed with exit ${exitCode}\n${tail}`);
       }
       return;
     }
 
     try {
       await host.waitForSsh(15000);
+      if (Date.now() >= nextTailRefreshAt) {
+        cachedTail = await readDetachedLogTail(host, logPath).catch(() => cachedTail);
+        nextTailRefreshAt = Date.now() + DETACHED_COMMAND_LOG_TAIL_REFRESH_MS;
+      }
     } catch {
       // Host may be briefly unavailable while Terrarium hardens SSH or restarts services.
     }
     await Bun.sleep(5000);
   }
 
-  const tail = await host.execAllowFailure(`tail -n 200 ${shellArg(logPath)} || true`, { timeoutMs: 20000 });
-  throw new Error(`timed out waiting for remote command to finish\n${tail.stdout || tail.stderr}`);
+  const tail = await readDetachedLogTail(host, logPath).catch(() => cachedTail);
+  await persistDetachedLogTail(options.localTailPath, logPath, "timed out waiting for remote command to finish", tail);
+  throw new Error(`timed out waiting for remote command to finish\n${tail}`);
 }
 
 async function runDetachedRemoteCommand(host: SshHost, label: string, command: string, timeoutMs = 20 * 60 * 1000): Promise<void> {

@@ -14,6 +14,7 @@ describe("management oauth2-proxy template", () => {
     const template = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/templates/oauth2-proxy.cfg.j2"), "utf8");
 
     expect(template).toContain('redirect_url = "/oauth2/callback"');
+    expect(template).toContain("relative_redirect_url = true");
     expect(template).toContain('cookie_name = "__Host-terrarium_admin_oauth2_proxy"');
     expect(template).toContain('cookie_path = "/"');
     expect(template).toContain('whitelist_domains = [ "{{ terrarium_manage_domain }}", "{{ terrarium_proxy_domain }}" ]');

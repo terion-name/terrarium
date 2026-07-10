@@ -376,7 +376,7 @@ async function waitForTrustedHttpsDiscovery(authDomain: string, dependencies: Lo
       "10",
       "--max-time",
       "20",
-      `https://${authDomain}/.well-known/openid-configuration`
+      `https://${authDomain}/oidc/.well-known/openid-configuration`
     ]);
     if (result.exitCode === 0) {
       try {

@@ -56,6 +56,30 @@ describe("Ansible site playbook", () => {
     expect(lxdTasks).toContain("- \"{{ terrarium_lxd_oidc_scopes_effective }}\"");
   });
 
+  test("resolves LXD OIDC defaults after base OIDC defaults", () => {
+    const source = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
+    const [play] = YAML.parse(source);
+    const preTasks = play.pre_tasks as Array<{
+      name?: string;
+      "ansible.builtin.set_fact"?: Record<string, string>;
+    }>;
+    const oidcTaskIndex = preTasks.findIndex((task) => task.name === "Resolve OIDC claim and scope defaults");
+    const lxdTaskIndex = preTasks.findIndex((task) => task.name === "Resolve LXD OIDC claim and scope defaults");
+
+    expect(oidcTaskIndex).toBeGreaterThanOrEqual(0);
+    expect(lxdTaskIndex).toBeGreaterThan(oidcTaskIndex);
+
+    const oidcFacts = preTasks[oidcTaskIndex]["ansible.builtin.set_fact"] ?? {};
+    const lxdFacts = preTasks[lxdTaskIndex]["ansible.builtin.set_fact"] ?? {};
+
+    expect(oidcFacts.terrarium_oidc_groups_claim_effective).toContain("terrarium_idp_provider_effective == 'logto'");
+    expect(oidcFacts.terrarium_oidc_scopes_effective).toContain("terrarium_idp_provider_effective == 'logto'");
+    expect(oidcFacts.terrarium_lxd_oidc_groups_claim_effective).toBeUndefined();
+    expect(oidcFacts.terrarium_lxd_oidc_scopes_effective).toBeUndefined();
+    expect(lxdFacts.terrarium_lxd_oidc_groups_claim_effective).toContain("else terrarium_oidc_groups_claim_effective");
+    expect(lxdFacts.terrarium_lxd_oidc_scopes_effective).toContain("else terrarium_oidc_scopes_effective");
+  });
+
   test("resolves local issuer and discovery URLs per IdP provider", () => {
     const source = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
 

@@ -5,6 +5,7 @@ import {
   cliOption,
   CONFIG_PATH,
   defaultServiceDomain,
+  effectiveIdpProvider,
   loadMutableConfig,
   localIdpEnabled,
   localIdpOutputsPath,
@@ -18,7 +19,7 @@ import { configBoolean, configString, normalizeS3Endpoint } from "../lib/common"
 import { existsSync, readFileSync } from "node:fs";
 import { verifyOidcConfig, verifyS3Config, type OidcVerificationOptions } from "./verify";
 import { exportClusterStoreToConfigFile, importConfigFileToClusterStore } from "../lib/config-store";
-import { validatePublicIdpProvider } from "../lib/idp-provider";
+import { resolveLocalOidcIssuer, validatePublicIdpProvider } from "../lib/idp-provider";
 
 /** Callback bundle used after any saved config change that affects the running host. */
 export type ReconcileActions = {
@@ -253,8 +254,9 @@ export async function setDomainsCmd(
   setConfigValue(config, "terrarium_lxd_domain", options.lxdDomain || defaultServiceDomain(rootDomain, publicIp, "lxd"));
   if (localIdpEnabled(config)) {
     const authDomain = options.authDomain || defaultServiceDomain(rootDomain, publicIp, "auth");
+    const issuer = resolveLocalOidcIssuer(authDomain, effectiveIdpProvider(config));
     setConfigValue(config, "terrarium_auth_domain", authDomain);
-    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}`, "--oidc"));
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
   }
 
   if (!localIdpEnabled(config)) {
@@ -323,8 +325,9 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     const nextAdminGroup = options.adminGroup || configString(config, "terrarium_admin_group") || "terrarium-admins";
     const authDomain = options.authDomain || configString(config, "terrarium_auth_domain") || defaultServiceDomain(rootDomain, publicIp, "auth");
     setConfigValue(config, "terrarium_admin_group", nextAdminGroup);
+    const issuer = resolveLocalOidcIssuer(authDomain, effectiveIdpProvider(config));
     setConfigValue(config, "terrarium_auth_domain", authDomain);
-    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(`https://${authDomain}`, "--oidc"));
+    setConfigValue(config, "terrarium_oidc_issuer", normalizeOidcIssuer(issuer, "--oidc"));
     setConfigValue(config, "terrarium_oidc_client_id", "");
     setConfigValue(config, "terrarium_oidc_client_secret", "");
     setConfigValue(config, "terrarium_lxd_oidc_client_id", "");

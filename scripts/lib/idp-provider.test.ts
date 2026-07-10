@@ -5,6 +5,7 @@ import {
   normalizePublicIdpProvider,
   resolveEffectiveIdpProvider,
   resolveLocalIdpOutputsPath,
+  resolveLocalOidcIssuer,
   resolveLxdOidcGroupsClaim,
   resolveLxdOidcScopes,
   resolveOidcGroupsClaim,
@@ -64,6 +65,13 @@ describe("IDP provider helpers", () => {
     };
     expect(resolveLxdOidcGroupsClaim(config, "logto")).toBe("lxd_groups");
     expect(resolveLxdOidcScopes(config, "logto")).toBe("openid profile lxd");
+  });
+
+  test("resolves local issuer URL per provider", () => {
+    expect(resolveLocalOidcIssuer("auth.example.test", "zitadel")).toBe("https://auth.example.test");
+    expect(resolveLocalOidcIssuer("auth.example.test", "generic")).toBe("https://auth.example.test");
+    expect(resolveLocalOidcIssuer("auth.example.test", "logto")).toBe("https://auth.example.test/oidc");
+    expect(resolveLocalOidcIssuer(" auth.example.test/ ", "logto")).toBe("https://auth.example.test/oidc");
   });
 
   test("resolves local IDP outputs path with canonical, fallback, then default precedence", () => {

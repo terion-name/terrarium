@@ -1,3 +1,93 @@
+- name: Check whether snapd snap is installed
+  ansible.builtin.command: snap list snapd
+  register: terrarium_snapd_snap_list
+  failed_when: false
+  changed_when: false
+
+- name: Wait for active snap changes to settle before snapd prerequisite
+  ansible.builtin.shell: |
+    set -u
+
+    active_changes="$(snap changes --no-legend 2>/dev/null | awk '$2 ~ /^(Doing|Undoing)$/ { print $1 }')"
+    if [ -z "$active_changes" ]; then
+      exit 0
+    fi
+
+    for change_id in $active_changes; do
+      echo "Waiting for snap change ${change_id} to settle"
+      /usr/bin/timeout 120s snap watch "$change_id"
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "snap change ${change_id} did not settle:" >&2
+        snap change "$change_id" >&2 || true
+        exit "$rc"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: terrarium_snapd_snap_changes_before_prerequisite
+  until: terrarium_snapd_snap_changes_before_prerequisite.rc == 0
+  retries: 6
+  delay: 10
+  changed_when: false
+
+- name: Refresh snapd snap when installed
+  ansible.builtin.command: /usr/bin/timeout --kill-after=15s 180s snap refresh snapd
+  register: terrarium_snapd_snap_refresh
+  until:
+    - terrarium_snapd_snap_refresh.rc == 0
+      or 'has no updates available' in (terrarium_snapd_snap_refresh.stdout | lower)
+      or 'has no updates available' in (terrarium_snapd_snap_refresh.stderr | lower)
+  retries: 10
+  delay: 10
+  changed_when:
+    - terrarium_snapd_snap_refresh.rc == 0
+    - "'has no updates available' not in (terrarium_snapd_snap_refresh.stdout | lower)"
+    - "'has no updates available' not in (terrarium_snapd_snap_refresh.stderr | lower)"
+  when: terrarium_snapd_snap_list.rc == 0
+
+- name: Install snapd snap when missing
+  ansible.builtin.command: /usr/bin/timeout --kill-after=15s 180s snap install snapd
+  register: terrarium_snapd_snap_install
+  until:
+    - terrarium_snapd_snap_install.rc == 0
+      or 'already installed' in (terrarium_snapd_snap_install.stdout | lower)
+      or 'already installed' in (terrarium_snapd_snap_install.stderr | lower)
+  retries: 10
+  delay: 10
+  changed_when:
+    - terrarium_snapd_snap_install.rc == 0
+    - "'already installed' not in (terrarium_snapd_snap_install.stdout | lower)"
+    - "'already installed' not in (terrarium_snapd_snap_install.stderr | lower)"
+  when: terrarium_snapd_snap_list.rc != 0
+
+- name: Wait for active snap changes to settle after snapd prerequisite
+  ansible.builtin.shell: |
+    set -u
+
+    active_changes="$(snap changes --no-legend 2>/dev/null | awk '$2 ~ /^(Doing|Undoing)$/ { print $1 }')"
+    if [ -z "$active_changes" ]; then
+      exit 0
+    fi
+
+    for change_id in $active_changes; do
+      echo "Waiting for snap change ${change_id} to settle"
+      /usr/bin/timeout 120s snap watch "$change_id"
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "snap change ${change_id} did not settle:" >&2
+        snap change "$change_id" >&2 || true
+        exit "$rc"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: terrarium_snapd_snap_changes_after_prerequisite
+  until: terrarium_snapd_snap_changes_after_prerequisite.rc == 0
+  retries: 6
+  delay: 10
+  changed_when: false
+
 - name: Check whether LXD snap is already installed
   ansible.builtin.command: snap list lxd
   register: terrarium_lxd_snap_list
@@ -5,18 +95,55 @@
   changed_when: false
 
 - name: Install LXD snap when missing
-  ansible.builtin.command: /usr/bin/timeout --kill-after=15s 180s snap install lxd --channel={{ terrarium_lxd_snap_channel }}
+  ansible.builtin.shell: |
+    set -u
+
+    install_output="$({ /usr/bin/timeout --kill-after=15s 180s snap install lxd --channel={{ terrarium_lxd_snap_channel }}; } 2>&1)"
+    install_rc=$?
+    printf '%s\n' "$install_output"
+
+    if printf '%s\n' "$install_output" | grep -Eiq 'already installed'; then
+      exit 0
+    fi
+
+    if [ "$install_rc" -eq 0 ]; then
+      echo "terrarium_lxd_snap_install_changed=1"
+      exit 0
+    fi
+
+    if ! printf '%s\n' "$install_output" | grep -Eiq 'change in progress|install-snap'; then
+      exit "$install_rc"
+    fi
+
+    active_changes="$(snap changes --no-legend 2>/dev/null | awk '$2 ~ /^(Doing|Undoing)$/ { print $1 }')"
+    if [ -n "$active_changes" ]; then
+      for change_id in $active_changes; do
+        echo "Waiting for snap change ${change_id} to settle"
+        /usr/bin/timeout 120s snap watch "$change_id"
+        watch_rc=$?
+        if [ "$watch_rc" -ne 0 ]; then
+          echo "snap change ${change_id} did not settle:" >&2
+          snap change "$change_id" >&2 || true
+          exit "$watch_rc"
+        fi
+      done
+    fi
+
+    if snap list lxd >/dev/null 2>&1; then
+      exit 0
+    fi
+
+    echo "snap install lxd reported a change in progress, but LXD is still not installed after waiting" >&2
+    exit "$install_rc"
+  args:
+    executable: /bin/bash
   register: terrarium_lxd_snap_install
-  until:
-    - terrarium_lxd_snap_install.rc == 0
-      or 'already installed' in (terrarium_lxd_snap_install.stdout | lower)
-      or 'already installed' in (terrarium_lxd_snap_install.stderr | lower)
+  until: terrarium_lxd_snap_install.rc == 0
   retries: 10
   delay: 10
   changed_when:
     - terrarium_lxd_snap_install.rc == 0
-    - "'already installed' not in (terrarium_lxd_snap_install.stdout | lower)"
-    - "'already installed' not in (terrarium_lxd_snap_install.stderr | lower)"
+    - "'terrarium_lxd_snap_install_changed=1' in terrarium_lxd_snap_install.stdout"
   when: terrarium_lxd_snap_list.rc != 0
 
 - name: Wait for active snap changes to settle after LXD install
@@ -46,20 +173,47 @@
   delay: 10
   changed_when: false
 
-- name: Wait for LXD daemon to be ready after snap install
-  ansible.builtin.command: /usr/bin/timeout 120s /snap/bin/lxd waitready
-  register: terrarium_lxd_waitready_after_install
-  until: terrarium_lxd_waitready_after_install.rc == 0
-  retries: 5
-  delay: 10
-  changed_when: false
+- name: Require LXD snap readiness after install
+  ansible.builtin.shell: |
+    set -u
 
-- name: Verify LXD client can reach daemon after snap install
-  ansible.builtin.command: /snap/bin/lxc info
-  register: terrarium_lxd_info_after_install
-  until: terrarium_lxd_info_after_install.rc == 0
-  retries: 12
-  delay: 10
+    installing_message="Installing LXD snap, please be patient."
+    attempts=30
+    delay_seconds=10
+    last_waitready_output=""
+    last_waitready_rc=0
+    last_info_output=""
+    last_info_rc=0
+
+    for attempt in $(seq 1 "$attempts"); do
+      last_waitready_output="$({ /usr/bin/timeout --kill-after=5s 30s /snap/bin/lxd waitready; } 2>&1)"
+      last_waitready_rc=$?
+
+      last_info_output="$({ /usr/bin/timeout --kill-after=5s 30s /snap/bin/lxc info; } 2>&1)"
+      last_info_rc=$?
+
+      combined_output="$(printf '%s\n%s\n' "$last_waitready_output" "$last_info_output")"
+      if [ "$last_waitready_rc" -eq 0 ] && [ "$last_info_rc" -eq 0 ] && ! printf '%s\n' "$combined_output" | grep -Fq "$installing_message"; then
+        exit 0
+      fi
+
+      if [ "$attempt" -lt "$attempts" ]; then
+        sleep "$delay_seconds"
+      fi
+    done
+
+    echo "LXD did not become ready after snap installation." >&2
+    echo "Last /snap/bin/lxd waitready rc=${last_waitready_rc}:" >&2
+    printf '%s\n' "$last_waitready_output" >&2
+    echo "Last /snap/bin/lxc info rc=${last_info_rc}:" >&2
+    printf '%s\n' "$last_info_output" >&2
+    echo "snap changes:" >&2
+    snap changes >&2 || true
+    echo "snap services lxd:" >&2
+    snap services lxd >&2 || true
+    exit 1
+  args:
+    executable: /bin/bash
   changed_when: false
 
 - name: Enable LXD UI

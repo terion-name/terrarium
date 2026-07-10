@@ -236,6 +236,8 @@
             if (terrarium_oidc_scopes | default('', true) | string | trim | length > 0)
             else ('openid profile email roles' if terrarium_idp_provider_effective == 'logto' else 'openid profile email')
           }}
+    - name: Resolve LXD OIDC claim and scope defaults
+      ansible.builtin.set_fact:
         terrarium_lxd_oidc_groups_claim_effective: >-
           {{
             (terrarium_lxd_oidc_groups_claim | default('', true) | string | trim)

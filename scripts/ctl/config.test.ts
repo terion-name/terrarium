@@ -347,10 +347,28 @@ describe("terrariumctl config reconciliation", () => {
     expect(config.terrarium_lxd_oidc_client_secret).toBe("");
   });
 
+  test("uses Logto issuer path for local Logto config changes", () => {
+    const config: Record<string, unknown> = {
+      terrarium_public_ip: "203.0.113.10",
+      terrarium_root_domain: "example.test",
+      terrarium_email: "admin@example.test",
+      terrarium_manage_domain: "primary-manage.example.test",
+      terrarium_proxy_domain: "primary-proxy.example.test",
+      terrarium_lxd_domain: "primary-lxd.example.test"
+    };
+
+    const plan = applySetIdpConfig(config, { mode: "local", provider: "logto", authDomain: "primary-auth.example.test" });
+
+    expect(plan.verifyOidc).toBeUndefined();
+    expect(config.terrarium_idp_provider).toBe("logto");
+    expect(config.terrarium_auth_domain).toBe("primary-auth.example.test");
+    expect(config.terrarium_oidc_issuer).toBe("https://primary-auth.example.test/oidc");
+  });
+
   test("uses ZITADEL discovery issuer shape for local IDP config changes", () => {
     const source = readFileSync(join(import.meta.dir, "config.ts"), "utf8");
 
-    expect(source).toContain('normalizeOidcIssuer(`https://${authDomain}`, "--oidc")');
+    expect(source).toContain("resolveLocalOidcIssuer(authDomain, effectiveIdpProvider(config))");
     expect(source).not.toContain('normalizeOidcIssuer(`https://${authDomain}/`, "--oidc")');
   });
 

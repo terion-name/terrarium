@@ -5,12 +5,34 @@ import { join } from "node:path";
 const repoRoot = join(import.meta.dir, "..");
 
 describe("base role packages", () => {
-  test("installs storage, network, and kernel support packages", () => {
+  test("installs required storage and network packages through the fatal base package list", () => {
     const defaults = readFileSync(join(repoRoot, "ansible/roles/base/defaults/main.yml"), "utf8");
 
     expect(defaults).toContain("- cifs-utils");
     expect(defaults).toContain("- wireguard-tools");
-    expect(defaults).toContain('- "linux-modules-extra-{{ ansible_kernel }}"');
+    expect(defaults).not.toMatch(/terrarium_base_packages:[\s\S]*-\s+"?linux-modules-extra-\{\{ ansible_kernel \}\}"?/);
+    expect(defaults).toContain('terrarium_kernel_modules_extra_package: "linux-modules-extra-{{ ansible_kernel }}"');
+  });
+
+  test("installs linux-modules-extra only when apt exposes an installable candidate", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("Check optional kernel modules extra package candidate");
+    expect(tasks).toContain("apt-cache policy {{ terrarium_kernel_modules_extra_package | quote }}");
+    expect(tasks).toContain("END { exit(found ? 0 : 1) }");
+    expect(tasks).toContain("Install optional kernel modules extra package");
+    expect(tasks).toContain("when: terrarium_kernel_modules_extra_policy.rc == 0");
+  });
+
+  test("keeps linux-modules-extra install non-fatal when apt cannot resolve the optional package", () => {
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/base/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("register: terrarium_kernel_modules_extra_install");
+    expect(tasks).toContain("terrarium_kernel_modules_extra_install is failed");
+    expect(tasks).toContain("No package matching '");
+    expect(tasks).toContain("' is available");
+    expect(tasks).toContain("Unable to locate package");
+    expect(tasks).toContain("terrarium_kernel_modules_extra_package");
   });
 });
 

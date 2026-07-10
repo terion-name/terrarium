@@ -8,7 +8,6 @@ terrarium_base_packages:
   - git
   - gnupg
   - jq
-  - "linux-modules-extra-{{ ansible_kernel }}"
   - lsb-release
   - openssl
   - python3
@@ -23,3 +22,5 @@ terrarium_base_packages:
   - vim
   - wireguard-tools
   - zstd
+
+terrarium_kernel_modules_extra_package: "linux-modules-extra-{{ ansible_kernel }}"

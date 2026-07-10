@@ -4,6 +4,10 @@ import { IntegrationContext } from "./context";
 import { shellEscape } from "./lib/process";
 import type { ManagedHost } from "./types";
 
+const MAIN_OAUTH2_PROXY_DIR = "/var/lib/terrarium/oauth2-proxy";
+const MAIN_OAUTH2_PROXY_COMPOSE_PROJECT = "terrarium-oauth2-proxy";
+const MAIN_OAUTH2_PROXY_COMPOSE_PATH = `${MAIN_OAUTH2_PROXY_DIR}/docker-compose.yml`;
+
 const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 
@@ -12,6 +16,51 @@ type HostDiagnostic = {
   command: string;
   timeoutMs: number;
 };
+
+function mainOauth2ProxyComposeCommand(command: string): string {
+  return `
+if [ -f ${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PATH)} ]; then
+  ${command}
+else
+  echo "${MAIN_OAUTH2_PROXY_COMPOSE_PATH} is missing"
+fi
+`.trim();
+}
+
+function mainOauth2ProxyProbeCommand(): string {
+  return `
+set +e
+oauth2_proxy_dir=${shellEscape(MAIN_OAUTH2_PROXY_DIR)}
+compose_file=${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PATH)}
+config_file="$oauth2_proxy_dir/oauth2-proxy.cfg"
+port=4180
+
+if [ -f "$compose_file" ]; then
+  echo "== compose services =="
+  timeout 15s docker compose --project-name ${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PROJECT)} -f "$compose_file" config --services 2>&1 || true
+fi
+
+if [ -f "$config_file" ]; then
+  configured_port=$(sed -nE 's/^[[:space:]]*http_address[[:space:]]*=[[:space:]]*"127\\.0\\.0\\.1:([0-9]+)".*/\\1/p' "$config_file" | head -n 1)
+  if [ -n "$configured_port" ]; then
+    port="$configured_port"
+  fi
+  echo "== oauth2-proxy.cfg =="
+  sed -nE '/^[[:space:]]*(http_address|redirect_url|relative_redirect_url|oidc_issuer_url|provider)[[:space:]]*=/p' "$config_file"
+else
+  echo "$config_file is missing; probing default port $port"
+fi
+
+echo
+echo "== listener :$port =="
+timeout 5s ss -ltnp "sport = :$port" 2>&1
+echo "ss_exit=$?"
+echo "-- curl http://127.0.0.1:$port/ping --"
+timeout 8s curl -fsS --noproxy "*" --connect-timeout 2 --max-time 3 "http://127.0.0.1:$port/ping" 2>&1
+echo
+echo "curl_exit=$?"
+`.trim();
+}
 
 function routeAuthComposeCommand(command: string): string {
   return `
@@ -199,6 +248,25 @@ fi
 
 function hostDiagnostics(host: ManagedHost): HostDiagnostic[] {
   return [
+    {
+      name: "oauth2-proxy-compose-ps",
+      command: mainOauth2ProxyComposeCommand(
+        `timeout 20s docker compose --project-name ${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PROJECT)} -f ${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PATH)} ps --all`
+      ),
+      timeoutMs: 30000
+    },
+    {
+      name: "oauth2-proxy-compose-logs",
+      command: mainOauth2ProxyComposeCommand(
+        `timeout 45s docker compose --project-name ${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PROJECT)} -f ${shellEscape(MAIN_OAUTH2_PROXY_COMPOSE_PATH)} logs --no-color --tail=200`
+      ),
+      timeoutMs: 60000
+    },
+    {
+      name: "oauth2-proxy-listener-probe",
+      command: mainOauth2ProxyProbeCommand(),
+      timeoutMs: 45000
+    },
     {
       name: "route-auth-compose-ps",
       command: routeAuthComposeCommand(`timeout 20s docker compose -f ${shellEscape(ROUTE_AUTH_COMPOSE_PATH)} ps --all`),

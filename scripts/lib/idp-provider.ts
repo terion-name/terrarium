@@ -82,3 +82,12 @@ export function resolveLocalIdpOutputsPath(config: IdpProviderConfig): string {
     DEFAULT_LOCAL_IDP_OUTPUTS_PATH
   );
 }
+
+export function resolveLocalOidcIssuer(authDomain: string, provider: EffectiveIdpProvider): string {
+  const domain = authDomain.trim().replace(/\/+$/, "");
+  if (!domain) {
+    return "";
+  }
+  const rootIssuer = `https://${domain}`;
+  return provider === "logto" ? `${rootIssuer}/oidc` : rootIssuer;
+}

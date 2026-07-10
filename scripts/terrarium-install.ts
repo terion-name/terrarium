@@ -24,6 +24,7 @@ import { hasConfigDocument } from "./lib/config-store";
 import {
   PUBLIC_IDP_PROVIDERS,
   resolveEffectiveIdpProvider,
+  resolveLocalOidcIssuer,
   resolveLxdOidcGroupsClaim,
   resolveLxdOidcScopes,
   resolveOidcGroupsClaim,
@@ -1000,18 +1001,24 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
     })) as IdpMode;
   }
 
+  validateIdpProviderOption(options);
+
   if (options.idpMode === "local") {
     options.adminGroup = options.adminGroup || "terrarium-admins";
     options.authDomain =
       options.authDomain ||
       (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
-    options.authDomain = await promptText("ZITADEL auth domain", options.authDomain);
-    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc");
-    options.zitadelAdminEmail = await promptEmail(
-      "ZITADEL bootstrap admin email",
-      options.zitadelAdminEmail || options.email,
-      "--zitadel-admin-email"
-    );
+    const localProvider = resolveEffectiveIdpProvider("local", options.idpProvider);
+    const authDomainPrompt = localProvider === "logto" ? "Logto auth domain" : "ZITADEL auth domain";
+    options.authDomain = await promptText(authDomainPrompt, options.authDomain);
+    options.oidcIssuer = normalizeOidcIssuer(resolveLocalOidcIssuer(options.authDomain, localProvider), "--oidc");
+    if (localProvider === "zitadel") {
+      options.zitadelAdminEmail = await promptEmail(
+        "ZITADEL bootstrap admin email",
+        options.zitadelAdminEmail || options.email,
+        "--zitadel-admin-email"
+      );
+    }
   } else {
     await promptAndVerifyExternalOidc(options);
   }
@@ -1140,11 +1147,14 @@ function validateNonInteractive(options: InstallOptions): void {
   }
 
   if (options.idpMode === "local") {
+    const localProvider = resolveEffectiveIdpProvider("local", options.idpProvider);
     options.adminGroup = options.adminGroup || "terrarium-admins";
     options.authDomain = options.authDomain || (options.domain ? `auth.${options.domain}` : `auth.${dashed}.traefik.me`);
-    options.oidcIssuer = normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc");
-    options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
-    options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
+    options.oidcIssuer = normalizeOidcIssuer(resolveLocalOidcIssuer(options.authDomain, localProvider), "--oidc");
+    if (localProvider === "zitadel") {
+      options.zitadelAdminEmail = options.zitadelAdminEmail || options.email;
+      options.zitadelAdminEmail = validateEmail(options.zitadelAdminEmail, "--zitadel-admin-email");
+    }
     options.oidcClientId = "";
     options.oidcClientSecret = "";
     options.lxdOidcClientId = "";

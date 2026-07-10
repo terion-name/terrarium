@@ -135,10 +135,10 @@ describe("terrarium install CLI parsing", () => {
     expect(config.terrarium_local_idp_outputs_path).toBe("/etc/terrarium/idp-apps.json");
   });
 
-  test("uses ZITADEL discovery issuer shape for local installs", () => {
+  test("uses provider-aware local issuer shape for local installs", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
 
-    expect(source).toContain('normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc")');
+    expect(source).toContain("resolveLocalOidcIssuer(options.authDomain, localProvider)");
     expect(source).not.toContain('normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc")');
   });
 

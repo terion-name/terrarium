@@ -114,6 +114,12 @@ describe("terrarium local Logto sync", () => {
     expect(isRetriableLogtoApiError("Logto API GET /api/applications returned HTTP 401: unauthorized")).toBe(false);
   });
 
+  test("probes Logto discovery under the OIDC issuer path", () => {
+    const source = Bun.file(join(import.meta.dir, "../scripts/terrarium-logto-sync.ts")).text();
+
+    return expect(source).resolves.toContain("https://${authDomain}/oidc/.well-known/openid-configuration");
+  });
+
   test("keeps token and API secrets out of curl argv", () => {
     const tokenRequest = buildLogtoTokenRequest("https://auth.example.test", "m-admin-secret");
     const tokenCmd = buildLogtoCurlCommand("auth.example.test", "POST", tokenRequest.url, "/tmp/token-headers", true, () => false);

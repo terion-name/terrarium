@@ -8,6 +8,38 @@
     name: "{{ terrarium_base_packages }}"
     state: present
 
+- name: Check optional kernel modules extra package candidate
+  ansible.builtin.shell: |
+    set -o pipefail
+    apt-cache policy {{ terrarium_kernel_modules_extra_package | quote }} | awk '
+      /^[[:space:]]*Candidate:/ {
+        if ($2 != "(none)" && $2 != "") {
+          found = 1
+        }
+      }
+      END { exit(found ? 0 : 1) }
+    '
+  args:
+    executable: /bin/bash
+  register: terrarium_kernel_modules_extra_policy
+  changed_when: false
+  failed_when: false
+
+- name: Install optional kernel modules extra package
+  ansible.builtin.apt:
+    name: "{{ terrarium_kernel_modules_extra_package }}"
+    state: present
+  register: terrarium_kernel_modules_extra_install
+  failed_when:
+    - terrarium_kernel_modules_extra_install is failed
+    - >-
+      ("No package matching '" ~ terrarium_kernel_modules_extra_package ~ "' is available")
+      not in (terrarium_kernel_modules_extra_install.msg | default(''))
+    - >-
+      ("Unable to locate package " ~ terrarium_kernel_modules_extra_package)
+      not in (terrarium_kernel_modules_extra_install.msg | default(''))
+  when: terrarium_kernel_modules_extra_policy.rc == 0
+
 - name: Enable snapd
   ansible.builtin.systemd:
     name: snapd
