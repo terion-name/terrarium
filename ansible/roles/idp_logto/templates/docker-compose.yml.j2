@@ -1,0 +1,64 @@
+x-logto-env: &logto-env
+  DB_URL: "postgresql://logto:{{ terrarium_logto_postgres_password }}@postgres:5432/logto"
+  ENDPOINT: "https://{{ terrarium_auth_domain }}/oidc"
+  ADMIN_ENDPOINT: "https://{{ terrarium_auth_domain }}/console"
+  TRUST_PROXY_HEADER: "1"
+  SECRET_VAULT_KEK: "{{ terrarium_logto_secret_vault_kek }}"
+
+services:
+  postgres:
+    image: {{ terrarium_logto_postgres_image_effective }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: logto
+      POSTGRES_PASSWORD: "{{ terrarium_logto_postgres_password }}"
+      POSTGRES_DB: logto
+      PGDATA: /var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -d logto -U logto
+      interval: 10s
+      timeout: 30s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - "{{ terrarium_logto_postgres_dir }}:/var/lib/postgresql/data:rw"
+    networks:
+      - logto
+
+  logto-seed:
+    image: {{ terrarium_logto_app_image_effective }}
+    restart: "no"
+    command: npm run cli db seed -- --swe
+    environment:
+      <<: *logto-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - "{{ terrarium_logto_seed_dir }}:/etc/logto/seed:rw"
+    networks:
+      - logto
+
+  logto:
+    image: {{ terrarium_logto_app_image_effective }}
+    restart: unless-stopped
+    environment:
+      <<: *logto-env
+      PORT: "3001"
+      ADMIN_PORT: "3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      logto-seed:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:{{ terrarium_logto_core_port }}:3001"
+      - "127.0.0.1:{{ terrarium_logto_admin_port }}:3002"
+    networks:
+      - logto
+
+networks:
+  logto:
+    name: terrarium-logto

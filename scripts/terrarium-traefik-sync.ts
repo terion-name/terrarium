@@ -159,6 +159,31 @@ type ProxySyncLockOwner = {
   acquiredAt?: number;
 };
 
+
+function resolveEffectiveIdpProvider(idpMode: string, provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized) {
+    return normalized;
+  }
+  return idpMode === "local" ? "zitadel" : "generic";
+}
+
+function resolveLocalIdpOutputsPath(config: Record<string, unknown>): string {
+  return (
+    configString(config, "terrarium_local_idp_outputs_path") ||
+    configString(config, "terrarium_zitadel_outputs_path") ||
+    ZITADEL_OUTPUTS_PATH
+  );
+}
+
+function resolveOidcGroupsClaim(config: Record<string, unknown>, idpProvider: string): string {
+  return configString(config, "terrarium_oidc_groups_claim") || (idpProvider === "logto" ? "roles" : "groups");
+}
+
+function resolveOidcScopes(config: Record<string, unknown>, idpProvider: string): string {
+  return configString(config, "terrarium_oidc_scopes") || (idpProvider === "logto" ? "openid profile email roles" : "openid profile email");
+}
+
 function compactCommandOutput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -630,7 +655,12 @@ async function lookupRoutesAppId(authDomain: string, pat: string, projectId: str
 }
 
 async function syncLocalRoutesClient(config: Record<string, unknown>, profiles: RouteAuthProfile[]): Promise<string[]> {
-  if (configString(config, "terrarium_idp_mode") !== "local") {
+  const idpMode = configString(config, "terrarium_idp_mode");
+  if (idpMode !== "local") {
+    return [];
+  }
+  const idpProvider = resolveEffectiveIdpProvider(idpMode, configString(config, "terrarium_idp_provider"));
+  if (idpProvider !== "zitadel") {
     return [];
   }
 
@@ -648,7 +678,7 @@ async function syncLocalRoutesClient(config: Record<string, unknown>, profiles: 
     return ["route auth local IDP sync requires a non-empty bootstrap PAT"];
   }
 
-  const outputs = readJsonFile<Record<string, { value?: string }>>(ZITADEL_OUTPUTS_PATH, {});
+  const outputs = readJsonFile<Record<string, { value?: string }>>(resolveLocalIdpOutputsPath(config), {});
 
   try {
     const projectId = await lookupZitadelProjectId(authDomain, adminPat, outputs);
@@ -1411,12 +1441,17 @@ export function buildRouteAuthComposeArtifacts(
   clientSecret: string,
   cookieSecret: string
 ): RouteAuthComposeArtifacts {
-  const localIdp = configString(config, "terrarium_idp_mode") === "local";
+  const idpMode = configString(config, "terrarium_idp_mode");
+  const localIdp = idpMode === "local";
   const localAuthDomain = configString(config, "terrarium_auth_domain");
-  const issuer = localIdp && localAuthDomain ? `https://${localAuthDomain}` : configString(config, "terrarium_oidc_issuer");
+  const idpProvider = resolveEffectiveIdpProvider(idpMode, configString(config, "terrarium_idp_provider"));
+  const localIssuer = idpProvider === "logto" ? `https://${localAuthDomain}/oidc` : `https://${localAuthDomain}`;
+  const issuer = localIdp && localAuthDomain ? localIssuer : configString(config, "terrarium_oidc_issuer");
   const oauth2ProxyImage = configString(config, "terrarium_oauth2_proxy_image", DEFAULT_OAUTH2_PROXY_IMAGE);
   const oauth2ProxyUid = configString(config, "terrarium_oauth2_proxy_uid", DEFAULT_OAUTH2_PROXY_UID);
   const oauth2ProxyGid = requireRouteAuthOauth2ProxyGid(config);
+  const oidcGroupsClaim = resolveOidcGroupsClaim(config, idpProvider);
+  const oidcScopes = resolveOidcScopes(config, idpProvider);
   const profileConfigs: Record<string, string> = {};
 
   const services = Object.fromEntries(
@@ -1429,7 +1464,7 @@ export function buildRouteAuthComposeArtifacts(
         `proxy_prefix = "${profile.proxyPrefix}"`,
         `redirect_url = "${profile.wildcardBaseHost ? `https://${profile.callbackHost}${profile.callbackPath}` : profile.callbackPath}"`,
         `oidc_issuer_url = "${issuer}"`,
-        'oidc_groups_claim = "groups"',
+        `oidc_groups_claim = "${oidcGroupsClaim}"`,
         `client_id = "${clientId}"`,
         `client_secret = "${clientSecret}"`,
         `cookie_secret = "${cookieSecret}"`,
@@ -1440,7 +1475,7 @@ export function buildRouteAuthComposeArtifacts(
         `whitelist_domains = [ "${wildcardCookieDomain || profile.host}" ]`,
         'email_domains = [ "*" ]',
         'upstreams = [ "static://202" ]',
-        'scope = "openid profile email"',
+        `scope = "${oidcScopes}"`,
         "reverse_proxy = true",
         'trusted_proxy_ips = [ "127.0.0.1/32", "::1/128" ]',
         'code_challenge_method = "S256"',
@@ -1589,7 +1624,8 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
   }
   const cookieSecret = readFileSync(OAUTH2_PROXY_COOKIE_SECRET_PATH, "utf8").trim();
   const idpMode = configString(config, "terrarium_idp_mode");
-  const outputs = idpMode === "local" ? readJsonFile<Record<string, { value?: string }>>("/etc/terrarium/zitadel-apps.json", {}) : {};
+  const idpProvider = resolveEffectiveIdpProvider(idpMode, configString(config, "terrarium_idp_provider"));
+  const outputs = idpMode === "local" ? readJsonFile<Record<string, { value?: string }>>(resolveLocalIdpOutputsPath(config), {}) : {};
   const clientId =
     (idpMode === "local" ? outputs.routes_client_id?.value : undefined) || configString(config, "terrarium_oidc_client_id");
   const clientSecret =
@@ -1600,6 +1636,12 @@ async function syncRouteAuthStack(config: Record<string, unknown>, profiles: Rou
     return errors;
   }
   if (!clientId || !clientSecret) {
+    if (idpMode === "local" && idpProvider === "logto") {
+      errors.push(
+        "route auth local Logto client provisioning is not implemented; set terrarium_oidc_client_id and terrarium_oidc_client_secret or provide routes_client_id/routes_client_secret in local IDP outputs"
+      );
+      return errors;
+    }
     errors.push("route auth requires an OIDC client for published route callbacks");
     return errors;
   }

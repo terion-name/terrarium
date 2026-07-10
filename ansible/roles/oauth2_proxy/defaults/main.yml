@@ -12,3 +12,5 @@ terrarium_oauth2_proxy_group: terrarium-oauth2-proxy
 terrarium_oauth2_proxy_gid: ""
 terrarium_oauth2_proxy_port: 4180
 terrarium_oauth2_proxy_cookie_secret_path: /etc/terrarium/secrets/oauth2_proxy_cookie_secret
+terrarium_oauth2_proxy_oidc_groups_claim: "{{ terrarium_oidc_groups_claim_effective | default(terrarium_oidc_groups_claim | default('groups', true), true) }}"
+terrarium_oauth2_proxy_oidc_scopes: "{{ terrarium_oidc_scopes_effective | default(terrarium_oidc_scopes | default('openid profile email', true), true) }}"

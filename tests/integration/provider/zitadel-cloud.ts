@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { DomainBundle, ExternalOidcFixture, IntegrationConfig, OidcTestUser } from "../types";
 import { IntegrationLogger } from "../lib/logger";
-import type { ZitadelFixtureUserKind } from "../resources";
+import type {
+  ExternalOidcCleanupStep,
+  IntegrationOidcFixtureOptions,
+  IntegrationOidcFixtureProgress,
+  IntegrationOidcFixtureProgressHandler,
+  IntegrationOidcProvider
+} from "./external-oidc";
 
 type ProjectResponse = { id?: string };
 type UserResponse = { userId?: string };
@@ -25,34 +31,8 @@ type SearchUserResult = {
 };
 type ActionResult = { result?: Array<{ id?: string; name?: string; script?: string }> };
 type Flow = { flow?: { triggerActions?: Array<{ triggerType?: { id?: string }; actions?: Array<{ id?: string }> }> } };
-type FixtureOptions = {
-  extraDomains?: DomainBundle[];
-};
-export type ZitadelFixtureProgress =
-  | {
-      type: "project";
-      fixtureSlug: string;
-      projectId: string;
-      projectName: string;
-      adminGroup: string;
-      routeGroups: string[];
-    }
-  | {
-      type: "app";
-      fixtureSlug: string;
-      projectId: string;
-      appId: string;
-      appName: string;
-    }
-  | {
-      type: "user";
-      fixtureSlug: string;
-      kind: ZitadelFixtureUserKind;
-      userId: string;
-      email: string;
-      roles: string[];
-    };
-export type ZitadelFixtureProgressHandler = (progress: ZitadelFixtureProgress) => void | Promise<void>;
+export type ZitadelFixtureProgress = IntegrationOidcFixtureProgress;
+export type ZitadelFixtureProgressHandler = IntegrationOidcFixtureProgressHandler;
 
 const GROUPS_ACTION_NAME = "groupsClaim";
 const DENIED_ROUTE_ROLE = "bystanders";
@@ -144,8 +124,9 @@ function isRetryableZitadelStatus(status: number): boolean {
  * so the same admin and route-authorization checks work against cloud and local
  * ZITADEL setups.
  */
-export class ZitadelCloudProvider {
-  private readonly issuer: string;
+export class ZitadelCloudProvider implements IntegrationOidcProvider {
+  readonly provider = "zitadel" as const;
+  readonly issuer: string;
   private readonly pat: string;
   private readonly orgId: string;
   private readonly logger: IntegrationLogger;
@@ -562,7 +543,7 @@ export class ZitadelCloudProvider {
     domains: DomainBundle,
     adminGroup: string,
     routeCallbackUris: string[] = [],
-    options: FixtureOptions = {},
+    options: IntegrationOidcFixtureOptions = {},
     onProgress?: ZitadelFixtureProgressHandler
   ): Promise<ExternalOidcFixture> {
     await this.ensureGroupsAction();
@@ -594,14 +575,21 @@ export class ZitadelCloudProvider {
         await onProgress?.({ type: "app", fixtureSlug: slug, projectId, appId: created.appId, appName });
       }
     );
-    const lxdApp = await this.createOidcApp(projectId, lxdAppName, {
-      redirectUris: buildZitadelCloudLxdRedirectUris(domains, options.extraDomains ?? []),
-      appType: "OIDC_APP_TYPE_NATIVE",
-      authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
-      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN", "OIDC_GRANT_TYPE_DEVICE_CODE"],
-      postLogoutRedirectUris: [`https://${domains.lxd}`],
-      requireSecret: false
-    });
+    const lxdApp = await this.createOidcApp(
+      projectId,
+      lxdAppName,
+      {
+        redirectUris: buildZitadelCloudLxdRedirectUris(domains, options.extraDomains ?? []),
+        appType: "OIDC_APP_TYPE_NATIVE",
+        authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+        grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN", "OIDC_GRANT_TYPE_DEVICE_CODE"],
+        postLogoutRedirectUris: [`https://${domains.lxd}`],
+        requireSecret: false
+      },
+      async (created) => {
+        await onProgress?.({ type: "app", fixtureSlug: slug, projectId, appId: created.appId, appName: lxdAppName });
+      }
+    );
 
     const adminPassword = generateComplexPassword();
     const adminEmail = `admin+${slug}@example.net`;
@@ -665,6 +653,28 @@ export class ZitadelCloudProvider {
       await this.deleteUser(user.userId);
     }
     await this.deleteProject(fixture.projectId);
+  }
+
+  async deleteFixtureResource(step: ExternalOidcCleanupStep): Promise<void> {
+    if (step.idpProvider !== this.provider) {
+      throw new Error(`ZITADEL cleanup received ${step.idpProvider} cleanup step`);
+    }
+    if (step.resourceType === "role" || step.resourceType === "api-resource" || step.resourceType === "container") {
+      throw new Error(`ZITADEL cleanup for ${step.resourceType} resources is not supported`);
+    }
+    if (step.resourceType === "user") {
+      await this.deleteUser(step.resource.userId);
+      return;
+    }
+    if (step.resourceType === "app") {
+      const projectId = step.projectId ?? step.resource.projectId;
+      if (!projectId) {
+        throw new Error("ZITADEL app cleanup requires a project id");
+      }
+      await this.deleteApp(projectId, step.appId);
+      return;
+    }
+    await this.deleteProject(step.projectId);
   }
 
   async deleteUser(userId: string): Promise<void> {

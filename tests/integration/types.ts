@@ -1,5 +1,7 @@
 export type SuiteName = "smoke" | "full";
 
+export type IntegrationIdpProvider = "zitadel" | "logto";
+
 export type IntegrationCliOptions = {
   suite: SuiteName;
   only: string[];
@@ -27,9 +29,15 @@ export type IntegrationConfig = {
   sshPublicKey: string;
   sshUser: string;
   ipDnsDomain: string;
+  idpProvider: IntegrationIdpProvider;
+  externalOidcIssuer: string;
   zitadelCloudIssuer: string;
   zitadelCloudPat: string;
   zitadelCloudOrgId: string;
+  logtoTenantEndpoint: string;
+  logtoM2mClientId: string;
+  logtoM2mClientSecret: string;
+  logtoManagementApiResource: string;
   s3Endpoint: string;
   s3Bucket: string;
   s3Region: string;

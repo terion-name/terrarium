@@ -40,17 +40,32 @@
     terrarium_proxy_domain: "{{ ('proxy.' ~ terrarium_root_domain) if terrarium_root_domain else ('proxy.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me') }}"
     terrarium_lxd_domain: "{{ ('lxd.' ~ terrarium_root_domain) if terrarium_root_domain else ('lxd.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me') }}"
     terrarium_idp_mode: oidc
+    terrarium_idp_provider: ""
     terrarium_auth_domain: "{{ (('auth.' ~ terrarium_root_domain) if terrarium_root_domain else ('auth.' ~ (terrarium_public_ip | replace('.', '-')) ~ '.traefik.me')) if terrarium_idp_mode == 'local' else '' }}"
     terrarium_oidc_issuer: "{{ ('https://' ~ terrarium_auth_domain) if terrarium_idp_mode == 'local' else '' }}"
     terrarium_oidc_client_id: ""
     terrarium_oidc_client_secret: ""
+    terrarium_oidc_groups_claim: ""
+    terrarium_oidc_scopes: ""
     terrarium_lxd_oidc_client_id: ""
     terrarium_lxd_oidc_client_secret: ""
+    terrarium_lxd_oidc_groups_claim: ""
+    terrarium_lxd_oidc_scopes: ""
     terrarium_admin_group: ""
     terrarium_zitadel_admin_email: "{{ terrarium_email }}"
     terrarium_zitadel_instance_name: terrarium-idp
     terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
     terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"
+    terrarium_logto_instance_name: terrarium-idp
+    terrarium_logto_instance_image: ubuntu:24.04
+    terrarium_logto_instance_profile: terrarium
+    terrarium_logto_dir: "{{ terrarium_state_dir }}/logto"
+    terrarium_logto_postgres_dir: "{{ terrarium_logto_dir }}/postgres"
+    terrarium_logto_seed_dir: "{{ terrarium_logto_dir }}/seed"
+    terrarium_logto_stage_dir: "{{ terrarium_state_dir }}/logto-container"
+    terrarium_logto_core_port: 3001
+    terrarium_logto_admin_port: 3002
+    terrarium_local_idp_outputs_path: ""
     terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
     terrarium_docker_registry_config_path: /root/.docker/config.json
     terrarium_docker_hardened_images: auto
@@ -66,6 +81,12 @@
     terrarium_zitadel_postgres_image_hardened: "dhi.io/postgres:17.10-alpine3.22@sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b"
     terrarium_zitadel_postgres_image_mirror: "ghcr.io/terion-name/terrarium-dhi-postgres:17.10-alpine3.22@sha256:9de93f210670e25bad3dd650ac435067c7628700cc7485fa0d4fe72b8e9d765d"
     terrarium_zitadel_postgres_image_fallback: "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308"
+    terrarium_logto_app_image: ""
+    terrarium_logto_app_image_fallback: "ghcr.io/logto-io/logto:latest"
+    terrarium_logto_postgres_image: ""
+    terrarium_logto_postgres_image_hardened: "dhi.io/postgres:17.10-alpine3.22@sha256:a8da88e1ff62d2764fc63b0f1b0f912ff06fc629d964a260d876be615bd0857b"
+    terrarium_logto_postgres_image_mirror: "ghcr.io/terion-name/terrarium-dhi-postgres:17.10-alpine3.22@sha256:9de93f210670e25bad3dd650ac435067c7628700cc7485fa0d4fe72b8e9d765d"
+    terrarium_logto_postgres_image_fallback: "postgres:17.9-alpine3.22@sha256:034839bd88128360cda25496ebdb1471e24a4aa09b937160c73df2bb51126308"
     terrarium_email: ""
     terrarium_acme_email: "{{ terrarium_email }}"
     terrarium_enable_s3: false
@@ -92,23 +113,41 @@
       terrarium_proxy_domain: "{{ terrarium_proxy_domain }}"
       terrarium_lxd_domain: "{{ terrarium_lxd_domain }}"
       terrarium_idp_mode: "{{ terrarium_idp_mode }}"
+      terrarium_idp_provider: "{{ terrarium_idp_provider_effective | default(terrarium_idp_provider) }}"
       terrarium_auth_domain: "{{ terrarium_auth_domain }}"
       terrarium_oidc_issuer: "{{ terrarium_oidc_issuer_effective | default(terrarium_oidc_issuer) }}"
       terrarium_oidc_client_id: "{{ terrarium_oidc_client_id }}"
       terrarium_oidc_client_secret: "{{ terrarium_oidc_client_secret }}"
+      terrarium_oidc_groups_claim: "{{ terrarium_oidc_groups_claim_effective | default(terrarium_oidc_groups_claim) }}"
+      terrarium_oidc_scopes: "{{ terrarium_oidc_scopes_effective | default(terrarium_oidc_scopes) }}"
       terrarium_lxd_oidc_client_id: "{{ terrarium_lxd_oidc_client_id }}"
       terrarium_lxd_oidc_client_secret: "{{ terrarium_lxd_oidc_client_secret }}"
+      terrarium_lxd_oidc_groups_claim: "{{ terrarium_lxd_oidc_groups_claim_effective | default(terrarium_lxd_oidc_groups_claim) }}"
+      terrarium_lxd_oidc_scopes: "{{ terrarium_lxd_oidc_scopes_effective | default(terrarium_lxd_oidc_scopes) }}"
       terrarium_admin_group: "{{ terrarium_admin_group }}"
       terrarium_zitadel_admin_email: "{{ terrarium_zitadel_admin_email }}"
       terrarium_zitadel_instance_name: "{{ terrarium_zitadel_instance_name }}"
       terrarium_zitadel_dir: "{{ terrarium_zitadel_dir }}"
       terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_bootstrap_dir }}"
-      terrarium_zitadel_outputs_path: "{{ terrarium_zitadel_outputs_path }}"
+      terrarium_logto_instance_name: "{{ terrarium_logto_instance_name }}"
+      terrarium_logto_instance_image: "{{ terrarium_logto_instance_image }}"
+      terrarium_logto_instance_profile: "{{ terrarium_logto_instance_profile }}"
+      terrarium_logto_dir: "{{ terrarium_logto_dir }}"
+      terrarium_logto_postgres_dir: "{{ terrarium_logto_postgres_dir }}"
+      terrarium_logto_seed_dir: "{{ terrarium_logto_seed_dir }}"
+      terrarium_logto_stage_dir: "{{ terrarium_logto_stage_dir }}"
+      terrarium_logto_core_port: "{{ terrarium_logto_core_port }}"
+      terrarium_logto_admin_port: "{{ terrarium_logto_admin_port }}"
+      terrarium_local_idp_outputs_path: "{{ terrarium_local_idp_outputs_path_effective | default(terrarium_local_idp_outputs_path) }}"
+      terrarium_zitadel_outputs_path: "{{ terrarium_zitadel_outputs_path_effective | default(terrarium_zitadel_outputs_path) }}"
       terrarium_oauth2_proxy_image: "{{ terrarium_oauth2_proxy_image_effective | default(terrarium_oauth2_proxy_image_fallback) }}"
       terrarium_oauth2_proxy_uid: "{{ terrarium_oauth2_proxy_uid }}"
       terrarium_oauth2_proxy_group: "{{ terrarium_oauth2_proxy_group }}"
       terrarium_oauth2_proxy_gid: "{{ terrarium_oauth2_proxy_gid_effective | default(terrarium_oauth2_proxy_gid) }}"
       terrarium_zitadel_postgres_image: "{{ terrarium_zitadel_postgres_image_effective | default(terrarium_zitadel_postgres_image_fallback) }}"
+      terrarium_logto_app_image: "{{ terrarium_logto_app_image_effective | default(terrarium_logto_app_image_fallback) }}"
+      terrarium_logto_postgres_image: "{{ terrarium_logto_postgres_image_effective | default(terrarium_logto_postgres_image_fallback) }}"
+      terrarium_local_idp_discovery_url: "{{ terrarium_local_idp_discovery_url_effective | default('') }}"
       terrarium_lxd_pool_name: "{{ terrarium_lxd_pool_name }}"
       terrarium_cluster_enabled: "{{ terrarium_cluster_enabled }}"
       terrarium_cluster_peer_cidrs: "{{ terrarium_cluster_peer_cidrs }}"
@@ -175,13 +214,75 @@
             and (terrarium_docker_hardened_image_mirrors | string | lower) in ['true', 'yes', '1', 'auto']
           }}
       no_log: true
+    - name: Resolve IdP provider default
+      ansible.builtin.set_fact:
+        terrarium_idp_provider_effective: >-
+          {{
+            (terrarium_idp_provider | default('', true) | string | trim | lower)
+            if (terrarium_idp_provider | default('', true) | string | trim | length > 0)
+            else ('zitadel' if terrarium_idp_mode == 'local' else 'generic')
+          }}
+    - name: Resolve OIDC claim and scope defaults
+      ansible.builtin.set_fact:
+        terrarium_oidc_groups_claim_effective: >-
+          {{
+            (terrarium_oidc_groups_claim | default('', true) | string | trim)
+            if (terrarium_oidc_groups_claim | default('', true) | string | trim | length > 0)
+            else ('roles' if terrarium_idp_provider_effective == 'logto' else 'groups')
+          }}
+        terrarium_oidc_scopes_effective: >-
+          {{
+            (terrarium_oidc_scopes | default('', true) | string | trim)
+            if (terrarium_oidc_scopes | default('', true) | string | trim | length > 0)
+            else ('openid profile email roles' if terrarium_idp_provider_effective == 'logto' else 'openid profile email')
+          }}
+        terrarium_lxd_oidc_groups_claim_effective: >-
+          {{
+            (terrarium_lxd_oidc_groups_claim | default('', true) | string | trim)
+            if (terrarium_lxd_oidc_groups_claim | default('', true) | string | trim | length > 0)
+            else terrarium_oidc_groups_claim_effective
+          }}
+        terrarium_lxd_oidc_scopes_effective: >-
+          {{
+            (terrarium_lxd_oidc_scopes | default('', true) | string | trim)
+            if (terrarium_lxd_oidc_scopes | default('', true) | string | trim | length > 0)
+            else terrarium_oidc_scopes_effective
+          }}
+    - name: Resolve local IdP output path
+      ansible.builtin.set_fact:
+        terrarium_local_idp_outputs_path_effective: >-
+          {{
+            (terrarium_local_idp_outputs_path | default('', true) | string | trim)
+            if (terrarium_local_idp_outputs_path | default('', true) | string | trim | length > 0)
+            else (terrarium_zitadel_outputs_path | default('/etc/terrarium/zitadel-apps.json', true))
+          }}
+        terrarium_zitadel_outputs_path_effective: >-
+          {{
+            (terrarium_local_idp_outputs_path | default('', true) | string | trim)
+            if (terrarium_local_idp_outputs_path | default('', true) | string | trim | length > 0)
+            else (terrarium_zitadel_outputs_path | default('/etc/terrarium/zitadel-apps.json', true))
+          }}
     - name: Resolve container image defaults
       ansible.builtin.set_fact:
         terrarium_oidc_issuer_effective: >-
           {{
-            ('https://' ~ terrarium_auth_domain)
-            if terrarium_idp_mode == 'local'
-            else terrarium_oidc_issuer
+            ('https://' ~ terrarium_auth_domain ~ '/oidc')
+            if (terrarium_idp_mode == 'local' and terrarium_idp_provider_effective == 'logto')
+            else (
+              ('https://' ~ terrarium_auth_domain)
+              if terrarium_idp_mode == 'local'
+              else terrarium_oidc_issuer
+            )
+          }}
+        terrarium_local_idp_discovery_url_effective: >-
+          {{
+            ('https://' ~ terrarium_auth_domain ~ '/oidc/.well-known/openid-configuration')
+            if (terrarium_idp_mode == 'local' and terrarium_idp_provider_effective == 'logto')
+            else (
+              ('https://' ~ terrarium_auth_domain ~ '/.well-known/openid-configuration')
+              if terrarium_idp_mode == 'local'
+              else ((terrarium_oidc_issuer | regex_replace('/+$', '')) ~ '/.well-known/openid-configuration')
+            )
           }}
         terrarium_oauth2_proxy_image_effective: >-
           {{
@@ -208,6 +309,26 @@
                 terrarium_zitadel_postgres_image_mirror
                 if terrarium_docker_hardened_image_mirrors_effective
                 else terrarium_zitadel_postgres_image_fallback
+              )
+            )
+          }}
+        terrarium_logto_app_image_effective: >-
+          {{
+            terrarium_logto_app_image
+            if (terrarium_logto_app_image | default('', true) | length > 0)
+            else terrarium_logto_app_image_fallback
+          }}
+        terrarium_logto_postgres_image_effective: >-
+          {{
+            terrarium_logto_postgres_image
+            if (terrarium_logto_postgres_image | default('', true) | length > 0)
+            else (
+              terrarium_logto_postgres_image_hardened
+              if terrarium_docker_hardened_images_effective
+              else (
+                terrarium_logto_postgres_image_mirror
+                if terrarium_docker_hardened_image_mirrors_effective
+                else terrarium_logto_postgres_image_fallback
               )
             )
           }}
@@ -239,13 +360,32 @@
         terrarium_config_bundle: >-
           {{
             terrarium_config_bundle | combine({
+              'terrarium_idp_provider': terrarium_idp_provider_effective,
+              'terrarium_oidc_groups_claim': terrarium_oidc_groups_claim_effective,
+              'terrarium_oidc_scopes': terrarium_oidc_scopes_effective,
+              'terrarium_lxd_oidc_groups_claim': terrarium_lxd_oidc_groups_claim_effective,
+              'terrarium_lxd_oidc_scopes': terrarium_lxd_oidc_scopes_effective,
+              'terrarium_local_idp_outputs_path': terrarium_local_idp_outputs_path_effective,
+              'terrarium_zitadel_outputs_path': terrarium_zitadel_outputs_path_effective,
               'terrarium_admin_group': terrarium_admin_group,
               'terrarium_oidc_issuer': terrarium_oidc_issuer_effective,
               'terrarium_oauth2_proxy_image': terrarium_oauth2_proxy_image_effective,
               'terrarium_oauth2_proxy_uid': terrarium_oauth2_proxy_uid,
               'terrarium_oauth2_proxy_group': terrarium_oauth2_proxy_group,
               'terrarium_oauth2_proxy_gid': terrarium_oauth2_proxy_gid_effective | default(terrarium_oauth2_proxy_gid),
-              'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective
+              'terrarium_zitadel_postgres_image': terrarium_zitadel_postgres_image_effective,
+              'terrarium_logto_instance_name': terrarium_logto_instance_name,
+              'terrarium_logto_instance_image': terrarium_logto_instance_image,
+              'terrarium_logto_instance_profile': terrarium_logto_instance_profile,
+              'terrarium_logto_dir': terrarium_logto_dir,
+              'terrarium_logto_postgres_dir': terrarium_logto_postgres_dir,
+              'terrarium_logto_seed_dir': terrarium_logto_seed_dir,
+              'terrarium_logto_stage_dir': terrarium_logto_stage_dir,
+              'terrarium_logto_core_port': terrarium_logto_core_port,
+              'terrarium_logto_admin_port': terrarium_logto_admin_port,
+              'terrarium_logto_app_image': terrarium_logto_app_image_effective,
+              'terrarium_logto_postgres_image': terrarium_logto_postgres_image_effective,
+              'terrarium_local_idp_discovery_url': terrarium_local_idp_discovery_url_effective
             })
           }}
       no_log: true
@@ -257,6 +397,10 @@
     - role: traefik
     - role: lxd
     - role: idp_zitadel
+    - role: idp_logto
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_idp_provider_effective == 'logto'
     - role: oauth2_proxy
     - role: backups
     - role: hardening
@@ -319,7 +463,7 @@
           - "10"
           - --max-time
           - "20"
-          - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
+          - "{{ terrarium_local_idp_discovery_url_effective }}"
       register: terrarium_auth_public_tls
       retries: 36
       delay: 10
@@ -353,7 +497,7 @@
           - "10"
           - --max-time
           - "20"
-          - "https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"
+          - "{{ terrarium_local_idp_discovery_url_effective }}"
       register: terrarium_auth_public_tls_retry
       retries: 36
       delay: 10

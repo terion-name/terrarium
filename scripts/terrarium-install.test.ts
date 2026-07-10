@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { cac } from "cac";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse } from "yaml";
 import {
+  buildConfig,
+  defaultOptions,
   externalOidcSetupInstructions,
   externalZitadelGroupsClaimActionScript,
   generateRootPassword,
@@ -42,6 +45,42 @@ describe("terrarium install CLI parsing", () => {
     }
   });
 
+  test("maps IDP provider/default flags from CLI options", () => {
+    const cli = cac("terrariumctl");
+    const originalArgv = process.argv;
+    process.argv = [
+      "node",
+      "terrariumctl",
+      "install",
+      "--idp-provider",
+      "logto",
+      "--oidc-groups-claim",
+      "roles",
+      "--oidc-scopes",
+      "openid profile email roles",
+      "--lxd-oidc-groups-claim",
+      "lxd_roles",
+      "--lxd-oidc-scopes",
+      "openid profile email lxd",
+      "--local-idp-outputs-path",
+      "/etc/terrarium/idp-apps.json"
+    ];
+
+    try {
+      registerInstallCommand(cli);
+      const parsed = cli.parse(process.argv, { run: false });
+
+      expect(readCliOption(parsed.options, "idpProvider", ["idp-provider"])).toBe("logto");
+      expect(readCliOption(parsed.options, "oidcGroupsClaim", ["oidc-groups-claim"])).toBe("roles");
+      expect(readCliOption(parsed.options, "oidcScopes", ["oidc-scopes"])).toBe("openid profile email roles");
+      expect(readCliOption(parsed.options, "lxdOidcGroupsClaim", ["lxd-oidc-groups-claim"])).toBe("lxd_roles");
+      expect(readCliOption(parsed.options, "lxdOidcScopes", ["lxd-oidc-scopes"])).toBe("openid profile email lxd");
+      expect(readCliOption(parsed.options, "localIdpOutputsPath", ["local-idp-outputs-path"])).toBe("/etc/terrarium/idp-apps.json");
+    } finally {
+      process.argv = originalArgv;
+    }
+  });
+
   test("caps auto free-space partition end using explicit storage size", () => {
     expect(
       partitionEndForCandidate(
@@ -65,11 +104,55 @@ describe("terrarium install CLI parsing", () => {
     expect(normalizeOidcIssuer("https://issuer.example.test/tenant/", "--oidc")).toBe("https://issuer.example.test/tenant/");
   });
 
+  test("omits IDP provider/default config keys when installer options are empty", () => {
+    const config = parse(buildConfig(defaultOptions())) as Record<string, unknown>;
+
+    expect(config.terrarium_idp_mode).toBe("");
+    expect(config).not.toHaveProperty("terrarium_idp_provider");
+    expect(config).not.toHaveProperty("terrarium_oidc_groups_claim");
+    expect(config).not.toHaveProperty("terrarium_oidc_scopes");
+    expect(config).not.toHaveProperty("terrarium_lxd_oidc_groups_claim");
+    expect(config).not.toHaveProperty("terrarium_lxd_oidc_scopes");
+    expect(config).not.toHaveProperty("terrarium_local_idp_outputs_path");
+  });
+
+  test("adds trimmed IDP provider/default config keys when installer options are set", () => {
+    const options = defaultOptions();
+    options.idpProvider = " logto ";
+    options.oidcGroupsClaim = " roles ";
+    options.oidcScopes = " openid profile email roles ";
+    options.lxdOidcGroupsClaim = " lxd_roles ";
+    options.lxdOidcScopes = " openid profile email lxd ";
+    options.localIdpOutputsPath = " /etc/terrarium/idp-apps.json ";
+
+    const config = parse(buildConfig(options)) as Record<string, unknown>;
+
+    expect(config.terrarium_idp_provider).toBe("logto");
+    expect(config.terrarium_oidc_groups_claim).toBe("roles");
+    expect(config.terrarium_oidc_scopes).toBe("openid profile email roles");
+    expect(config.terrarium_lxd_oidc_groups_claim).toBe("lxd_roles");
+    expect(config.terrarium_lxd_oidc_scopes).toBe("openid profile email lxd");
+    expect(config.terrarium_local_idp_outputs_path).toBe("/etc/terrarium/idp-apps.json");
+  });
+
   test("uses ZITADEL discovery issuer shape for local installs", () => {
     const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
 
     expect(source).toContain('normalizeOidcIssuer(`https://${options.authDomain}`, "--oidc")');
     expect(source).not.toContain('normalizeOidcIssuer(`https://${options.authDomain}/`, "--oidc")');
+  });
+
+  test("wires IDP provider/default options through installer source", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-install.ts"), "utf8");
+
+    expect(source).toContain('from "./lib/idp-provider"');
+    expect(source).toContain('.option("--idp-provider <provider>"');
+    expect(source).toContain('.option("--oidc-groups-claim <claim>"');
+    expect(source).toContain('.option("--local-idp-outputs-path <path>"');
+    expect(source).toContain('readCliOption(cliOptions, "idpProvider", ["idp-provider"])');
+    expect(source).toContain("validatePublicIdpProvider(explicitProvider)");
+    expect(source).toContain('resolveEffectiveIdpProvider("oidc", options.idpProvider)');
+    expect(source).not.toContain("/zitadel/i.test(options.oidcIssuer");
   });
 
   test("does not expose the Cockpit root password as an argv option", () => {
@@ -130,9 +213,10 @@ describe("terrarium install CLI parsing", () => {
   test("shows concrete external OIDC setup requirements before provider prompts", () => {
     const instructions = externalOidcSetupInstructions({
       adminGroup: "admin",
+      idpProvider: "zitadel",
       lxdDomain: "lxd.example.test",
       manageDomain: "manage.example.test",
-      oidcIssuer: "https://tenant.us1.zitadel.cloud",
+      oidcIssuer: "https://issuer.example.test",
       proxyDomain: "proxy.example.test"
     });
 
@@ -152,6 +236,52 @@ describe("terrarium install CLI parsing", () => {
     expect(instructions).toContain("https://<route-host>/oauth2/callback");
     expect(instructions).toContain("https://<route-host>/oauth2/<path>/callback");
     expect(instructions).not.toContain("/oauth2/route/.../callback");
+  });
+
+  test("external OIDC instructions default to generic provider guidance when provider is omitted", () => {
+    const instructions = externalOidcSetupInstructions({
+      adminGroup: "admin",
+      lxdDomain: "lxd.example.test",
+      manageDomain: "manage.example.test",
+      oidcIssuer: "https://tenant.us1.zitadel.cloud",
+      proxyDomain: "proxy.example.test"
+    });
+
+    expect(instructions).toContain("Scopes:     openid profile email");
+    expect(instructions).toContain('Claim:      groups must be a JSON string array containing "admin"');
+    expect(instructions).toContain("LXD scopes: openid profile email");
+    expect(instructions).toContain('LXD claim:  groups must be a JSON string array containing "admin"');
+    expect(instructions).not.toContain("ZITADEL Cloud note:");
+  });
+
+  test("external OIDC instructions use Logto defaults for explicit Logto provider", () => {
+    const instructions = externalOidcSetupInstructions({
+      adminGroup: "admin",
+      idpProvider: "logto",
+      lxdDomain: "lxd.example.test",
+      manageDomain: "manage.example.test",
+      oidcIssuer: "https://auth.example.test",
+      proxyDomain: "proxy.example.test"
+    });
+
+    expect(instructions).toContain("Scopes:     openid profile email roles");
+    expect(instructions).toContain('Claim:      roles must be a JSON string array containing "admin"');
+    expect(instructions).toContain("LXD scopes: openid profile email roles");
+    expect(instructions).toContain('LXD claim:  roles must be a JSON string array containing "admin"');
+    expect(instructions).not.toContain("ZITADEL Cloud note:");
+  });
+
+  test("external OIDC instructions reject generic as an explicit public provider", () => {
+    expect(() =>
+      externalOidcSetupInstructions({
+        adminGroup: "admin",
+        idpProvider: "generic",
+        lxdDomain: "lxd.example.test",
+        manageDomain: "manage.example.test",
+        oidcIssuer: "https://issuer.example.test",
+        proxyDomain: "proxy.example.test"
+      })
+    ).toThrow('invalid IDP provider "generic"; expected one of: zitadel, logto');
   });
 
   test("ZITADEL Cloud groups action ignores roles from unrelated projects", () => {

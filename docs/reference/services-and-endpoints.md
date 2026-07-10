@@ -12,7 +12,7 @@ Terrarium automatically installs and configures the following tools on your host
 - **[OpenZFS](https://github.com/openzfs/zfs):** The advanced file system providing instant snapshots and data integrity.
 - **[Cockpit](https://github.com/cockpit-project/cockpit):** A visual web dashboard for managing the host server.
 - **[Traefik](https://github.com/traefik/traefik):** The dynamic proxy that handles routing and Let's Encrypt SSL certificates.
-- **[ZITADEL](https://github.com/zitadel/zitadel) (Optional):** Your built-in Single Sign-On (SSO) provider.
+- **[ZITADEL](https://github.com/zitadel/zitadel) or [Logto](https://github.com/logto-io/logto) (Optional):** Your built-in Single Sign-On (SSO) provider when using local IDP mode.
 - **[OAuth2-Proxy](https://github.com/oauth2-proxy/oauth2-proxy):** The gatekeeper that forces users to authenticate before accessing protected routes.
 - **[Sanoid / Syncoid](https://github.com/jimsalterjrs/sanoid):** Automated ZFS snapshot retention and replication.
 - **[devsec.hardening](https://github.com/dev-sec/ansible-collection-hardening):** An Ansible collection that automatically secures the host OS and SSH settings.
@@ -28,7 +28,7 @@ By default, Terrarium publishes the following URLs (which automatically resolve 
 | **Cockpit** | `manage.<your-ip>.traefik.me` | Manage the host server, read logs, check ZFS. |
 | **Traefik** | `proxy.<your-ip>.traefik.me` | View live network routing rules. |
 | **LXD UI** | `lxd.<your-ip>.traefik.me` | Create and manage containers. |
-| **ZITADEL** | `auth.<your-ip>.traefik.me` | Manage users and SSO (if using `--idp local`). |
+| **Local IDP** | `auth.<your-ip>.traefik.me` | ZITADEL or Logto SSO endpoint (if using `--idp local`). |
 
 *(You can override these to use your own custom domain using the `terrariumctl set domains` command).*
 
@@ -43,6 +43,17 @@ By default, Terrarium publishes the following URLs (which automatically resolve 
 
 ---
 
+## 🔐 Local IDP Services
+
+When `--idp local` is enabled, Terrarium uses the provider selected by `--idp-provider zitadel|logto`. Omitting the provider keeps the compatibility default of ZITADEL.
+
+| Provider | Public endpoint | Managed instance | Internal services |
+| --- | --- | --- | --- |
+| ZITADEL | `https://auth.<domain>` | `terrarium-idp` | ZITADEL API/login services and Postgres inside the managed IDP instance. |
+| Logto | `https://auth.<domain>` | `terrarium-idp` | `terrarium-logto.service` runs a Docker Compose project with `logto`, `logto-seed`, and `postgres`; host loopback proxies expose Logto core on port `3001`, while the admin console port is not published separately by Traefik. |
+
+Logto's public issuer path is `https://<auth-domain>/oidc`. Terrarium routes the auth domain to Logto core, provisions Terrarium OIDC clients through `terrariumctl idp sync`, and uses Logto's `roles` claim plus `openid profile email roles` scopes by default.
+
 ## 📁 Important File Paths
 
 If you ever need to dig into the server's internals, here is where everything lives:
@@ -51,7 +62,7 @@ If you ever need to dig into the server's internals, here is where everything li
 | --- | --- |
 | `/etc/terrarium/config.yaml` | Optional root-only human-readable export, created by `terrariumctl config export` or transiently during reconciliation. |
 | `/etc/terrarium/secrets/` | Generated passwords (like your Cockpit root login). |
-| `/var/lib/terrarium/` | General state files, S3 backup manifests, and OAuth proxy configs. |
+| `/var/lib/terrarium/` | General state files, S3 backup manifests, OAuth proxy configs, and local Logto state under `/var/lib/terrarium/logto` inside the managed IDP instance. |
 | `/opt/terrarium/` | The installed Terrarium bundle: compiled `terrariumctl` and Ansible provisioning assets. |
 
 *Note: The **canonical** configuration is stored inside LXD's `dqlite` database. Do not edit `/etc/terrarium/config.yaml` by hand; always use `terrariumctl set` commands.*

@@ -7,6 +7,8 @@ import {
   defaultServiceDomain,
   loadMutableConfig,
   localIdpEnabled,
+  localIdpOutputsPath,
+  localZitadelEnabled,
   MutableConfig,
   saveMutableConfig,
   setConfigValue,
@@ -16,8 +18,7 @@ import { configBoolean, configString, normalizeS3Endpoint } from "../lib/common"
 import { existsSync, readFileSync } from "node:fs";
 import { verifyOidcConfig, verifyS3Config, type OidcVerificationOptions } from "./verify";
 import { exportClusterStoreToConfigFile, importConfigFileToClusterStore } from "../lib/config-store";
-
-const LOCAL_IDP_OUTPUTS_PATH = "/etc/terrarium/zitadel-apps.json";
+import { validatePublicIdpProvider } from "../lib/idp-provider";
 
 /** Callback bundle used after any saved config change that affects the running host. */
 export type ReconcileActions = {
@@ -45,6 +46,7 @@ export type SetEmailsOptions = {
 /** Reusable option bag for `set idp`. */
 export type SetIdpOptions = {
   mode: string;
+  provider?: string;
   adminGroup?: string;
   authDomain?: string;
   oidc?: string;
@@ -54,6 +56,11 @@ export type SetIdpOptions = {
   lxdOidcClient?: string;
   lxdOidcSecret?: string;
   lxdOidcSecretFile?: string;
+  oidcGroupsClaim?: string;
+  oidcScopes?: string;
+  lxdOidcGroupsClaim?: string;
+  lxdOidcScopes?: string;
+  localIdpOutputsPath?: string;
   zitadelAdminEmail?: string;
 };
 
@@ -118,24 +125,25 @@ function secretCliOption(
  * Every `set ...` command should go through this helper so the saved config
  * and the actual host state never drift for long.
  */
-async function readLocalIdpOutputs(actions: ReconcileActions): Promise<string> {
+async function readLocalIdpOutputs(config: MutableConfig, actions: ReconcileActions): Promise<string> {
   if (actions.readLocalIdpOutputs) {
     return await actions.readLocalIdpOutputs();
   }
-  if (!existsSync(LOCAL_IDP_OUTPUTS_PATH)) {
+  const outputsPath = localIdpOutputsPath(config);
+  if (!existsSync(outputsPath)) {
     return "";
   }
-  return readFileSync(LOCAL_IDP_OUTPUTS_PATH, "utf8");
+  return readFileSync(outputsPath, "utf8");
 }
 
 export async function runReconcileActions(config: MutableConfig, actions: ReconcileActions): Promise<void> {
   await actions.reconfigure();
-  if (localIdpEnabled(config)) {
+  if (localZitadelEnabled(config)) {
     let stable = false;
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const outputsBeforeSync = await readLocalIdpOutputs(actions);
+      const outputsBeforeSync = await readLocalIdpOutputs(config, actions);
       await actions.syncIdp();
-      const outputsAfterSync = await readLocalIdpOutputs(actions);
+      const outputsAfterSync = await readLocalIdpOutputs(config, actions);
       if (outputsAfterSync === outputsBeforeSync) {
         stable = true;
         break;
@@ -301,8 +309,16 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
   if (!["local", "oidc"].includes(nextMode)) {
     throw new Error("set idp requires mode 'local' or 'oidc'");
   }
+  const explicitProvider = options.provider === undefined ? undefined : validatePublicIdpProvider(options.provider);
 
   setConfigValue(config, "terrarium_idp_mode", nextMode);
+  if (explicitProvider !== undefined) setConfigValue(config, "terrarium_idp_provider", explicitProvider);
+  if (options.oidcGroupsClaim !== undefined) setConfigValue(config, "terrarium_oidc_groups_claim", options.oidcGroupsClaim);
+  if (options.oidcScopes !== undefined) setConfigValue(config, "terrarium_oidc_scopes", options.oidcScopes);
+  if (options.lxdOidcGroupsClaim !== undefined) setConfigValue(config, "terrarium_lxd_oidc_groups_claim", options.lxdOidcGroupsClaim);
+  if (options.lxdOidcScopes !== undefined) setConfigValue(config, "terrarium_lxd_oidc_scopes", options.lxdOidcScopes);
+  if (options.localIdpOutputsPath !== undefined) setConfigValue(config, "terrarium_local_idp_outputs_path", options.localIdpOutputsPath);
+
   if (nextMode === "local") {
     const nextAdminGroup = options.adminGroup || configString(config, "terrarium_admin_group") || "terrarium-admins";
     const authDomain = options.authDomain || configString(config, "terrarium_auth_domain") || defaultServiceDomain(rootDomain, publicIp, "auth");
@@ -313,8 +329,10 @@ export function applySetIdpConfig(config: MutableConfig, options: SetIdpOptions)
     setConfigValue(config, "terrarium_oidc_client_secret", "");
     setConfigValue(config, "terrarium_lxd_oidc_client_id", "");
     setConfigValue(config, "terrarium_lxd_oidc_client_secret", "");
-    const currentAdmin = options.zitadelAdminEmail || configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
-    setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(currentAdmin, "--zitadel-admin-email"));
+    if (localZitadelEnabled(config)) {
+      const currentAdmin = options.zitadelAdminEmail || configString(config, "terrarium_zitadel_admin_email") || configString(config, "terrarium_email");
+      setConfigValue(config, "terrarium_zitadel_admin_email", validateEmail(currentAdmin, "--zitadel-admin-email"));
+    }
     return { summary: "Switched IDP mode to local" };
   } else {
     const issuer = options.oidc || configString(config, "terrarium_oidc_issuer");
@@ -451,6 +469,7 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
       zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
     },
     idp: {
+      provider: cliOption(rawOptions, "provider", ["idpProvider", "idp-provider"]),
       adminGroup: cliOption(rawOptions, "adminGroup", ["admin-group"]),
       authDomain: cliOption(rawOptions, "authDomain", ["auth-domain"]),
       oidc: cliOption(rawOptions, "oidc"),
@@ -464,6 +483,11 @@ export function parseSetCommandOptions(rawOptions: Record<string, unknown>) {
         ["lxd-oidc-secret"],
         ["lxd-oidc-secret-file"]
       ),
+      oidcGroupsClaim: cliOption(rawOptions, "oidcGroupsClaim", ["oidc-groups-claim"]),
+      oidcScopes: cliOption(rawOptions, "oidcScopes", ["oidc-scopes"]),
+      lxdOidcGroupsClaim: cliOption(rawOptions, "lxdOidcGroupsClaim", ["lxd-oidc-groups-claim"]),
+      lxdOidcScopes: cliOption(rawOptions, "lxdOidcScopes", ["lxd-oidc-scopes"]),
+      localIdpOutputsPath: cliOption(rawOptions, "localIdpOutputsPath", ["local-idp-outputs-path"]),
       zitadelAdminEmail: cliOption(rawOptions, "zitadelAdminEmail", ["zitadel-admin-email"])
     },
     s3: {

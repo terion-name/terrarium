@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySetDnsProviderConfig, applySetIdpConfig, parseSetCommandOptions, runReconcileActions, type ReconcileActions } from "./config";
+import { localIdpOutputsPath, lxdOidcGroupsClaim, lxdOidcScopes, oidcGroupsClaim, oidcScopes } from "./context";
+import { DEFAULT_LOCAL_IDP_OUTPUTS_PATH } from "../lib/idp-provider";
 
 function recordActions(calls: string[], outputs: string[] = [""]): ReconcileActions {
   return {
@@ -48,6 +50,33 @@ describe("terrariumctl config reconciliation", () => {
     } finally {
       process.argv = originalArgv;
     }
+  });
+
+  test("wires provider set idp flags through terrariumctl source", () => {
+    const ctlSource = readFileSync(join(import.meta.dir, "..", "terrariumctl.ts"), "utf8");
+    const configSource = readFileSync(join(import.meta.dir, "config.ts"), "utf8");
+
+    expect(ctlSource).toContain('.option("--provider <provider>"');
+    expect(ctlSource).toContain('.option("--idp-provider <provider>"');
+    expect(configSource).toContain('provider: cliOption(rawOptions, "provider", ["idpProvider", "idp-provider"])');
+  });
+
+  test("parses provider and claim/scope set idp flags", () => {
+    const parsed = parseSetCommandOptions({
+      "idp-provider": "logto",
+      "oidc-groups-claim": "roles",
+      "oidc-scopes": "openid profile email roles",
+      "lxd-oidc-groups-claim": "organization_roles",
+      "lxd-oidc-scopes": "openid email organizations",
+      "local-idp-outputs-path": "/run/terrarium/idp-apps.json"
+    });
+
+    expect(parsed.idp.provider).toBe("logto");
+    expect(parsed.idp.oidcGroupsClaim).toBe("roles");
+    expect(parsed.idp.oidcScopes).toBe("openid profile email roles");
+    expect(parsed.idp.lxdOidcGroupsClaim).toBe("organization_roles");
+    expect(parsed.idp.lxdOidcScopes).toBe("openid email organizations");
+    expect(parsed.idp.localIdpOutputsPath).toBe("/run/terrarium/idp-apps.json");
   });
 
   test("syncs local IDP outputs before proxy config convergence finishes", async () => {
@@ -96,6 +125,129 @@ describe("terrariumctl config reconciliation", () => {
     await runReconcileActions({ terrarium_idp_mode: "oidc" }, recordActions(calls));
 
     expect(calls).toEqual(["reconfigure", "syncProxy"]);
+  });
+
+  test("persists an explicit public IDP provider", () => {
+    const config: Record<string, unknown> = {};
+
+    applySetIdpConfig(config, {
+      mode: "oidc",
+      provider: "logto",
+      adminGroup: "admins",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "client-1",
+      oidcSecret: "secret-1"
+    });
+
+    expect(config.terrarium_idp_provider).toBe("logto");
+  });
+
+  test("does not persist an IDP provider when omitted", () => {
+    const config: Record<string, unknown> = {};
+
+    applySetIdpConfig(config, {
+      mode: "oidc",
+      adminGroup: "admins",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "client-1",
+      oidcSecret: "secret-1"
+    });
+
+    expect(config).not.toHaveProperty("terrarium_idp_provider");
+  });
+
+  test("rejects invalid explicit IDP providers including generic", () => {
+    expect(() => applySetIdpConfig({}, { mode: "oidc", provider: "generic" })).toThrow("expected one of: zitadel, logto");
+    expect(() => applySetIdpConfig({}, { mode: "oidc", provider: "custom" })).toThrow("expected one of: zitadel, logto");
+  });
+
+  test("uses Logto claim and scope defaults through context helpers", () => {
+    const config: Record<string, unknown> = {};
+
+    applySetIdpConfig(config, {
+      mode: "oidc",
+      provider: "logto",
+      adminGroup: "admins",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "client-1",
+      oidcSecret: "secret-1"
+    });
+
+    expect(oidcGroupsClaim(config)).toBe("roles");
+    expect(oidcScopes(config)).toBe("openid profile email roles");
+    expect(lxdOidcGroupsClaim(config)).toBe("roles");
+    expect(lxdOidcScopes(config)).toBe("openid profile email roles");
+  });
+
+  test("uses ZITADEL-compatible claim and scope defaults when provider is omitted or explicit", () => {
+    const omittedProviderConfig: Record<string, unknown> = {};
+    const explicitZitadelConfig: Record<string, unknown> = {};
+
+    applySetIdpConfig(omittedProviderConfig, {
+      mode: "oidc",
+      adminGroup: "admins",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "client-1",
+      oidcSecret: "secret-1"
+    });
+    applySetIdpConfig(explicitZitadelConfig, {
+      mode: "oidc",
+      provider: "zitadel",
+      adminGroup: "admins",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "client-1",
+      oidcSecret: "secret-1"
+    });
+
+    expect(oidcGroupsClaim(omittedProviderConfig)).toBe("groups");
+    expect(oidcScopes(omittedProviderConfig)).toBe("openid profile email");
+    expect(oidcGroupsClaim(explicitZitadelConfig)).toBe("groups");
+    expect(oidcScopes(explicitZitadelConfig)).toBe("openid profile email");
+  });
+
+  test("persists IDP claim and scope overrides exactly and resolves them first", () => {
+    const config: Record<string, unknown> = {};
+
+    applySetIdpConfig(config, {
+      mode: "oidc",
+      provider: "logto",
+      adminGroup: "admins",
+      oidc: "https://issuer.example.test/",
+      oidcClient: "client-1",
+      oidcSecret: "secret-1",
+      oidcGroupsClaim: " custom_groups ",
+      oidcScopes: "openid custom",
+      lxdOidcGroupsClaim: "lxd_groups",
+      lxdOidcScopes: "openid lxd"
+    });
+
+    expect(config.terrarium_oidc_groups_claim).toBe(" custom_groups ");
+    expect(config.terrarium_oidc_scopes).toBe("openid custom");
+    expect(config.terrarium_lxd_oidc_groups_claim).toBe("lxd_groups");
+    expect(config.terrarium_lxd_oidc_scopes).toBe("openid lxd");
+    expect(oidcGroupsClaim(config)).toBe("custom_groups");
+    expect(oidcScopes(config)).toBe("openid custom");
+    expect(lxdOidcGroupsClaim(config)).toBe("lxd_groups");
+    expect(lxdOidcScopes(config)).toBe("openid lxd");
+  });
+
+  test("skips ZITADEL output stabilization for local Logto provider", async () => {
+    const calls: string[] = [];
+
+    await runReconcileActions({ terrarium_idp_mode: "local", terrarium_idp_provider: "logto" }, recordActions(calls, ["old", "new"]));
+
+    expect(calls).toEqual(["reconfigure", "syncProxy"]);
+  });
+
+  test("resolves local IDP output path precedence", () => {
+    expect(
+      localIdpOutputsPath({
+        terrarium_local_idp_outputs_path: "/canonical/idp-apps.json",
+        terrarium_zitadel_outputs_path: "/legacy/zitadel-apps.json"
+      })
+    ).toBe("/canonical/idp-apps.json");
+    expect(localIdpOutputsPath({ terrarium_zitadel_outputs_path: "/legacy/zitadel-apps.json" })).toBe("/legacy/zitadel-apps.json");
+    expect(localIdpOutputsPath({})).toBe(DEFAULT_LOCAL_IDP_OUTPUTS_PATH);
   });
 
   test("preserves the local auth domain when switching to external OIDC", () => {

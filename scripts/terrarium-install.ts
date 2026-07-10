@@ -21,6 +21,15 @@ import { updateCmd } from "./ctl/update";
 import { verifyOidcConfig, verifyS3Config } from "./ctl/verify";
 import { normalizeS3Endpoint } from "./lib/common";
 import { hasConfigDocument } from "./lib/config-store";
+import {
+  PUBLIC_IDP_PROVIDERS,
+  resolveEffectiveIdpProvider,
+  resolveLxdOidcGroupsClaim,
+  resolveLxdOidcScopes,
+  resolveOidcGroupsClaim,
+  resolveOidcScopes,
+  validatePublicIdpProvider
+} from "./lib/idp-provider";
 
 const PREFIX = "terrariumctl install";
 const REPO_URL = process.env.TERRARIUM_REPO_URL ?? "https://github.com/terion-name/terrarium.git";
@@ -80,6 +89,12 @@ type InstallOptions = {
   oidcClientSecret: string;
   lxdOidcClientId: string;
   lxdOidcClientSecret: string;
+  idpProvider: string;
+  oidcGroupsClaim: string;
+  oidcScopes: string;
+  lxdOidcGroupsClaim: string;
+  lxdOidcScopes: string;
+  localIdpOutputsPath: string;
   zitadelAdminEmail: string;
   rootPassword: string;
   generateRootPassword: boolean;
@@ -559,12 +574,27 @@ async function promptConfirm(message: string, defaultValue: boolean, assumeYes: 
 
 export function externalOidcSetupInstructions(options: {
   adminGroup: string;
+  idpProvider?: string;
   lxdDomain: string;
+  lxdOidcGroupsClaim?: string;
+  lxdOidcScopes?: string;
   manageDomain: string;
+  oidcGroupsClaim?: string;
   oidcIssuer?: string;
+  oidcScopes?: string;
   proxyDomain: string;
 }): string {
-  const isZitadel = /zitadel/i.test(options.oidcIssuer ?? "");
+  const effectiveProvider = resolveEffectiveIdpProvider("oidc", options.idpProvider);
+  const providerConfig = {
+    terrarium_oidc_groups_claim: options.oidcGroupsClaim,
+    terrarium_oidc_scopes: options.oidcScopes,
+    terrarium_lxd_oidc_groups_claim: options.lxdOidcGroupsClaim,
+    terrarium_lxd_oidc_scopes: options.lxdOidcScopes
+  };
+  const oidcGroupsClaim = resolveOidcGroupsClaim(providerConfig, effectiveProvider);
+  const oidcScopes = resolveOidcScopes(providerConfig, effectiveProvider);
+  const lxdOidcGroupsClaim = resolveLxdOidcGroupsClaim(providerConfig, effectiveProvider);
+  const lxdOidcScopes = resolveLxdOidcScopes(providerConfig, effectiveProvider);
   const zitadelGroupsClaimAction = externalZitadelGroupsClaimActionScript("replace-with-your-terrarium-project-id")
     .split("\n")
     .map((line) => `  ${line}`);
@@ -578,10 +608,12 @@ export function externalOidcSetupInstructions(options: {
     `    LXD:                    https://${options.lxdDomain}/oidc/callback`,
     "",
     "  Grant/flow: authorization code",
-    "  Scopes:     openid profile email",
-    `  Claim:      groups must be a JSON string array containing "${options.adminGroup}"`,
+    `  Scopes:     ${oidcScopes}`,
+    `  Claim:      ${oidcGroupsClaim} must be a JSON string array containing "${options.adminGroup}"`,
     "              A provider role assignment is not enough unless it is emitted in this claim.",
-    ...(isZitadel
+    `  LXD scopes: ${lxdOidcScopes}`,
+    `  LXD claim:  ${lxdOidcGroupsClaim} must be a JSON string array containing "${options.adminGroup}"`,
+    ...(effectiveProvider === "zitadel"
       ? [
           "",
           "ZITADEL Cloud note:",
@@ -640,6 +672,7 @@ export function externalZitadelGroupsClaimActionScript(projectId: string): strin
  * and then use the same verifier without a retry loop.
  */
 async function promptAndVerifyExternalOidc(options: InstallOptions): Promise<void> {
+  validateIdpProviderOption(options);
   let printedSetupInstructions = false;
   while (true) {
     options.adminGroup = await promptText("Management admin group", options.adminGroup);
@@ -1072,7 +1105,20 @@ async function interactiveConfig(options: InstallOptions): Promise<void> {
   await reviewOptionalIntegrations(options);
 }
 
+function validateIdpProviderOption(options: InstallOptions): void {
+  const explicitProvider = options.idpProvider.trim();
+  if (!explicitProvider) {
+    return;
+  }
+  try {
+    options.idpProvider = validatePublicIdpProvider(explicitProvider);
+  } catch (error) {
+    fail(String(error).replace(/^Error: /, ""));
+  }
+}
+
 function validateNonInteractive(options: InstallOptions): void {
+  validateIdpProviderOption(options);
   if (!options.idpMode) {
     fail("--idp must be either local or oidc");
   }
@@ -1202,8 +1248,8 @@ async function confirmDestructiveActions(options: InstallOptions): Promise<void>
   }
 }
 
-function buildConfig(options: InstallOptions): string {
-  return stringify({
+export function buildConfig(options: InstallOptions): string {
+  const config: Record<string, unknown> = {
     terrarium_repo_dir: REPO_DIR,
     terrarium_public_ip: options.publicIp,
     terrarium_root_domain: options.domain,
@@ -1237,7 +1283,23 @@ function buildConfig(options: InstallOptions): string {
     terrarium_syncoid_target: options.syncoidTarget,
     terrarium_syncoid_target_dataset: options.syncoidTargetDataset,
     terrarium_syncoid_ssh_key: options.syncoidSshKey
-  });
+  };
+
+  for (const [key, value] of Object.entries({
+    terrarium_idp_provider: options.idpProvider,
+    terrarium_oidc_groups_claim: options.oidcGroupsClaim,
+    terrarium_oidc_scopes: options.oidcScopes,
+    terrarium_lxd_oidc_groups_claim: options.lxdOidcGroupsClaim,
+    terrarium_lxd_oidc_scopes: options.lxdOidcScopes,
+    terrarium_local_idp_outputs_path: options.localIdpOutputsPath
+  })) {
+    const trimmed = value.trim();
+    if (trimmed) {
+      config[key] = trimmed;
+    }
+  }
+
+  return stringify(config);
 }
 
 function buildSecretConfig(options: InstallOptions): string {
@@ -1274,7 +1336,7 @@ function printDnsGuidance(options: InstallOptions): void {
   }
 }
 
-function defaultOptions(): InstallOptions {
+export function defaultOptions(): InstallOptions {
   return {
     ref: "main",
     mode: "interactive",
@@ -1294,6 +1356,12 @@ function defaultOptions(): InstallOptions {
     oidcClientSecret: "",
     lxdOidcClientId: "",
     lxdOidcClientSecret: "",
+    idpProvider: "",
+    oidcGroupsClaim: "",
+    oidcScopes: "",
+    lxdOidcGroupsClaim: "",
+    lxdOidcScopes: "",
+    localIdpOutputsPath: "",
     zitadelAdminEmail: "",
     rootPassword: "",
     generateRootPassword: false,
@@ -1404,6 +1472,8 @@ async function installTerrarium(options: InstallOptions): Promise<void> {
     await verifyConfiguredIntegrations(options);
   }
 
+  validateIdpProviderOption(options);
+
   await confirmDestructiveActions(options);
 
   const tempDir = mkdtempSync(join(tmpdir(), "terrarium-config-"));
@@ -1450,6 +1520,12 @@ export function registerInstallCommand(cli: CAC): void {
     .option("--proxy-domain <domain>", "Traefik dashboard domain", STRING_OPTION)
     .option("--lxd-domain <domain>", "LXD domain", STRING_OPTION)
     .option("--idp <mode>", "Identity provider mode: local or oidc", STRING_OPTION)
+    .option("--idp-provider <provider>", `External IDP provider defaults: ${PUBLIC_IDP_PROVIDERS.join(" or ")}`, STRING_OPTION)
+    .option("--oidc-groups-claim <claim>", "Management OIDC groups claim override", STRING_OPTION)
+    .option("--oidc-scopes <scopes>", "Management OIDC scopes override", STRING_OPTION)
+    .option("--lxd-oidc-groups-claim <claim>", "LXD OIDC groups claim override", STRING_OPTION)
+    .option("--lxd-oidc-scopes <scopes>", "LXD OIDC scopes override", STRING_OPTION)
+    .option("--local-idp-outputs-path <path>", "Path to local IDP generated app outputs", STRING_OPTION)
     .option("--admin-group <group>", "Management admin group; required when --idp=oidc", STRING_OPTION)
     .option("--oidc <issuer>", "OIDC issuer URL; required when --idp=oidc", STRING_OPTION)
     .option("--oidc-client <clientId>", "OIDC client ID; required when --idp=oidc", STRING_OPTION)
@@ -1490,6 +1566,12 @@ export function registerInstallCommand(cli: CAC): void {
       options.proxyDomain = readCliOption(cliOptions, "proxyDomain", ["proxy-domain"]);
       options.lxdDomain = readCliOption(cliOptions, "lxdDomain", ["lxd-domain"]);
       options.idpMode = readCliOption(cliOptions, "idp").trim().toLowerCase() as IdpMode | "";
+      options.idpProvider = readCliOption(cliOptions, "idpProvider", ["idp-provider"]);
+      options.oidcGroupsClaim = readCliOption(cliOptions, "oidcGroupsClaim", ["oidc-groups-claim"]);
+      options.oidcScopes = readCliOption(cliOptions, "oidcScopes", ["oidc-scopes"]);
+      options.lxdOidcGroupsClaim = readCliOption(cliOptions, "lxdOidcGroupsClaim", ["lxd-oidc-groups-claim"]);
+      options.lxdOidcScopes = readCliOption(cliOptions, "lxdOidcScopes", ["lxd-oidc-scopes"]);
+      options.localIdpOutputsPath = readCliOption(cliOptions, "localIdpOutputsPath", ["local-idp-outputs-path"]);
       options.adminGroup = readCliOption(cliOptions, "adminGroup", ["admin-group"]);
       options.oidcIssuer = readCliOption(cliOptions, "oidc");
       options.oidcClientId = readCliOption(cliOptions, "oidcClient", ["oidc-client"]);

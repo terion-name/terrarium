@@ -44,15 +44,15 @@ terrariumctl proxy sync
 ```
 In this example, a user must successfully log in **AND** belong to either the `admins` or `devops` group to gain access. 
 
-With Terrarium's built-in ZITADEL, these are project roles that Terrarium emits as the OIDC `groups` claim. With an external provider, make sure the provider emits a flat `groups` claim containing the same names.
+With Terrarium's built-in ZITADEL, these are project roles that Terrarium emits as the OIDC `groups` claim. With local or external Logto, Terrarium defaults route auth to the OIDC `roles` claim and the `openid profile email roles` scopes. With a generic external provider, make sure the provider emits the configured claim (by default, a flat `groups` claim) containing the same names.
 
 ---
 
 ## Important Rules for External OIDC
 
-If you installed Terrarium using `--idp=local`, everything above works instantly. Terrarium manages all the wiring for you, including published-route callback URLs in the local ZITADEL app when you run `terrariumctl proxy sync`.
+If you installed Terrarium using `--idp local`, everything above works with the local provider wiring. Terrarium manages the local OIDC clients for ZITADEL or Logto, including published-route callback URLs in the local ZITADEL app when you run `terrariumctl proxy sync`.
 
-However, if you configured Terrarium to use an **External Identity Provider** (like ZITADEL Cloud, Auth0, Google, or GitHub), there is one extra step you must do manually.
+However, if you configured Terrarium to use an **External Identity Provider** (like ZITADEL Cloud, Logto Cloud, Auth0, Google, or GitHub), there is one extra step you must do manually.
 
 When Terrarium creates a protected route, your identity provider must allow that route's callback URL.
 
@@ -76,7 +76,7 @@ Add this callback to the external provider:
 https://app.example.com/oauth2/admin/callback
 ```
 
-If you are using the `@auth:groupname` feature, you must also ensure your external provider is configured to send a `groups` claim inside the authentication token, or Terrarium won't know which groups the user belongs to.
+If you are using the `@auth:groupname` feature, you must also ensure your external provider is configured to send the claim Terrarium reads. Generic OIDC and ZITADEL default to `groups`; Logto defaults to `roles`. Without that claim in the token or userinfo response, Terrarium won't know which groups or roles the user belongs to.
 
 ---
 

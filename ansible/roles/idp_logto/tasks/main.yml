@@ -1,0 +1,279 @@
+- name: Configure self-hosted Logto
+  when: terrarium_logto_enabled | bool
+  block:
+    - name: Stop legacy host Logto compose service
+      ansible.builtin.systemd:
+        name: terrarium-logto.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove legacy host Logto systemd unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/terrarium-logto.service
+        state: absent
+      notify: reload terrarium logto systemd
+
+    - name: Check whether Logto system instance exists
+      ansible.builtin.command: "/snap/bin/lxc info {{ terrarium_logto_instance_name }}"
+      register: terrarium_logto_instance_info
+      failed_when: false
+      changed_when: false
+
+    - name: Resolve local LXD member for first Logto placement
+      ansible.builtin.command: /snap/bin/lxc query /1.0
+      register: terrarium_logto_local_lxd_info
+      changed_when: false
+      when:
+        - terrarium_cluster_enabled | bool
+        - terrarium_logto_instance_info.rc != 0
+
+    - name: Parse local LXD member for first Logto placement
+      ansible.builtin.set_fact:
+        terrarium_logto_instance_target: "{{ (terrarium_logto_local_lxd_info.stdout | from_json).environment.server_name | default('') }}"
+      when:
+        - terrarium_cluster_enabled | bool
+        - terrarium_logto_instance_info.rc != 0
+
+    - name: Assert local LXD member was resolved for first Logto placement
+      ansible.builtin.assert:
+        that:
+          - terrarium_logto_instance_target | default('') | length > 0
+        fail_msg: "failed to resolve local LXD cluster member for {{ terrarium_logto_instance_name }} placement"
+      when:
+        - terrarium_cluster_enabled | bool
+        - terrarium_logto_instance_info.rc != 0
+
+    - name: Launch Logto system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc launch {{ terrarium_logto_instance_image }}
+        {{ terrarium_logto_instance_name }}
+        --profile {{ terrarium_logto_instance_profile }}
+        {% if terrarium_cluster_enabled | bool %}--target {{ terrarium_logto_instance_target | default(ansible_hostname) }}{% endif %}
+      when: terrarium_logto_instance_info.rc != 0
+
+    - name: Mark Logto system instance
+      ansible.builtin.command: "/snap/bin/lxc config set {{ terrarium_logto_instance_name }} {{ item.key }} {{ item.value }}"
+      loop:
+        - { key: "boot.autostart", value: "true" }
+        - { key: "user.terrarium.system", value: "idp" }
+      changed_when: false
+
+    - name: Wait for Logto system instance to accept commands
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- true"
+      register: terrarium_logto_instance_ready
+      until: terrarium_logto_instance_ready.rc == 0
+      retries: 30
+      delay: 4
+      changed_when: false
+
+    - name: Wait for cloud-init in Logto system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- cloud-init status --wait"
+      register: terrarium_logto_cloud_init
+      failed_when: false
+      changed_when: false
+
+    - name: Install Docker runtime inside Logto system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- bash -lc
+        'set -euo pipefail;
+        export DEBIAN_FRONTEND=noninteractive;
+        apt-get update;
+        apt-get install -y docker.io docker-compose-v2 || apt-get install -y docker.io docker-compose-plugin;
+        systemctl enable --now docker'
+      register: terrarium_logto_container_docker_install
+      until: terrarium_logto_container_docker_install.rc == 0
+      retries: 5
+      delay: 10
+      changed_when: false
+
+    - name: Create Logto root directories inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- install -d -m 0700
+        /etc/terrarium/secrets
+        {{ terrarium_logto_dir }}
+        {{ terrarium_logto_seed_dir }}
+      changed_when: false
+
+    - name: Create Logto Postgres data directory inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- install -d
+        -o {{ terrarium_logto_postgres_uid }}
+        -g {{ terrarium_logto_postgres_gid }}
+        -m 0700
+        {{ terrarium_logto_postgres_dir }}
+      changed_when: false
+
+    - name: Generate Logto secrets inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- bash -lc
+        'set -eu;
+        umask 077;
+        [ -f /etc/terrarium/secrets/logto_postgres_password ] || tr -dc "A-Za-z0-9" </dev/urandom | head -c 48 > /etc/terrarium/secrets/logto_postgres_password;
+        [ -f /etc/terrarium/secrets/logto_secret_vault_kek ] || openssl rand -base64 32 > /etc/terrarium/secrets/logto_secret_vault_kek'
+      changed_when: false
+      no_log: true
+
+    - name: Copy Docker registry credentials into Logto system instance when present
+      ansible.builtin.shell: |
+        set -euo pipefail
+        source=/root/.docker/config.json
+        instance={{ terrarium_logto_instance_name | quote }}
+        if [ ! -f "$source" ]; then
+          exit 0
+        fi
+        /snap/bin/lxc exec "$instance" -- install -d -m 0700 /root/.docker
+        /snap/bin/lxc file push "$source" "$instance/root/.docker/config.json"
+        /snap/bin/lxc exec "$instance" -- chmod 0600 /root/.docker/config.json
+      args:
+        executable: /bin/bash
+      changed_when: false
+      no_log: true
+
+    - name: Check Docker registry credentials for Logto images
+      ansible.builtin.stat:
+        path: "{{ terrarium_docker_registry_config_path }}"
+      register: terrarium_logto_docker_registry_config
+      when: terrarium_logto_app_image_effective is not defined or terrarium_logto_postgres_image_effective is not defined
+      no_log: true
+
+    - name: Resolve Logto app image
+      ansible.builtin.set_fact:
+        terrarium_logto_app_image_effective: >-
+          {{
+            terrarium_logto_app_image
+            if (terrarium_logto_app_image | default('', true) | length > 0)
+            else terrarium_logto_app_image_fallback
+          }}
+      when: terrarium_logto_app_image_effective is not defined
+      no_log: true
+
+    - name: Resolve Logto Postgres image
+      ansible.builtin.set_fact:
+        terrarium_logto_postgres_image_effective: >-
+          {{
+            terrarium_logto_postgres_image
+            if (terrarium_logto_postgres_image | default('', true) | length > 0)
+            else (
+              terrarium_logto_postgres_image_hardened
+              if (
+                (terrarium_docker_hardened_images | string | lower) in ['true', 'yes', '1']
+                or (
+                  (terrarium_docker_hardened_images | string | lower) == 'auto'
+                  and (terrarium_logto_docker_registry_config.stat.exists | default(false))
+                )
+              )
+              else (
+                terrarium_logto_postgres_image_mirror
+                if (
+                  (terrarium_docker_hardened_images | string | lower) not in ['false', 'no', '0']
+                  and (terrarium_docker_hardened_image_mirrors | string | lower) in ['true', 'yes', '1', 'auto']
+                )
+                else terrarium_logto_postgres_image_fallback
+              )
+            )
+          }}
+      when: terrarium_logto_postgres_image_effective is not defined
+      no_log: true
+
+    - name: Read Logto Postgres password from system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- cat /etc/terrarium/secrets/logto_postgres_password"
+      register: terrarium_logto_postgres_password_raw
+      changed_when: false
+      no_log: true
+
+    - name: Read Logto secret vault KEK from system instance
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- cat /etc/terrarium/secrets/logto_secret_vault_kek"
+      register: terrarium_logto_secret_vault_kek_raw
+      changed_when: false
+      no_log: true
+
+    - name: Create local Logto staging directory
+      ansible.builtin.file:
+        path: "{{ terrarium_logto_stage_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Render Logto compose stack for system instance
+      ansible.builtin.template:
+        src: docker-compose.yml.j2
+        dest: "{{ terrarium_logto_stage_dir }}/docker-compose.yml"
+        mode: "0600"
+      vars:
+        terrarium_logto_postgres_password: "{{ terrarium_logto_postgres_password_raw.stdout }}"
+        terrarium_logto_secret_vault_kek: "{{ terrarium_logto_secret_vault_kek_raw.stdout }}"
+      register: terrarium_logto_compose_render
+      no_log: true
+
+    - name: Render Logto systemd unit for system instance
+      ansible.builtin.template:
+        src: terrarium-logto.service.j2
+        dest: "{{ terrarium_logto_stage_dir }}/terrarium-logto.service"
+        mode: "0600"
+      register: terrarium_logto_unit_render
+
+    - name: Push Logto compose stack into system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc file push
+        {{ terrarium_logto_stage_dir }}/docker-compose.yml
+        {{ terrarium_logto_instance_name }}{{ terrarium_logto_dir }}/docker-compose.yml
+      changed_when: terrarium_logto_compose_render.changed
+      no_log: true
+
+    - name: Push Logto systemd unit into system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc file push
+        {{ terrarium_logto_stage_dir }}/terrarium-logto.service
+        {{ terrarium_logto_instance_name }}/etc/systemd/system/terrarium-logto.service
+      changed_when: terrarium_logto_unit_render.changed
+
+    - name: Enable Logto compose service inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- bash -lc
+        'systemctl daemon-reload && systemctl enable terrarium-logto.service'
+      changed_when: false
+
+    - name: Start or restart Logto compose service inside system instance
+      ansible.builtin.command: >-
+        /snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- systemctl
+        {{ 'restart' if (terrarium_logto_compose_render.changed or terrarium_logto_unit_render.changed) else 'start' }}
+        terrarium-logto.service
+
+    - name: Ensure host loopback proxies reach the Logto system instance
+      ansible.builtin.shell: |
+        set -euo pipefail
+        instance={{ terrarium_logto_instance_name | quote }}
+        ensure_proxy() {
+          name="$1"
+          port="$2"
+          listen="tcp:127.0.0.1:${port}"
+          connect="tcp:127.0.0.1:${port}"
+          current_listen="$(/snap/bin/lxc config device get "$instance" "$name" listen 2>/dev/null || true)"
+          current_connect="$(/snap/bin/lxc config device get "$instance" "$name" connect 2>/dev/null || true)"
+          if [ "$current_listen" = "$listen" ] && [ "$current_connect" = "$connect" ]; then
+            return
+          fi
+          /snap/bin/lxc config device remove "$instance" "$name" >/dev/null 2>&1 || true
+          /snap/bin/lxc config device add "$instance" "$name" proxy "listen=${listen}" "connect=${connect}" bind=host
+        }
+        ensure_proxy terrarium-logto-core {{ terrarium_logto_core_port }}
+        ensure_proxy terrarium-logto-admin {{ terrarium_logto_admin_port }}
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Disable self-hosted Logto service when not enabled
+  when: not (terrarium_logto_enabled | bool)
+  block:
+    - name: Stop and disable legacy host Logto compose service
+      ansible.builtin.systemd:
+        name: terrarium-logto.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Stop Logto service inside system instance when present
+      ansible.builtin.command: "/snap/bin/lxc exec {{ terrarium_logto_instance_name }} -- systemctl disable --now terrarium-logto.service"
+      register: terrarium_logto_container_disable
+      failed_when: false
+      changed_when: terrarium_logto_container_disable.rc == 0

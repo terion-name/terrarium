@@ -9,7 +9,7 @@ By default, Terrarium exposes:
 - `https://manage.<dashed-public-ip>.traefik.me` for Cockpit
 - `https://proxy.<dashed-public-ip>.traefik.me` for the Traefik dashboard
 - `https://lxd.<dashed-public-ip>.traefik.me` for the LXD API and UI
-- `https://auth.<dashed-public-ip>.traefik.me` for self-hosted ZITADEL when `--idp=local` is used
+- `https://auth.<dashed-public-ip>.traefik.me` for the self-hosted identity provider when `--idp local` is used
 
 You can override those endpoints with:
 
@@ -24,7 +24,7 @@ If you provide a custom root domain like `--domain example.com`, Terrarium autom
 - `manage.<domain>`
 - `proxy.<domain>`
 - `lxd.<domain>`
-- `auth.<domain>` (if self-hosted ZITADEL is enabled)
+- `auth.<domain>` (if a self-hosted identity provider is enabled)
 
 These domains are strictly for management and explicitly published services. A service running inside a container is not reachable from the outside until you deliberately publish it.
 
@@ -154,27 +154,38 @@ Terrarium supports two different ways to handle user logins.
 
 ### Mode 1: Local (`--idp local`)
 
-Terrarium deploys ZITADEL directly on the host and automatically provisions the clients and claims it needs.
+Terrarium deploys a self-hosted identity provider and automatically provisions the clients and claims it needs. The local provider is selected with `--idp-provider zitadel|logto` during install:
+
+```bash
+terrariumctl install --idp local --idp-provider zitadel
+terrariumctl install --idp local --idp-provider logto
+```
+
+If you omit `--idp-provider` in local mode, Terrarium keeps the compatibility default of local ZITADEL.
 
 Defaults:
 - Auth domain: `auth.<domain>` or `auth.<dashed-public-ip>.traefik.me`
 - Admin group: `terrarium-admins`
 
-Terrarium will automatically:
+With local ZITADEL, Terrarium will automatically:
 - Provision the necessary management role.
 - Grant that role to the bootstrap admin user.
 - Emit a flat `groups` claim for `oauth2-proxy` and LXD to read.
 - Keep route-auth callback URLs in the managed ZITADEL app up to date when you run `terrariumctl proxy sync`.
 
+With local Logto, Terrarium also uses the same `auth.<domain>` public endpoint, but it runs Logto plus Postgres in the managed IDP system instance. Bootstrap is unattended: Terrarium seeds the Logto database, creates the Terrarium OAuth clients, creates the admin role, assigns it to the bootstrap admin email when that user exists, and writes the local client outputs consumed by oauth2-proxy, LXD, and route auth. Logto defaults to the `roles` claim and `openid profile email roles` scopes for both management and LXD unless you override the claim/scope flags.
+
 ### Mode 2: External OIDC (`--idp oidc`)
 
-If you prefer to use an external provider (like Google Workspace, GitHub, or Auth0), Terrarium can connect to it.
+If you prefer to use an external provider (like Google Workspace, GitHub, Auth0, ZITADEL Cloud, or Logto Cloud), Terrarium can connect to it.
 
 You must provide the following:
 - `--oidc`
 - `--oidc-client`
 - `--oidc-secret-file` or `--oidc-secret`
 - `--admin-group`
+
+Provider-specific defaults are optional for external OIDC. If you omit `--idp-provider`, Terrarium keeps the compatibility default of generic OIDC with a `groups` claim and `openid profile email` scopes. If your external issuer is Logto or Logto Cloud, pass `--idp-provider logto`; Terrarium then defaults management, LXD, and route auth to the Logto `roles` claim and `openid profile email roles` scopes. You can still override those values with the claim/scope flags documented in the `terrariumctl` reference.
 
 **Requirements for your external provider:**
 You must configure your provider to allow the following callback URLs:
@@ -183,9 +194,9 @@ You must configure your provider to allow the following callback URLs:
 - `https://<lxd-domain>/oidc/callback`
 - If you plan to protect published app routes with `@auth`, you must also allow each route callback. A root route uses `https://<route-host>/oauth2/callback`; a path route like `/admin` uses `https://<route-host>/oauth2/admin/callback`.
 
-For external providers, including ZITADEL Cloud, Terrarium does not mutate your provider app automatically. Add new published-route callback URLs manually before or when you create the protected route.
+For external providers, including ZITADEL Cloud, Terrarium does not mutate your provider app automatically. The same is true for Logto Cloud. Add new published-route callback URLs manually before or when you create the protected route.
 
-Additionally, the external provider must emit a `groups` claim as a JSON string array containing the configured admin group. A provider-side role assignment is not enough unless the issued ID token or userinfo response actually contains that value in `groups`. Check your IDP documentation to set this up properly.
+Additionally, the external provider must emit the configured groups/roles claim as a JSON string array containing the configured admin group. Generic OIDC and ZITADEL default to `groups`; Logto defaults to `roles`. A provider-side role assignment is not enough unless the issued ID token or userinfo response actually contains that value in the claim Terrarium is configured to read. Check your IDP documentation to set this up properly.
 
 ---
 
@@ -232,6 +243,8 @@ Terrarium reuses the exact same external OIDC client for:
 - Published HTTP(S) routes protected with the `@auth` label
 
 If your identity provider requires you to use a separate client specifically for LXD, you can pass `--lxd-oidc-client` and `--lxd-oidc-secret-file`. For automated setups, always prefer using the secret-file flags over passing secrets directly as arguments.
+
+For external Logto/Logto Cloud, configure an application that allows the management callbacks above and requests/permits the `roles` scope. If you use a separate LXD application, allow `https://<lxd-domain>/oidc/callback` there and keep the same `roles` claim and `openid profile email roles` scopes unless you have explicitly overridden Terrarium's LXD claim/scope settings.
 
 ## The Admin Group
 

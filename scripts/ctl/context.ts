@@ -8,6 +8,15 @@ import {
   readConfigDocument,
   writeConfigDocument
 } from "../lib/config-store";
+import {
+  resolveEffectiveIdpProvider,
+  resolveLocalIdpOutputsPath,
+  resolveLxdOidcGroupsClaim,
+  resolveLxdOidcScopes,
+  resolveOidcGroupsClaim,
+  resolveOidcScopes,
+  type EffectiveIdpProvider
+} from "../lib/idp-provider";
 
 /** Shared command prefix used in CLI error messages and subprocess output. */
 export const PREFIX = "terrariumctl";
@@ -124,9 +133,50 @@ export function idpEnabled(config: MutableConfig): boolean {
   return ["local", "oidc"].includes(idpMode(config));
 }
 
-/** Returns whether Terrarium is currently using self-hosted ZITADEL mode. */
+/** Returns the explicitly persisted IDP provider, or an empty string when unset. */
+export function idpProvider(config: MutableConfig): string {
+  const provider = config["terrarium_idp_provider"];
+  return typeof provider === "string" ? provider.trim() : "";
+}
+
+/** Resolves the active IDP provider, including implicit local/external defaults. */
+export function effectiveIdpProvider(config: MutableConfig): EffectiveIdpProvider {
+  return resolveEffectiveIdpProvider(idpMode(config), idpProvider(config));
+}
+
+/** Returns the management OIDC groups claim for the effective provider. */
+export function oidcGroupsClaim(config: MutableConfig): string {
+  return resolveOidcGroupsClaim(config, effectiveIdpProvider(config));
+}
+
+/** Returns the management OIDC scopes for the effective provider. */
+export function oidcScopes(config: MutableConfig): string {
+  return resolveOidcScopes(config, effectiveIdpProvider(config));
+}
+
+/** Returns the LXD OIDC groups claim for the effective provider. */
+export function lxdOidcGroupsClaim(config: MutableConfig): string {
+  return resolveLxdOidcGroupsClaim(config, effectiveIdpProvider(config));
+}
+
+/** Returns the LXD OIDC scopes for the effective provider. */
+export function lxdOidcScopes(config: MutableConfig): string {
+  return resolveLxdOidcScopes(config, effectiveIdpProvider(config));
+}
+
+/** Returns the local IDP output file path, including legacy ZITADEL fallback. */
+export function localIdpOutputsPath(config: MutableConfig): string {
+  return resolveLocalIdpOutputsPath(config);
+}
+
+/** Returns whether Terrarium is currently using self-hosted IDP mode. */
 export function localIdpEnabled(config: MutableConfig): boolean {
   return idpMode(config) === "local";
+}
+
+/** Returns whether Terrarium is using the self-hosted ZITADEL provider. */
+export function localZitadelEnabled(config: MutableConfig): boolean {
+  return localIdpEnabled(config) && effectiveIdpProvider(config) === "zitadel";
 }
 
 /** Resolves the effective Terrarium admin group with a sensible local-IDP default. */

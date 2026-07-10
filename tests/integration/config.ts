@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import type { IntegrationCliOptions, IntegrationConfig } from "./types";
+import type { IntegrationCliOptions, IntegrationConfig, IntegrationIdpProvider } from "./types";
 
 function loadDotEnvFile(): void {
   const explicitPath = process.env.TERRARIUM_INTEGRATION_ENV_FILE?.trim();
@@ -32,6 +32,8 @@ function loadDotEnvFile(): void {
 
 loadDotEnvFile();
 
+const INTEGRATION_IDP_PROVIDERS = ["zitadel", "logto"] as const satisfies readonly IntegrationIdpProvider[];
+
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -42,6 +44,23 @@ function requiredEnv(name: string): string {
 
 function optionalEnv(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
+}
+
+function hasRequiredLogtoEnv(): boolean {
+  return ["LOGTO_TENANT_ENDPOINT", "LOGTO_M2M_CLIENT_ID", "LOGTO_M2M_CLIENT_SECRET"].every(name => Boolean(process.env[name]?.trim()));
+}
+
+function selectIntegrationIdpProvider(): IntegrationIdpProvider {
+  const explicitProvider = optionalEnv("TERRARIUM_INTEGRATION_IDP_PROVIDER");
+  if (!explicitProvider) {
+    return hasRequiredLogtoEnv() ? "logto" : "zitadel";
+  }
+  if (explicitProvider === "zitadel" || explicitProvider === "logto") {
+    return explicitProvider;
+  }
+  throw new Error(
+    `invalid TERRARIUM_INTEGRATION_IDP_PROVIDER "${explicitProvider}"; expected one of: ${INTEGRATION_IDP_PROVIDERS.join(", ")}`
+  );
 }
 
 function slugify(value: string): string {
@@ -94,6 +113,15 @@ export function loadIntegrationConfig(options: IntegrationCliOptions): Integrati
       ? privateKeyPath
       : ensureTempKey(`terrarium-${slug}-id_ed25519`, normalizeKeyContent(requiredEnv("HCLOUD_SSH_PRIVATE_KEY")));
 
+  const idpProvider = selectIntegrationIdpProvider();
+  const zitadelCloudIssuer = idpProvider === "zitadel" ? requiredEnv("ZITADEL_CLOUD_ISSUER") : optionalEnv("ZITADEL_CLOUD_ISSUER");
+  const zitadelCloudPat = idpProvider === "zitadel" ? requiredEnv("ZITADEL_CLOUD_PAT") : optionalEnv("ZITADEL_CLOUD_PAT");
+  const logtoTenantEndpoint = idpProvider === "logto" ? requiredEnv("LOGTO_TENANT_ENDPOINT") : optionalEnv("LOGTO_TENANT_ENDPOINT");
+  const logtoManagementApiResource = optionalEnv(
+    "LOGTO_MANAGEMENT_API_RESOURCE",
+    logtoTenantEndpoint ? `${logtoTenantEndpoint}/api` : ""
+  );
+
   return {
     suite: options.suite,
     only: new Set(options.only),
@@ -112,9 +140,15 @@ export function loadIntegrationConfig(options: IntegrationCliOptions): Integrati
     sshPublicKey: publicKey,
     sshUser: optionalEnv("HCLOUD_SSH_USER", "root"),
     ipDnsDomain: optionalEnv("TERRARIUM_INTEGRATION_IP_DNS_DOMAIN", "nip.io"),
-    zitadelCloudIssuer: requiredEnv("ZITADEL_CLOUD_ISSUER"),
-    zitadelCloudPat: requiredEnv("ZITADEL_CLOUD_PAT"),
+    idpProvider,
+    externalOidcIssuer: idpProvider === "zitadel" ? zitadelCloudIssuer : logtoTenantEndpoint,
+    zitadelCloudIssuer,
+    zitadelCloudPat,
     zitadelCloudOrgId: optionalEnv("ZITADEL_CLOUD_ORG_ID"),
+    logtoTenantEndpoint,
+    logtoM2mClientId: idpProvider === "logto" ? requiredEnv("LOGTO_M2M_CLIENT_ID") : optionalEnv("LOGTO_M2M_CLIENT_ID"),
+    logtoM2mClientSecret: idpProvider === "logto" ? requiredEnv("LOGTO_M2M_CLIENT_SECRET") : optionalEnv("LOGTO_M2M_CLIENT_SECRET"),
+    logtoManagementApiResource,
     s3Endpoint: requiredEnv("S3_ENDPOINT"),
     s3Bucket: requiredEnv("S3_BUCKET"),
     s3Region: requiredEnv("S3_REGION"),

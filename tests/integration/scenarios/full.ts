@@ -241,7 +241,7 @@ async function verifyTerrariumCluster(context: IntegrationContext, sshKeyId: num
       joiner.server.ipv4
     );
 
-    const fixture = await context.provisionZitadelFixture(
+    const fixture = await context.provisionExternalOidcFixture(
       `${context.config.slug}-cluster`,
       seed.domains,
       "terrarium-admins",
@@ -253,7 +253,7 @@ async function verifyTerrariumCluster(context: IntegrationContext, sshKeyId: num
       idpMode: "oidc",
       storageMode: "file",
       storageSize: "32G",
-      oidcIssuer: context.config.zitadelCloudIssuer,
+      oidcIssuer: context.externalOidcIssuer,
       oidcClientId: fixture.clientId,
       oidcClientSecret: fixture.clientSecret,
       lxdOidcClientId: fixture.lxdClientId,
@@ -264,7 +264,7 @@ async function verifyTerrariumCluster(context: IntegrationContext, sshKeyId: num
       idpMode: "oidc",
       storageMode: "file",
       storageSize: "32G",
-      oidcIssuer: context.config.zitadelCloudIssuer,
+      oidcIssuer: context.externalOidcIssuer,
       oidcClientId: fixture.clientId,
       oidcClientSecret: fixture.clientSecret,
       lxdOidcClientId: fixture.lxdClientId,
@@ -416,7 +416,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
   try {
     const composeRouteLabels = [`https://compose-${context.config.slug}.${rootDomain}@auth:agents,admins`];
     const routeCallbackUris = expectedRouteAuthRedirectUris(composeRouteLabels);
-    const externalFixture = await context.provisionZitadelFixture(
+    const externalFixture = await context.provisionExternalOidcFixture(
       `${context.config.slug}-full`,
       fileHost.domains,
       "terrarium-admins",
@@ -432,7 +432,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       idpMode: "oidc",
       storageMode: "file",
       storageSize: "32G",
-      oidcIssuer: context.config.zitadelCloudIssuer,
+      oidcIssuer: context.externalOidcIssuer,
       oidcClientId: externalFixture.clientId,
       oidcClientSecret: externalFixture.clientSecret,
       lxdOidcClientId: externalFixture.lxdClientId,
@@ -496,7 +496,7 @@ export async function runFullSuite(context: IntegrationContext): Promise<void> {
       throw new Error("expected bad S3 credentials to fail");
     }
     const badOidc = await fileSsh.execAllowFailure(
-      `terrariumctl set idp oidc --oidc ${shellArg(context.config.zitadelCloudIssuer)} --oidc-client bad --oidc-secret bad --admin-group terrarium-admins`
+      `terrariumctl set idp oidc --provider ${shellArg(context.config.idpProvider)} --oidc ${shellArg(context.externalOidcIssuer)} --oidc-client bad --oidc-secret bad --admin-group terrarium-admins`
     );
     if (badOidc.exitCode === 0) {
       throw new Error("expected bad OIDC credentials to fail");

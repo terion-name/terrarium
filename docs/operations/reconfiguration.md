@@ -35,7 +35,7 @@ Here are the commands you'll use to change how Terrarium behaves:
 ## Examples: How to Change Your Setup
 
 ### 1. Change Your Domain Name
-Want to switch from the default `traefik.me` domain to your own custom domain? 
+Want to switch from the default `traefik.me` domain to your own custom domain?
 
 ```bash
 terrariumctl set domains example.com
@@ -51,7 +51,7 @@ terrariumctl set emails --email ops@example.com --acme-email certs@example.com
 ```
 
 ### 3. Switch Between Local and External Logins (IDP)
-Decided you want to stop using the built-in ZITADEL login and switch to your company's Google Workspace or Auth0? 
+Decided you want to switch between built-in ZITADEL, built-in Logto, and your company's external OIDC provider?
 
 First, securely save your new OIDC secret to a file:
 ```bash
@@ -59,7 +59,7 @@ install -m 600 /dev/null /root/terrarium-oidc-secret
 printf '%s\n' 'super-secret' > /root/terrarium-oidc-secret
 ```
 
-Then, tell Terrarium to switch to external OIDC mode:
+Then, tell Terrarium to switch to external generic OIDC mode:
 ```bash
 terrariumctl set idp oidc \
   --oidc https://issuer.example.com \
@@ -67,9 +67,29 @@ terrariumctl set idp oidc \
   --oidc-secret-file /root/terrarium-oidc-secret \
   --admin-group terrarium-admins
 ```
-Terrarium will automatically test the connection to your new provider before applying the changes to ensure you don't accidentally lock yourself out.
+Terrarium will automatically test the connection to your new provider before applying the changes to ensure you don't accidentally lock yourself out. If you omit `--provider`, external OIDC keeps the compatibility defaults: `groups` claim and `openid profile email` scopes.
 
-*(Want to switch back to the built-in ZITADEL login? Just run `terrariumctl set idp local`)*
+For external Logto or Logto Cloud, select the Logto provider defaults:
+```bash
+terrariumctl set idp oidc --provider logto \
+  --oidc https://tenant.logto.app/oidc \
+  --oidc-client terrarium \
+  --oidc-secret-file /root/terrarium-oidc-secret \
+  --admin-group terrarium-admins
+```
+Logto defaults to the `roles` claim and `openid profile email roles` scopes for oauth2-proxy, LXD, and published-route auth unless you pass explicit claim/scope overrides.
+
+Switch back to local ZITADEL:
+```bash
+terrariumctl set idp local --provider zitadel
+```
+
+Switch to local Logto:
+```bash
+terrariumctl set idp local --provider logto
+```
+
+Switching local providers reuses the managed IDP system instance name and disables the other provider's compose service before enabling the selected provider. Review backups before switching providers on a production host.
 
 ### 4. Enable S3 Disaster Recovery Backups
 Ready to start automatically exporting your ZFS snapshots to an off-site S3 bucket?
@@ -110,5 +130,5 @@ terrariumctl set syncoid \
 Terrarium is designed to be non-disruptive. When you change a setting:
 - Traefik routing changes trigger a graceful Traefik restart.
 - IDP changes re-render and restart the `oauth2-proxy` without dropping active container traffic.
-- ZITADEL settings are updated inside the `terrarium-idp` container.
+- Local ZITADEL or Logto settings are updated inside the managed `terrarium-idp` system instance when local IDP mode is enabled.
 - Terrarium automatically runs `terrariumctl proxy sync` to ensure all your published apps reflect the new domains and authentication rules.

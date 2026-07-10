@@ -53,9 +53,46 @@ curl -fsSL https://github.com/terion-name/terrarium/releases/latest/download/ins
   --email admin@your-domain.tld \
   --acme-email certs@your-domain.tld \
   --idp local \
+  --idp-provider zitadel \
   --generate-root-pwd \
   --storage-mode file \
   --yes
+```
+
+### Identity Provider Examples
+
+Use the compatibility default local ZITADEL:
+
+```bash
+terrariumctl install --idp local --idp-provider zitadel
+```
+
+Use local Logto instead:
+
+```bash
+terrariumctl install --idp local --idp-provider logto
+```
+
+Local Logto is heavier than local ZITADEL: Terrarium runs Logto and Postgres in the managed IDP system instance, seeds Logto unattended, and provisions the Terrarium OIDC clients during `terrariumctl idp sync`.
+
+Use external generic OIDC, preserving the existing `groups` claim and `openid profile email` scope defaults:
+
+```bash
+terrariumctl install --idp oidc \
+  --oidc https://issuer.example.com \
+  --oidc-client terrarium \
+  --oidc-secret-file /root/terrarium-oidc-secret \
+  --admin-group terrarium-admins
+```
+
+Use external Logto or Logto Cloud, which defaults to the `roles` claim and `openid profile email roles` scopes:
+
+```bash
+terrariumctl install --idp oidc --idp-provider logto \
+  --oidc https://tenant.logto.app/oidc \
+  --oidc-client terrarium \
+  --oidc-secret-file /root/terrarium-oidc-secret \
+  --admin-group terrarium-admins
 ```
 
 ## Storage Modes
@@ -84,8 +121,11 @@ The installer will guide you through:
 - Root password setup for Cockpit when the host does not already have a usable local root password.
 - Domain setup (custom domain or default `traefik.me`).
 - IDP mode:
-  - `local` for self-hosted ZITADEL
+  - `local` for a self-hosted provider
   - `oidc` for an external OIDC provider
+- IDP provider:
+  - `zitadel` is the compatibility default for local installs
+  - `logto` selects local Logto or external Logto/Logto Cloud defaults
 - Storage mode and storage source.
 - Optional S3 archive backups.
 - Optional syncoid replication.
@@ -93,12 +133,12 @@ The installer will guide you through:
 Terrarium also verifies the most failure-prone integrations while you configure them:
 
 - Password and secret prompts are masked in interactive mode.
-- External OIDC settings are probed against the issuer, callback flow, and client credentials before install continues.
+- External OIDC settings are probed against the issuer, callback flow, and client credentials before install continues. External Logto uses the same verification path; no Logto Cloud management credential is required for normal Terrarium runtime config.
 - S3 settings are tested with a real write/delete probe against the configured bucket.
 
 ## Container Image Sources
 
-Terrarium pins the upstream oauth2-proxy and local ZITADEL Postgres image sources by digest. The default source order is:
+Terrarium pins the upstream oauth2-proxy and local identity-provider Postgres image sources by digest where Terrarium manages those images. The default source order is:
 
 - upstream Docker Hardened Images from `dhi.io` when Docker registry credentials exist on the host.
 - Terrarium's GHCR mirror of those same DHI multi-arch indexes when upstream DHI credentials are not present.

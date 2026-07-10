@@ -14,9 +14,11 @@ import type {
   ServerRecord,
   VolumeRecord
 } from "./types";
+import type { IntegrationOidcFixtureProgress, IntegrationOidcProvider } from "./provider/external-oidc";
 import { HetznerCloudProvider } from "./provider/hetzner";
 import { IpEncodedDnsProvider } from "./provider/ip-encoded-dns";
 import { ZitadelCloudProvider } from "./provider/zitadel-cloud";
+import { LogtoCloudProvider } from "./provider/logto-cloud";
 import { S3Provider } from "./provider/s3";
 import { CifsProvider } from "./provider/cifs";
 import { SshHost } from "./remote/ssh";
@@ -30,12 +32,21 @@ function describeCleanupStep(step: CleanupStep): string {
     return `Hetzner ${step.resourceType} ${step.resource.id}`;
   }
   if (step.resourceType === "user") {
-    return `ZITADEL user ${step.resource.userId}`;
+    return `External OIDC ${step.idpProvider} user ${step.resource.userId}`;
   }
   if (step.resourceType === "app") {
-    return `ZITADEL app ${step.appId}`;
+    return `External OIDC ${step.idpProvider} app ${step.appId}`;
   }
-  return `ZITADEL project ${step.projectId}`;
+  if (step.resourceType === "role") {
+    return `External OIDC ${step.idpProvider} role ${step.resource.roleId}`;
+  }
+  if (step.resourceType === "api-resource") {
+    return `External OIDC ${step.idpProvider} API resource ${step.resource.apiResourceId}`;
+  }
+  if (step.resourceType === "container") {
+    return `External OIDC ${step.idpProvider} container ${step.containerId}`;
+  }
+  return `External OIDC ${step.idpProvider} project ${step.projectId}`;
 }
 
 function ansibleWheelhousePlatform(binaryTarget: string): string {
@@ -55,6 +66,8 @@ export class IntegrationContext {
   readonly hetzner: HetznerCloudProvider;
   readonly publicDns: IpEncodedDnsProvider;
   readonly zitadelCloud: ZitadelCloudProvider;
+  readonly logtoCloud: LogtoCloudProvider;
+  readonly externalOidcProvider: IntegrationOidcProvider;
   readonly s3: S3Provider;
   readonly cifs: CifsProvider;
   readonly results: ScenarioResult[] = [];
@@ -82,6 +95,8 @@ export class IntegrationContext {
     this.hetzner = new HetznerCloudProvider(this.config, this.logger.child("hetzner"));
     this.publicDns = new IpEncodedDnsProvider(this.config, this.logger.child("public-dns"));
     this.zitadelCloud = new ZitadelCloudProvider(this.config, this.logger.child("zitadel-cloud"));
+    this.logtoCloud = new LogtoCloudProvider(this.config, this.logger.child("logto-cloud"));
+    this.externalOidcProvider = this.config.idpProvider === "logto" ? this.logtoCloud : this.zitadelCloud;
     this.s3 = new S3Provider(this.config, this.logger.child("s3"));
     this.cifs = new CifsProvider(this.config, this.logger.child("cifs"));
   }
@@ -168,6 +183,10 @@ export class IntegrationContext {
     };
   }
 
+  get externalOidcIssuer(): string {
+    return this.externalOidcProvider.issuer;
+  }
+
   async registerHetznerKey(name: string): Promise<number> {
     const publicKey = readFileSync(this.config.sshPublicKey, "utf8");
     const { id, reused } = await this.hetzner.createSshKey(name, publicKey);
@@ -205,6 +224,58 @@ export class IntegrationContext {
     const volume = await this.hetzner.attachVolume(volumeId, serverId);
     this.resources.recordHetznerVolume({ ...volume, label, serverId });
     return volume;
+  }
+
+  async provisionExternalOidcFixture(
+    slug: string,
+    domains: DomainBundle,
+    adminGroup: string,
+    routeCallbackUris: string[] = [],
+    extraDomains: DomainBundle[] = []
+  ): Promise<ExternalOidcFixture> {
+    return await this.externalOidcProvider.provisionFixture(slug, domains, adminGroup, routeCallbackUris, { extraDomains }, (progress) => {
+      this.recordExternalOidcFixtureProgress(this.externalOidcProvider.provider, progress);
+    });
+  }
+
+  async cleanupStaleExternalOidcFixtures(): Promise<void> {
+    this.logger.info(`cleanup stale ${this.externalOidcProvider.provider} integration fixtures`);
+    await this.externalOidcProvider.cleanupStaleIntegrationFixtures();
+  }
+
+  private recordExternalOidcFixtureProgress(
+    idpProvider: IntegrationConfig["idpProvider"],
+    progress: IntegrationOidcFixtureProgress
+  ): void {
+    if (progress.type === "project") {
+      this.resources.recordExternalOidcFixtureProject({
+        idpProvider,
+        slug: progress.fixtureSlug,
+        projectId: progress.projectId,
+        projectName: progress.projectName,
+        adminGroup: progress.adminGroup,
+        routeGroups: progress.routeGroups
+      });
+      return;
+    }
+    if (progress.type === "app") {
+      this.resources.recordExternalOidcFixtureApp({
+        idpProvider,
+        slug: progress.fixtureSlug,
+        projectId: progress.projectId,
+        appId: progress.appId,
+        appName: progress.appName
+      });
+      return;
+    }
+    this.resources.recordExternalOidcFixtureUser({
+      idpProvider,
+      slug: progress.fixtureSlug,
+      kind: progress.kind,
+      userId: progress.userId,
+      email: progress.email,
+      roles: progress.roles
+    });
   }
 
   async provisionZitadelFixture(
@@ -348,16 +419,13 @@ export class IntegrationContext {
       await this.hetzner.deleteSshKey(step.resource.id);
       return;
     }
-    if (step.provider === "zitadel" && step.resourceType === "user") {
-      await this.zitadelCloud.deleteUser(step.resource.userId);
-      return;
-    }
-    if (step.provider === "zitadel" && step.resourceType === "app") {
-      await this.zitadelCloud.deleteApp(step.projectId, step.appId);
-      return;
-    }
-    if (step.provider === "zitadel" && step.resourceType === "project") {
-      await this.zitadelCloud.deleteProject(step.projectId);
+    if (step.provider === "external-oidc") {
+      if (step.idpProvider !== this.externalOidcProvider.provider) {
+        throw new Error(
+          `external OIDC cleanup step targets ${step.idpProvider}, but selected provider is ${this.externalOidcProvider.provider}`
+        );
+      }
+      await this.externalOidcProvider.deleteFixtureResource(step);
     }
   }
 
@@ -374,16 +442,42 @@ export class IntegrationContext {
       this.resources.removeHetznerSshKey(step.resource.id);
       return;
     }
-    if (step.provider === "zitadel" && step.resourceType === "user") {
-      this.resources.removeZitadelFixtureUser(step.fixtureSlug, step.resource.userId);
-      return;
-    }
-    if (step.provider === "zitadel" && step.resourceType === "app") {
-      this.resources.removeZitadelFixtureApp(step.fixtureSlug);
-      return;
-    }
-    if (step.provider === "zitadel" && step.resourceType === "project") {
-      this.resources.removeZitadelFixtureProject(step.fixtureSlug);
+    if (step.provider === "external-oidc") {
+      if (step.resourceType === "user") {
+        if (step.idpProvider === "zitadel") {
+          this.resources.removeZitadelFixtureUser(step.fixtureSlug, step.resource.userId);
+        } else {
+          this.resources.removeExternalOidcFixtureUser(step.idpProvider, step.fixtureSlug, step.resource.userId);
+        }
+        return;
+      }
+      if (step.resourceType === "app") {
+        if (step.idpProvider === "zitadel") {
+          this.resources.removeZitadelFixtureApp(step.fixtureSlug, step.appId);
+        } else {
+          this.resources.removeExternalOidcFixtureApp(step.idpProvider, step.fixtureSlug, step.appId);
+        }
+        return;
+      }
+      if (step.resourceType === "role") {
+        this.resources.removeExternalOidcFixtureRole(step.idpProvider, step.fixtureSlug, step.resource.roleId);
+        return;
+      }
+      if (step.resourceType === "api-resource") {
+        this.resources.removeExternalOidcFixtureApiResource(step.idpProvider, step.fixtureSlug, step.resource.apiResourceId);
+        return;
+      }
+      if (step.resourceType === "container") {
+        this.resources.removeExternalOidcFixtureContainer(step.idpProvider, step.fixtureSlug);
+        return;
+      }
+      if (step.resourceType === "project") {
+        if (step.idpProvider === "zitadel") {
+          this.resources.removeZitadelFixtureProject(step.fixtureSlug);
+        } else {
+          this.resources.removeExternalOidcFixtureProject(step.idpProvider, step.fixtureSlug);
+        }
+      }
     }
   }
 

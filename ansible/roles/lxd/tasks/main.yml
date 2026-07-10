@@ -546,22 +546,36 @@
   changed_when: false
 
 - name: Configure LXD OIDC groups claim when provided
-  ansible.builtin.command: "/snap/bin/lxc config set oidc.groups.claim {{ terrarium_lxd_oidc_groups_claim }}"
+  ansible.builtin.command: "/snap/bin/lxc config set oidc.groups.claim {{ terrarium_lxd_oidc_groups_claim_effective }}"
   when:
     - terrarium_idp_mode == 'oidc'
     - terrarium_lxd_oidc_issuer_effective | default('', true) | length > 0
-    - terrarium_lxd_oidc_groups_claim | length > 0
+    - terrarium_lxd_oidc_groups_claim_effective | length > 0
+  changed_when: false
+
+- name: Configure LXD OIDC scopes when provided
+  ansible.builtin.command:
+    argv:
+      - /snap/bin/lxc
+      - config
+      - set
+      - oidc.scopes
+      - "{{ terrarium_lxd_oidc_scopes_effective }}"
+  when:
+    - terrarium_idp_mode == 'oidc'
+    - terrarium_lxd_oidc_issuer_effective | default('', true) | length > 0
+    - terrarium_lxd_oidc_scopes_effective | length > 0
   changed_when: false
 
 - name: Read ZITADEL outputs for LXD local client configuration
   ansible.builtin.slurp:
-    src: "{{ terrarium_zitadel_outputs_path }}"
+    src: "{{ terrarium_zitadel_outputs_path_effective | default(terrarium_zitadel_outputs_path) }}"
   register: terrarium_lxd_zitadel_outputs_raw
   failed_when: false
   changed_when: false
   when:
     - terrarium_idp_mode == 'local'
-    - terrarium_zitadel_outputs_path is defined
+    - (terrarium_zitadel_outputs_path_effective | default(terrarium_zitadel_outputs_path, true)) | length > 0
 
 - name: Parse ZITADEL outputs for LXD local client configuration
   ansible.builtin.set_fact:

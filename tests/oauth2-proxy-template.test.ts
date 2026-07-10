@@ -25,6 +25,56 @@ describe("management oauth2-proxy template", () => {
     expect(template).not.toContain("terrarium_oauth2_proxy_cookie_domain");
   });
 
+  test("uses provider-aware OIDC claim and scope variables", () => {
+    const defaults = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/defaults/main.yml"), "utf8");
+    const tasks = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/tasks/main.yml"), "utf8");
+    const template = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/templates/oauth2-proxy.cfg.j2"), "utf8");
+
+    expect(defaults).toContain("terrarium_oauth2_proxy_oidc_groups_claim");
+    expect(defaults).toContain("terrarium_oidc_groups_claim_effective");
+    expect(defaults).toContain("terrarium_oauth2_proxy_oidc_scopes");
+    expect(defaults).toContain("terrarium_oidc_scopes_effective");
+    expect(template).toContain('oidc_groups_claim = "{{ terrarium_oauth2_proxy_oidc_groups_claim }}"');
+    expect(template).toContain('scope = "{{ terrarium_oauth2_proxy_oidc_scopes }}"');
+    expect(template).not.toContain('oidc_groups_claim = "groups"');
+    expect(template).not.toContain('scope = "openid profile email"');
+    expect(tasks).toContain("terrarium_oauth2_proxy_oidc_issuer_effective");
+  });
+
+  test("consumes provider-neutral local IdP outputs with legacy ZITADEL fallback", () => {
+    const tasks = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/tasks/main.yml"), "utf8");
+
+    expect(tasks).toContain("Resolve local IdP output path for oauth2-proxy");
+    expect(tasks).toContain("terrarium_oauth2_proxy_local_idp_outputs_path_effective");
+    expect(tasks).toContain("terrarium_local_idp_outputs_path_effective");
+    expect(tasks).toContain("terrarium_local_idp_outputs_path");
+    expect(tasks).toContain("terrarium_zitadel_outputs_path_effective");
+    expect(tasks).toContain("terrarium_zitadel_outputs_path");
+    expect(tasks).toContain("'/etc/terrarium/zitadel-apps.json'");
+    expect(tasks.indexOf("terrarium_local_idp_outputs_path_effective")).toBeLessThan(
+      tasks.indexOf("terrarium_local_idp_outputs_path | default")
+    );
+    expect(tasks.indexOf("terrarium_local_idp_outputs_path | default")).toBeLessThan(
+      tasks.indexOf("terrarium_zitadel_outputs_path_effective")
+    );
+    expect(tasks.indexOf("terrarium_zitadel_outputs_path_effective")).toBeLessThan(
+      tasks.indexOf("terrarium_zitadel_outputs_path | default")
+    );
+    expect(tasks.indexOf("terrarium_zitadel_outputs_path | default")).toBeLessThan(
+      tasks.indexOf("'/etc/terrarium/zitadel-apps.json'")
+    );
+
+    expect(tasks).toContain("Read local IdP application outputs for oauth2-proxy");
+    expect(tasks).toContain("Parse local IdP application outputs for oauth2-proxy");
+    expect(tasks).toContain("terrarium_oauth2_proxy_local_idp_outputs_raw");
+    expect(tasks).toContain("terrarium_oauth2_proxy_local_idp_outputs.cockpit_client_id.value");
+    expect(tasks).toContain("terrarium_oauth2_proxy_local_idp_outputs.cockpit_client_secret.value");
+    expect(tasks).toContain("terrarium_oauth2_proxy_local_idp_outputs.issuer.value");
+    expect(tasks).toContain("default(terrarium_oidc_issuer_effective | default('', true), true)");
+    expect(tasks).not.toContain("Read ZITADEL application outputs for oauth2-proxy");
+    expect(tasks).not.toContain("terrarium_oauth2_proxy_zitadel_outputs");
+  });
+
   test("runs oauth2-proxy without root while keeping secret config non-world-readable", () => {
     const defaults = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/defaults/main.yml"), "utf8");
     const compose = readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/templates/docker-compose.yml.j2"), "utf8");

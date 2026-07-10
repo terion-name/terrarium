@@ -4,6 +4,7 @@
         domains:
           - main: "{{ domain }}"
 {% endmacro %}
+{% set traefik_idp_provider_effective = terrarium_idp_provider_effective | default('zitadel', true) %}
 http:
   middlewares:
     admin-forward-auth:
@@ -24,7 +25,7 @@ http:
       redirectRegex:
         regex: "^https?://([^/]+)/?$"
         replacement: "https://$1/dashboard/"
-{% if terrarium_idp_mode == 'local' %}
+{% if terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'zitadel' %}
     zitadel-root-rewrite:
       replacePath:
         path: /ui/v2/login/
@@ -89,7 +90,7 @@ http:
         - management-security-headers
       service: lxd
 {{ terrarium_host_tls(terrarium_lxd_domain) }}
-{% if terrarium_idp_mode == 'local' %}
+{% if terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'zitadel' %}
     zitadel-root:
       entryPoints:
         - websecure
@@ -122,6 +123,14 @@ http:
       service: zitadel-api
       priority: 100
 {{ terrarium_host_tls(terrarium_auth_domain) }}
+{% elif terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'logto' %}
+    logto-core:
+      entryPoints:
+        - websecure
+      rule: Host(`{{ terrarium_auth_domain }}`)
+      service: logto-core
+      priority: 100
+{{ terrarium_host_tls(terrarium_auth_domain) }}
 {% endif %}
   services:
     oauth2-proxy:
@@ -138,7 +147,7 @@ http:
         passHostHeader: true
         servers:
           - url: https://127.0.0.1:8443
-{% if terrarium_idp_mode == 'local' %}
+{% if terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'zitadel' %}
     zitadel-login:
       loadBalancer:
         servers:
@@ -147,6 +156,11 @@ http:
       loadBalancer:
         servers:
           - url: h2c://127.0.0.1:8082
+{% elif terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'logto' %}
+    logto-core:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:{{ terrarium_logto_core_port | default(3001) }}
 {% endif %}
   serversTransports:
     lxd-loopback:

@@ -1,5 +1,7 @@
+{% set traefik_idp_provider_effective = terrarium_idp_provider_effective | default('zitadel', true) %}
 http:
   routers:
+{% if traefik_idp_provider_effective == 'zitadel' %}
     zitadel-root-bootstrap:
       entryPoints:
         - bootstrapweb
@@ -28,3 +30,11 @@ http:
       rule: Host(`{{ terrarium_auth_domain }}`)
       service: zitadel-api@file
       priority: 100
+{% elif traefik_idp_provider_effective == 'logto' %}
+    logto-core-bootstrap:
+      entryPoints:
+        - bootstrapweb
+      rule: Host(`{{ terrarium_auth_domain }}`)
+      service: logto-core@file
+      priority: 100
+{% endif %}

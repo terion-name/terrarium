@@ -277,6 +277,87 @@ describe("terrarium route auth generation", () => {
     expect(Object.values(profileConfigs)[0]).not.toContain('oidc_issuer_url = "https://auth.example.test/"');
   });
 
+  test("skips ZITADEL-only local route client sync for local Logto", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+    const syncStart = source.indexOf("async function syncLocalRoutesClient");
+    const providerGuard = source.indexOf('if (idpProvider !== "zitadel")', syncStart);
+    const patRead = source.indexOf("readLocalZitadelPat(config)", syncStart);
+
+    expect(providerGuard).toBeGreaterThan(syncStart);
+    expect(patRead).toBeGreaterThan(providerGuard);
+  });
+
+  test("uses provider-aware OIDC claim and scope defaults for route auth", () => {
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth")], routeAuthConfig);
+    const [profile] = profiles;
+    const { profileConfigs: zitadelProfileConfigs } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_idp_provider: "zitadel" },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+    const { profileConfigs: logtoProfileConfigs } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_idp_provider: "logto" },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+
+    expect(zitadelProfileConfigs[profile.containerName]).toContain('oidc_groups_claim = "groups"');
+    expect(zitadelProfileConfigs[profile.containerName]).toContain('scope = "openid profile email"');
+    expect(logtoProfileConfigs[profile.containerName]).toContain('oidc_groups_claim = "roles"');
+    expect(logtoProfileConfigs[profile.containerName]).toContain('scope = "openid profile email roles"');
+  });
+
+  test("lets explicit route auth OIDC claim and scope overrides win over provider defaults", () => {
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth")], routeAuthConfig);
+    const [profile] = profiles;
+    const { profileConfigs } = buildRouteAuthComposeArtifacts(
+      {
+        ...routeAuthConfig,
+        terrarium_idp_provider: "logto",
+        terrarium_oidc_groups_claim: "groups",
+        terrarium_oidc_scopes: "openid profile email custom"
+      },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+
+    expect(profileConfigs[profile.containerName]).toContain('oidc_groups_claim = "groups"');
+    expect(profileConfigs[profile.containerName]).toContain('scope = "openid profile email custom"');
+  });
+
+  test("uses the local Logto OIDC issuer path for route auth", () => {
+    const { profiles } = buildRouteAuthProfiles([container("admin", "https://app.example.test:8080/admin@auth")], {
+      ...routeAuthConfig,
+      terrarium_idp_mode: "local",
+      terrarium_idp_provider: "logto"
+    });
+    const { profileConfigs } = buildRouteAuthComposeArtifacts(
+      { ...routeAuthConfig, terrarium_idp_mode: "local", terrarium_idp_provider: "logto" },
+      profiles,
+      "routes-client",
+      "routes-secret",
+      "0123456789abcdef"
+    );
+
+    expect(Object.values(profileConfigs)[0].split("\n")).toContain('oidc_issuer_url = "https://auth.example.test/oidc"');
+    expect(Object.values(profileConfigs)[0].split("\n")).not.toContain('oidc_issuer_url = "https://auth.example.test"');
+  });
+
+  test("uses the shared local IDP outputs path helper for route auth local reads", () => {
+    const source = readFileSync(join(repoRoot, "scripts/terrarium-traefik-sync.ts"), "utf8");
+
+    expect(source).toContain("function resolveLocalIdpOutputsPath");
+    expect(source).toContain('configString(config, "terrarium_local_idp_outputs_path")');
+    expect(source).toContain('configString(config, "terrarium_zitadel_outputs_path")');
+    expect(source).not.toContain('readJsonFile<Record<string, { value?: string }>>("/etc/terrarium/zitadel-apps.json", {})');
+  });
+
   test("generates policy-specific forwardAuth middleware and oauth callback routes without query policy", () => {
     const { dynamicYaml, authProfiles, errors } = buildDynamicConfig(
       [
@@ -583,5 +664,35 @@ describe("terrarium proxy sync failure handling", () => {
     expect(message).toContain("host=app.example.test groups=admins,operators port=4182");
     expect(message).toContain("http://127.0.0.1:4182/ping");
     expect(message).toContain('last stderr/stdout: stderr="curl: (7) Failed to connect" stdout="<empty>"');
+  });
+});
+
+describe("local auth Traefik templates", () => {
+  test("provider-gates local auth-domain Traefik routes without routing Logto admin publicly", () => {
+    const dynamicTemplate = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/terrarium-dynamic.yml.j2"), "utf8");
+    const bootstrapTemplate = readFileSync(join(repoRoot, "ansible/roles/traefik/templates/bootstrap-routes.yml.j2"), "utf8");
+    const dynamicRouterLogtoBranch = dynamicTemplate.slice(
+      dynamicTemplate.indexOf("{% elif terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'logto' %}"),
+      dynamicTemplate.indexOf("{% endif %}\n  services:")
+    );
+    const bootstrapLogtoBranch = bootstrapTemplate.slice(
+      bootstrapTemplate.indexOf("{% elif traefik_idp_provider_effective == 'logto' %}"),
+      bootstrapTemplate.indexOf("{% endif %}")
+    );
+
+    expect(dynamicTemplate).toContain("{% set traefik_idp_provider_effective = terrarium_idp_provider_effective | default('zitadel', true) %}");
+    expect(dynamicTemplate).toContain("{% if terrarium_idp_mode == 'local' and traefik_idp_provider_effective == 'zitadel' %}\n    zitadel-root-rewrite:");
+    expect(dynamicRouterLogtoBranch).toContain("    logto-core:\n      entryPoints:");
+    expect(dynamicRouterLogtoBranch).toContain("      rule: Host(`{{ terrarium_auth_domain }}`)\n      service: logto-core");
+    expect(dynamicTemplate).toContain("          - url: http://127.0.0.1:{{ terrarium_logto_core_port | default(3001) }}");
+    expect(dynamicTemplate).not.toContain("          - url: http://127.0.0.1:{{ terrarium_logto_admin_port | default(3002) }}");
+    expect(dynamicRouterLogtoBranch).not.toContain("logto-admin");
+    expect(dynamicRouterLogtoBranch).not.toContain("zitadel-root-rewrite");
+    expect(dynamicRouterLogtoBranch).not.toContain("zitadel-strip-api");
+
+    expect(bootstrapTemplate).toContain("{% set traefik_idp_provider_effective = terrarium_idp_provider_effective | default('zitadel', true) %}");
+    expect(bootstrapLogtoBranch).toContain("    logto-core-bootstrap:\n      entryPoints:");
+    expect(bootstrapLogtoBranch).toContain("      rule: Host(`{{ terrarium_auth_domain }}`)\n      service: logto-core@file");
+    expect(bootstrapLogtoBranch).not.toContain("logto-admin");
   });
 });

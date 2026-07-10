@@ -1,6 +1,9 @@
 terrarium_lxd_snap_channel: latest/stable
 terrarium_lxd_auth_group: terrarium-management
-terrarium_lxd_oidc_groups_claim: groups
+terrarium_lxd_oidc_groups_claim: ""
+terrarium_lxd_oidc_scopes: ""
+terrarium_lxd_oidc_groups_claim_effective: "{{ terrarium_lxd_oidc_groups_claim | default(terrarium_oidc_groups_claim_effective | default(terrarium_oidc_groups_claim | default('groups', true), true), true) }}"
+terrarium_lxd_oidc_scopes_effective: "{{ terrarium_lxd_oidc_scopes | default(terrarium_oidc_scopes_effective | default(terrarium_oidc_scopes | default('openid profile email', true), true), true) }}"
 terrarium_lxd_idp_group_state_path: "{{ terrarium_state_dir }}/lxd-idp-admin-group"
 terrarium_cluster_enabled: false
 terrarium_cluster_wireguard_enabled: false

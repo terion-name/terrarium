@@ -1,9 +1,10 @@
-terrarium_zitadel_enabled: "{{ terrarium_idp_mode == 'local' }}"
+terrarium_zitadel_enabled: "{{ terrarium_idp_mode == 'local' and (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('zitadel', true), true) | lower) == 'zitadel' }}"
 terrarium_zitadel_dir: "{{ terrarium_state_dir }}/zitadel"
 terrarium_zitadel_postgres_dir: "{{ terrarium_zitadel_dir }}/postgres"
 terrarium_zitadel_postgres_uid: 70
 terrarium_zitadel_postgres_gid: 70
 terrarium_zitadel_bootstrap_dir: "{{ terrarium_zitadel_dir }}/bootstrap"
+terrarium_local_idp_outputs_path: ""
 terrarium_zitadel_outputs_path: /etc/terrarium/zitadel-apps.json
 terrarium_zitadel_stage_dir: "{{ terrarium_state_dir }}/zitadel-container"
 terrarium_zitadel_instance_name: terrarium-idp

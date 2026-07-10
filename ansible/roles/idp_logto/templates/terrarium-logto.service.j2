@@ -1,0 +1,16 @@
+[Unit]
+Description=Terrarium self-hosted Logto stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ terrarium_logto_dir }}
+ExecStart=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 --remove-orphans
+ExecStop=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml down
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

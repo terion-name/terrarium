@@ -34,9 +34,9 @@
 | `terrariumctl mount add` | required: `protocol`, `hostPath`, `address`, `username`; optional: `-p/--password`, `--password-file`, `--container`, `--seal` | password prompt, host `uid=0`, host `gid=0`, container-aware uid/gid when `--container` is set, `file_mode=0660`, `dir_mode=0770`, `--seal=true` | Creates a managed host SMB/CIFS mount, stores credentials under `/etc/terrarium/mounts`, writes a managed `/etc/fstab` block, and mounts it immediately. |
 | `terrariumctl mount remove` | required: `hostPath` | n/a | Unmounts a Terrarium-managed host mount, removes its managed `/etc/fstab` block, and deletes its managed credentials file. |
 | `terrariumctl mount list` | none | n/a | Lists Terrarium-managed host mounts, including whether each one is currently mounted. |
-| `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL applications, Terrarium management role claims, and related local OIDC settings. No-op unless ZITADEL mode is enabled. |
-| `terrariumctl idp status` | none | n/a | Shows the managed `terrarium-idp` instance and its ZITADEL compose services. |
-| `terrariumctl idp logs` | optional: `--lines` | `120` | Prints recent ZITADEL compose logs from inside the managed IDP instance. |
+| `terrariumctl idp sync` | none | n/a | Reconciles self-hosted ZITADEL or Logto applications, Terrarium management roles/claims, local OIDC settings, and client output files. No-op unless local IDP mode is enabled. |
+| `terrariumctl idp status` | none | n/a | Shows the managed `terrarium-idp` instance and provider-specific compose services. |
+| `terrariumctl idp logs` | optional: `--lines` | `120` | Prints recent provider-specific compose logs from inside the managed IDP instance. |
 | `terrariumctl idp backup` | none | local snapshot; exports to S3 when enabled | Creates a manual recursive snapshot of the managed IDP instance. |
 | `terrariumctl idp restore` | optional: `--source`, `--at`, `--as-new` | `--source local`, latest restore point, in-place restore | Restores the managed IDP instance through the normal Terrarium backup/restore flow. |
 | `terrariumctl set domains` | optional `rootDomain`, plus override flags | `manage.<rootDomain>`, `lxd.<rootDomain>`, `auth.<rootDomain>` when applicable | Updates the root domain, derived Terrarium subdomains, re-verifies external OIDC when needed, and re-runs reconciliation. |
@@ -169,7 +169,8 @@ trm image delete golden-web
 | `--manage-domain` | domain | no | `manage.<domain>` when `--domain` is set, otherwise `manage.<dashed-public-ip>.traefik.me` | Overrides the Cockpit domain. |
 | `--proxy-domain` | domain | no | `proxy.<domain>` when `--domain` is set, otherwise `proxy.<dashed-public-ip>.traefik.me` | Overrides the Traefik dashboard domain. |
 | `--lxd-domain` | domain | no | `lxd.<domain>` when `--domain` is set, otherwise `lxd.<dashed-public-ip>.traefik.me` | Overrides the LXD domain. |
-| `--idp` | `local` or `oidc` | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Selects whether Terrarium uses self-hosted ZITADEL or an external OIDC issuer. |
+| `--idp` | `local` or `oidc` | yes in non-interactive mode; no in interactive mode | prompted in interactive mode | Selects whether Terrarium uses a self-hosted provider or an external OIDC issuer. |
+| `--idp-provider` | `zitadel` or `logto` | no | local mode defaults to `zitadel`; external OIDC defaults to generic provider behavior when omitted | Selects provider-specific defaults. `logto` uses the `roles` claim and `openid profile email roles` scopes. |
 | `--admin-group` | group name | yes when `--idp=oidc`; no otherwise | `terrarium-admins` when `--idp=local`, otherwise prompted in interactive mode | Sets the management admin group that is allowed into Cockpit and LXD. |
 | `--oidc` | issuer URL | yes when `--idp=oidc`; no otherwise | derived from `https://<auth-domain>` when `--idp=local` | Sets the OIDC issuer URL. |
 | `--oidc-client` | client ID | yes when `--idp=oidc`; no otherwise | none | Sets the external OIDC client ID used by Cockpit's oauth2-proxy, LXD, and published-route auth. |
@@ -178,7 +179,11 @@ trm image delete golden-web
 | `--lxd-oidc-client` | client ID | no | falls back to `--oidc-client` | Uses a separate external OIDC client for LXD. |
 | `--lxd-oidc-secret` | client secret | no | falls back to `--oidc-secret` | Sets the separate LXD OIDC client secret. Prefer `--lxd-oidc-secret-file` for automation. |
 | `--lxd-oidc-secret-file` | path | no | none | Reads the separate LXD OIDC client secret from a root-readable file. |
-| `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and self-hosted ZITADEL is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the ZITADEL auth domain. |
+| `--auth-domain` | domain | no | `auth.<domain>` when `--domain` is set and local IDP is enabled, otherwise `auth.<dashed-public-ip>.traefik.me` | Overrides the local identity-provider auth domain. |
+| `--oidc-groups-claim` | claim name | no | `roles` for Logto, otherwise `groups` | Overrides the management oauth2-proxy groups/roles claim. |
+| `--oidc-scopes` | space-separated scopes | no | `openid profile email roles` for Logto, otherwise `openid profile email` | Overrides the management oauth2-proxy OIDC scopes. |
+| `--lxd-oidc-groups-claim` | claim name | no | follows provider default unless set | Overrides the LXD OIDC groups/roles claim. |
+| `--lxd-oidc-scopes` | space-separated scopes | no | follows provider default unless set | Overrides the LXD OIDC scopes. |
 | `--zitadel-admin-email` | email address | no | falls back to `--email` | Sets the initial admin email for self-hosted ZITADEL. |
 | `--generate-root-pwd` | none | yes in non-interactive mode when root has no usable local password unless `--root-pwd-file` is passed; no otherwise | none | Generates a strong Cockpit root password and saves it to `/etc/terrarium/secrets/cockpit_root_password` with root-only permissions. |
 | `--root-pwd-file` | path | yes in non-interactive mode when root has no usable local password unless `--generate-root-pwd` is passed; no otherwise | none | Reads the Cockpit root password from a local file. |
@@ -202,7 +207,7 @@ Install verification notes:
 
 - Interactive password and secret prompts are masked.
 - For automation, use `--generate-root-pwd` or `--root-pwd-file` for Cockpit, and prefer `--oidc-secret-file`, `--lxd-oidc-secret-file`, and `--s3-secret-key-file` over argv secrets.
-- In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials.
+- In interactive mode, external OIDC is not accepted until Terrarium can reach the issuer, confirm the callback flow looks valid, and probe the client credentials. External Logto uses the same checks and does not require Logto Cloud management credentials for runtime configuration.
 - In interactive mode, S3 is not accepted until Terrarium can reach the bucket and complete a write/delete verification object cycle.
 - In non-interactive mode, the same checks run once and the install exits on failure.
 
@@ -661,7 +666,7 @@ Behavior:
 | `--manage-domain` | domain | no | `manage.<rootDomain>` | Overrides the Cockpit domain. |
 | `--proxy-domain` | domain | no | `proxy.<rootDomain>` | Overrides the Traefik dashboard domain. |
 | `--lxd-domain` | domain | no | `lxd.<rootDomain>` | Overrides the LXD domain. |
-| `--auth-domain` | domain | no | `auth.<rootDomain>` when self-hosted ZITADEL is enabled | Overrides the ZITADEL domain. |
+| `--auth-domain` | domain | no | `auth.<rootDomain>` when a local IDP is enabled | Overrides the local identity-provider domain. |
 
 ## set emails
 
@@ -676,7 +681,8 @@ Behavior:
 | Flag | Argument | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | positional mode | `local` or `oidc` | yes | none | Switches the Terrarium IDP mode. |
-| `--auth-domain` | domain | no | derived from the current root domain or IP when mode is `local` | Overrides the self-hosted ZITADEL auth domain. |
+| `--provider` / `--idp-provider` | `zitadel` or `logto` | no | local mode defaults to `zitadel`; external OIDC defaults to generic provider behavior when omitted | Selects provider-specific defaults. `--idp-provider` is an alias for `--provider`. |
+| `--auth-domain` | domain | no | derived from the current root domain or IP when mode is `local` | Overrides the self-hosted identity-provider auth domain. |
 | `--admin-group` | group name | required when mode is `oidc`; optional otherwise | existing configured value, or `terrarium-admins` when mode is `local` | Sets the management admin group for Cockpit and LXD authorization. |
 | `--oidc` | issuer URL | required when mode is `oidc` and no issuer is already configured | existing configured issuer, or derived from `auth-domain` when mode is `local` | Sets the OIDC issuer URL. |
 | `--oidc-client` | client ID | required when mode is `oidc` and no client ID is already configured | existing configured value | Sets the external OIDC client ID shared by Cockpit's oauth2-proxy, LXD, and published-route auth. |
@@ -685,6 +691,11 @@ Behavior:
 | `--lxd-oidc-client` | client ID | no | falls back to `--oidc-client` | Uses a separate external OIDC client for LXD. |
 | `--lxd-oidc-secret` | client secret | no | falls back to `--oidc-secret` | Sets the separate LXD OIDC client secret. Prefer `--lxd-oidc-secret-file` for automation. |
 | `--lxd-oidc-secret-file` | path | no | none | Reads the separate LXD OIDC client secret from a root-readable file. |
+| `--oidc-groups-claim` | claim name | no | `roles` for Logto, otherwise `groups` | Overrides the management oauth2-proxy groups/roles claim. |
+| `--oidc-scopes` | space-separated scopes | no | `openid profile email roles` for Logto, otherwise `openid profile email` | Overrides the management oauth2-proxy OIDC scopes. |
+| `--lxd-oidc-groups-claim` | claim name | no | follows provider default unless set | Overrides the LXD OIDC groups/roles claim. |
+| `--lxd-oidc-scopes` | space-separated scopes | no | follows provider default unless set | Overrides the LXD OIDC scopes. |
+| `--local-idp-outputs-path` | path | no | `/etc/terrarium/zitadel-apps.json` compatibility path | Overrides where local provider client outputs are read/written. |
 | `--zitadel-admin-email` | email address | no | existing configured value or `--email` | Updates the ZITADEL bootstrap admin email when mode is `local`. |
 
 External OIDC notes:
@@ -695,16 +706,18 @@ External OIDC notes:
   - `https://<proxy-domain>/oauth2/callback`
   - `https://<lxd-domain>/oidc/callback`
 - Published-route auth with `@auth` also requires the external client to allow each route callback. A root route is rendered as `https://<route-host>/oauth2/callback`; a path route like `/admin` is rendered as `https://<route-host>/oauth2/admin/callback`.
-- The external provider must emit a `groups` claim that contains the configured admin group as a JSON string array. For ZITADEL Cloud, a project role assignment is not enough by itself; add a Complement Token Action that copies granted role keys into `groups`. See [Domains and auth](../getting-started/domains-and-auth) for details
+- The external provider must emit the configured groups/roles claim that contains the configured admin group as a JSON string array. Generic OIDC and ZITADEL default to `groups`; Logto defaults to `roles` and `openid profile email roles` scopes. For ZITADEL Cloud, a project role assignment is not enough by itself; add a Complement Token Action that copies granted role keys into `groups`. See [Domains and auth](../getting-started/domains-and-auth) for details.
 - `terrariumctl set idp oidc ...` verifies the issuer, callback flow, and client credentials before persisting the new settings.
 - If your provider needs separate OIDC clients for Cockpit/published routes and LXD, pass `--lxd-oidc-client` plus `--lxd-oidc-secret-file`.
 
-Local ZITADEL notes:
+Local provider notes:
 
+- Local ZITADEL remains the default when mode is `local` and no provider is set. External OIDC remains generic when no provider is set.
 - Local ZITADEL runs in the `terrarium-idp` LXD system instance, so its data is part of the LXD/ZFS backup set instead of host Docker state.
+- Local Logto also runs in the managed `terrarium-idp` system instance. It starts Logto plus Postgres through `terrarium-logto.service`, seeds the database unattended, and provisions Terrarium clients during `terrariumctl idp sync`.
 - Terrarium auto-provisions a management role named after `terrarium_admin_group`, defaulting to `terrarium-admins`.
-- The bootstrap admin is granted that role automatically.
-- Terrarium also installs a small ZITADEL Action that flattens Terrarium role assignments into a `groups` claim for oauth2-proxy and LXD.
+- The bootstrap admin is granted that role automatically when the selected provider can resolve that user.
+- ZITADEL flattens Terrarium role assignments into a `groups` claim. Logto uses its `roles` claim and `openid profile email roles` scopes by default.
 
 ## set s3
 

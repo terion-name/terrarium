@@ -12,11 +12,11 @@ exercise Terrarium the way a real operator would:
 - install from the built Linux bundle, then use `/usr/local/bin/terrariumctl`
   for post-install work
 - use public HTTPS endpoints with normal certificate validation
-- drive Cockpit, Traefik, LXD, ZITADEL, and protected routes through browser or
+- drive Cockpit, Traefik, LXD, the selected external OIDC provider, and protected routes through browser or
   HTTP flows instead of bypassing them through internal files
 - pass secrets through temporary root-readable files where the product supports
   file-based secret input
-- clean all Hetzner, ZITADEL, and local artifact resources after successful
+- clean all Hetzner, selected provider, and local artifact resources after successful
   runs
 
 ## Entry points
@@ -84,8 +84,6 @@ Required:
 - `HCLOUD_SERVER_TYPE`
 - `HCLOUD_SSH_PRIVATE_KEY`
 - `HCLOUD_SSH_PUBLIC_KEY`
-- `ZITADEL_CLOUD_ISSUER`
-- `ZITADEL_CLOUD_PAT`
 - `S3_ENDPOINT`
 - `S3_BUCKET`
 - `S3_REGION`
@@ -95,6 +93,25 @@ Required:
 - `CIFS_USERNAME`
 - `CIFS_PASSWORD`
 - `CIFS_HOST_PATH_BASE`
+
+External OIDC provider selection:
+
+- `TERRARIUM_INTEGRATION_IDP_PROVIDER=zitadel|logto` selects which external
+  OIDC identity provider fixture the harness uses.
+- When `TERRARIUM_INTEGRATION_IDP_PROVIDER` is unset, the harness uses Logto if
+  the required Logto existing-tenant variables are complete; otherwise it falls
+  back to ZITADEL.
+- For ZITADEL, keep using the existing variables:
+  - `ZITADEL_CLOUD_ISSUER`
+  - `ZITADEL_CLOUD_PAT`
+- For Logto, the harness targets an existing tenant. Set:
+  - `LOGTO_TENANT_ENDPOINT`
+  - `LOGTO_M2M_CLIENT_ID`
+  - `LOGTO_M2M_CLIENT_SECRET`
+  - `LOGTO_MANAGEMENT_API_RESOURCE` optionally overrides the Management API
+    resource and defaults to `${LOGTO_TENANT_ENDPOINT}/api`.
+- The Logto M2M application must have Logto Management API access with `all`
+  permissions. Running a local Logto runtime is out of scope for this harness.
 
 Optional:
 

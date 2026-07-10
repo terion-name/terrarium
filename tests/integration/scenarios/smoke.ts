@@ -25,8 +25,8 @@ import { expectHttpBodyContains, waitForHttpStatusResolved } from "../assertions
 
 /** Runs the high-signal real-infra smoke suite on one primary and one replica host. */
 export async function runSmokeSuite(context: IntegrationContext): Promise<void> {
-  await context.zitadelCloud.verifyManagementAccess();
-  await context.cleanupStaleZitadelFixtures();
+  await context.externalOidcProvider.verifyManagementAccess();
+  await context.cleanupStaleExternalOidcFixtures();
   const sshKeyId = await context.registerHetznerKey(`terrarium-${context.config.slug}`);
   const syncoidTargetDataset = `terrarium/replicated-${context.config.slug}`;
   const replica = await provisionHost(context, { label: "replica", withVolume: false }, sshKeyId);
@@ -105,7 +105,7 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
       `https://group-${context.config.slug}.${rootDomain}:8080@auth:agents,admins`
     ];
     const routeCallbackUris = expectedRouteAuthRedirectUris(externalRouteLabels);
-    const externalFixture: ExternalOidcFixture = await context.provisionZitadelFixture(
+    const externalFixture: ExternalOidcFixture = await context.provisionExternalOidcFixture(
       context.config.slug,
       primary.domains,
       "terrarium-admins",

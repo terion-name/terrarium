@@ -193,6 +193,7 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     args.push(`--admin-group ${shellArg(options.adminGroup || "terrarium-admins")}`);
   } else {
     args.push(`--admin-group ${shellArg(options.adminGroup || "terrarium-admins")}`);
+    args.push(`--idp-provider ${shellArg(context.config.idpProvider)}`);
     args.push(`--oidc ${shellArg(options.oidcIssuer || "")}`);
     args.push(`--oidc-client ${shellArg(options.oidcClientId || "")}`);
     const oidcSecretPath = `/root/terrarium-install-${host.label}-oidc-secret`;
@@ -654,7 +655,8 @@ export async function switchToExternalOidc(
     "switch-oidc",
     `trap "rm -f ${shellArg(secretPath)}" EXIT
 ${remoteCtl("set idp oidc")} \\
-  --oidc ${shellArg(context.config.zitadelCloudIssuer)} \\
+  --provider ${shellArg(context.config.idpProvider)} \\
+  --oidc ${shellArg(context.externalOidcIssuer)} \\
   --oidc-client ${shellArg(fixture.clientId)} \\
   --oidc-secret-file ${shellArg(secretPath)} \\
   --lxd-oidc-client ${shellArg(fixture.lxdClientId)} \\

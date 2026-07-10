@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { IntegrationLogger } from "../lib/logger";
 import type { ExternalOidcFixture, IntegrationConfig } from "../types";
+import type { IntegrationOidcProvider } from "./external-oidc";
 import { ZitadelCloudProvider } from "./zitadel-cloud";
 
 const originalFetch = globalThis.fetch;
@@ -75,6 +76,13 @@ afterEach(() => {
 });
 
 describe("ZITADEL Cloud provider", () => {
+  test("can be used through the provider-neutral external OIDC interface", () => {
+    const provider: IntegrationOidcProvider = createProvider();
+
+    expect(provider.provider).toBe("zitadel");
+    expect(provider.issuer).toBe("https://zitadel.example.test");
+  });
+
   test("cleanupFixture uses scoped delete helpers for users and project", async () => {
     const calls = installFetchMock(() => new Response(null, { status: 204 }));
     const provider = createProvider();

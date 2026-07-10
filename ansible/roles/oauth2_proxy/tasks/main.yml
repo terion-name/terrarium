@@ -140,28 +140,52 @@
       register: terrarium_oauth2_proxy_cookie_secret_raw
       changed_when: false
 
-    - name: Read ZITADEL application outputs for oauth2-proxy
-      ansible.builtin.slurp:
-        src: "{{ terrarium_zitadel_outputs_path }}"
-      register: terrarium_oauth2_proxy_zitadel_outputs_raw
-      when:
-        - terrarium_idp_mode == 'local'
-        - terrarium_zitadel_outputs_path is defined
-
-    - name: Parse ZITADEL application outputs for oauth2-proxy
+    - name: Resolve local IdP output path for oauth2-proxy
       ansible.builtin.set_fact:
-        terrarium_oauth2_proxy_zitadel_outputs: "{{ terrarium_oauth2_proxy_zitadel_outputs_raw.content | b64decode | from_json }}"
+        terrarium_oauth2_proxy_local_idp_outputs_path_effective: >-
+          {{
+            (terrarium_local_idp_outputs_path_effective | default('', true) | string | trim)
+            if (terrarium_local_idp_outputs_path_effective | default('', true) | string | trim | length > 0)
+            else (
+              (terrarium_local_idp_outputs_path | default('', true) | string | trim)
+              if (terrarium_local_idp_outputs_path | default('', true) | string | trim | length > 0)
+              else (
+                (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim)
+                if (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim | length > 0)
+                else (
+                  (terrarium_zitadel_outputs_path | default('', true) | string | trim)
+                  if (terrarium_zitadel_outputs_path | default('', true) | string | trim | length > 0)
+                  else '/etc/terrarium/zitadel-apps.json'
+                )
+              )
+            )
+          }}
+      when: terrarium_idp_mode == 'local'
+
+    - name: Read local IdP application outputs for oauth2-proxy
+      ansible.builtin.slurp:
+        src: "{{ terrarium_oauth2_proxy_local_idp_outputs_path_effective }}"
+      register: terrarium_oauth2_proxy_local_idp_outputs_raw
       when:
         - terrarium_idp_mode == 'local'
-        - terrarium_oauth2_proxy_zitadel_outputs_raw is defined
-        - terrarium_oauth2_proxy_zitadel_outputs_raw.content is defined
+        - terrarium_oauth2_proxy_local_idp_outputs_path_effective | length > 0
+      no_log: true
+
+    - name: Parse local IdP application outputs for oauth2-proxy
+      ansible.builtin.set_fact:
+        terrarium_oauth2_proxy_local_idp_outputs: "{{ terrarium_oauth2_proxy_local_idp_outputs_raw.content | b64decode | from_json }}"
+      when:
+        - terrarium_idp_mode == 'local'
+        - terrarium_oauth2_proxy_local_idp_outputs_raw is defined
+        - terrarium_oauth2_proxy_local_idp_outputs_raw.content is defined
+      no_log: true
 
     - name: Resolve oauth2-proxy OIDC client settings
       ansible.builtin.set_fact:
         terrarium_oauth2_proxy_client_id_effective: >-
           {{
             (
-              terrarium_oauth2_proxy_zitadel_outputs.cockpit_client_id.value
+              terrarium_oauth2_proxy_local_idp_outputs.cockpit_client_id.value
               if terrarium_idp_mode == 'local'
               else terrarium_oidc_client_id
             ) | default('', true)
@@ -169,7 +193,7 @@
         terrarium_oauth2_proxy_client_secret_effective: >-
           {{
             (
-              terrarium_oauth2_proxy_zitadel_outputs.cockpit_client_secret.value
+              terrarium_oauth2_proxy_local_idp_outputs.cockpit_client_secret.value
               if terrarium_idp_mode == 'local'
               else terrarium_oidc_client_secret
             ) | default('', true)
@@ -177,11 +201,17 @@
         terrarium_oauth2_proxy_oidc_issuer_effective: >-
           {{
             (
-              'https://' ~ terrarium_auth_domain
+              (
+                terrarium_oauth2_proxy_local_idp_outputs.issuer.value
+                | default(terrarium_oidc_issuer_effective | default('', true), true)
+              )
               if terrarium_idp_mode == 'local'
-              else terrarium_oidc_issuer
+              else (
+                terrarium_oidc_issuer_effective | default(terrarium_oidc_issuer | default('', true), true)
+              )
             ) | default('', true)
           }}
+      no_log: true
 
     - name: Assert oauth2-proxy client credentials are present
       ansible.builtin.assert:

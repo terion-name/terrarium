@@ -128,7 +128,8 @@ describe("Traefik bootstrap certificate template", () => {
     const defaults = readFileSync(join(repoRoot, "ansible/roles/idp_zitadel/defaults/main.yml"), "utf8");
 
     expect(site.indexOf("- role: lxd")).toBeLessThan(site.indexOf("- role: idp_zitadel"));
-    expect(site.indexOf("- role: idp_zitadel")).toBeLessThan(site.indexOf("- role: oauth2_proxy"));
+    expect(site.indexOf("- role: idp_zitadel")).toBeLessThan(site.indexOf("- role: idp_logto"));
+    expect(site.indexOf("- role: idp_logto")).toBeLessThan(site.indexOf("- role: oauth2_proxy"));
     expect(site).toContain("terrarium_zitadel_instance_name: terrarium-idp");
     expect(site).toContain('terrarium_zitadel_instance_name: "{{ terrarium_zitadel_instance_name }}"');
     expect(defaults).toContain("terrarium_zitadel_instance_name: terrarium-idp");
