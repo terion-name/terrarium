@@ -18,6 +18,7 @@ const LOGTO_HTTP_STATUS_MARKER = "__terrarium_logto_http_status__:";
 const DEFAULT_SYSTEM_CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const TERRARIUM_SECRET_NAME = "terrarium";
 const LOGTO_ADMIN_PASSWORD_ENV = "TERRARIUM_LOGTO_ADMIN_PASSWORD";
+const LOGTO_ADMIN_USERNAME = "terrarium_admin";
 const LOGTO_MANAGEMENT_APP_CANDIDATES_SQL = `
 create function pg_temp.terrarium_logto_management_app_candidates()
 returns table(app_id text, secret text)
@@ -227,6 +228,26 @@ export type LocalLogtoOidcApp = {
   clientSecret?: string;
 };
 
+export type LogtoSignInMethod = Record<string, unknown> & {
+  identifier?: string;
+  password?: boolean;
+  verificationCode?: boolean;
+  isPasswordPrimary?: boolean;
+};
+
+export type LogtoSignUpExperience = Record<string, unknown> & {
+  identifiers?: string[];
+  password?: boolean;
+  verify?: boolean;
+};
+
+export type LogtoSignInExperience = Record<string, unknown> & {
+  signIn?: {
+    methods?: LogtoSignInMethod[];
+  };
+  signUp?: LogtoSignUpExperience;
+};
+
 export type LogtoApplication = Record<string, unknown> & {
   id?: string;
   name?: string;
@@ -245,6 +266,7 @@ export type LogtoUser = Record<string, unknown> & {
   id?: string;
   primaryEmail?: string;
   email?: string;
+  username?: string;
 };
 
 const defaultDependencies: LogtoSyncDependencies = {
@@ -936,6 +958,44 @@ export function previousLogtoClientSecret(previousOutputs: OutputMap, outputPref
   return previousClientId === clientId ? previousSecret : "";
 }
 
+const emailPasswordSignInMethods: readonly LogtoSignInMethod[] = [
+  {
+    identifier: "email",
+    isPasswordPrimary: true,
+    password: true,
+    verificationCode: false
+  }
+];
+
+
+function isEmailPasswordSignInMethod(method: LogtoSignInMethod): boolean {
+  return (
+    method.identifier === "email" &&
+    method.isPasswordPrimary === true &&
+    method.password === true &&
+    method.verificationCode === false
+  );
+}
+
+function hasOnlyEmailPasswordSignInMethod(experience: LogtoSignInExperience): boolean {
+  const methods = asArray(asRecord(experience.signIn).methods).map((method) => asRecord(method) as LogtoSignInMethod);
+  return methods.length === 1 && isEmailPasswordSignInMethod(methods[0]!);
+}
+
+
+export async function ensureEmailPasswordSignInExperience(api: LogtoApiCall): Promise<void> {
+  const experience = asRecord(await api<unknown>("GET", "/api/sign-in-exp")) as LogtoSignInExperience;
+  if (hasOnlyEmailPasswordSignInMethod(experience)) {
+    return;
+  }
+
+  await api("PATCH", "/api/sign-in-exp", {
+    signIn: {
+      methods: emailPasswordSignInMethods
+    }
+  });
+}
+
 async function listLogtoApplications(api: LogtoApiCall): Promise<LogtoApplication[]> {
   return asArray(await api<unknown>("GET", "/api/applications")).map((app) => asRecord(app) as LogtoApplication);
 }
@@ -1133,6 +1193,7 @@ async function findLogtoAdminUser(api: LogtoApiCall, email: string): Promise<Log
 function buildLogtoAdminUserBody(email: string, password: string): Record<string, unknown> {
   return {
     primaryEmail: email,
+    username: LOGTO_ADMIN_USERNAME,
     name: "Terrarium Admin",
     password,
     emailVerified: true,
@@ -1149,14 +1210,30 @@ function buildLogtoAdminUserBody(email: string, password: string): Record<string
 function normalizeCreatedLogtoUser(user: LogtoUser, email: string): LogtoUser {
   return {
     ...user,
-    primaryEmail: stringValue(user.primaryEmail) || stringValue(user.email) || email
+    primaryEmail: stringValue(user.primaryEmail) || stringValue(user.email) || email,
+    username: stringValue(user.username) || LOGTO_ADMIN_USERNAME
+  };
+}
+
+async function ensureLogtoAdminUsername(api: LogtoApiCall, user: LogtoUser): Promise<LogtoUser> {
+  if (stringValue(user.username) || !user.id) {
+    return user;
+  }
+
+  const patched = asRecord(
+    await api<unknown>("PATCH", `/api/users/${encodeURIComponent(user.id)}`, { username: LOGTO_ADMIN_USERNAME })
+  ) as LogtoUser;
+  return {
+    ...user,
+    ...patched,
+    username: stringValue(patched.username) || LOGTO_ADMIN_USERNAME
   };
 }
 
 export async function ensureLogtoAdminUser(api: LogtoApiCall, email: string): Promise<LogtoUser> {
   const existing = await findLogtoAdminUser(api, email);
   if (existing) {
-    return existing;
+    return ensureLogtoAdminUsername(api, existing);
   }
 
   const password = process.env[LOGTO_ADMIN_PASSWORD_ENV] ?? "";
@@ -1176,7 +1253,7 @@ export async function ensureLogtoAdminUser(api: LogtoApiCall, email: string): Pr
   if (!refreshed?.id) {
     throw new Error(`failed to create Logto user for email ${email}`);
   }
-  return refreshed;
+  return ensureLogtoAdminUsername(api, refreshed);
 }
 
 export async function ensureLogtoAdminUserRole(api: LogtoApiCall, email: string, role: LogtoRole): Promise<void> {
@@ -1253,6 +1330,7 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH, dependencies:
   const api: LogtoApiCall = async <T>(method: LogtoHttpMethod, path: string, body?: unknown, query?: Record<string, string>) =>
     await logtoApi<T>(authDomain, managementSession.apiEndpoint, managementSession.token, dependencies, method, path, body, query);
 
+  await ensureEmailPasswordSignInExperience(api);
   const apps = await ensureLocalLogtoApplications(config, api, outputsPath, issuer, dependencies);
   await ensureManagementGroupProvisioning(config, api);
 
