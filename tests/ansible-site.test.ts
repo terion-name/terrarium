@@ -24,6 +24,7 @@ describe("Ansible site playbook", () => {
     expect(play.vars.terrarium_lxd_oidc_groups_claim).toBe("");
     expect(play.vars.terrarium_lxd_oidc_scopes).toBe("");
     expect(play.vars.terrarium_local_idp_outputs_path).toBe("");
+    expect(play.vars.terrarium_local_idp_outputs_path_default).toBe("/etc/terrarium/idp-apps.json");
     expect(play.vars.terrarium_zitadel_outputs_path).toBe("/etc/terrarium/zitadel-apps.json");
 
     expect(bundle.terrarium_idp_provider).toBe("{{ terrarium_idp_provider_effective | default(terrarium_idp_provider) }}");
@@ -100,14 +101,39 @@ describe("Ansible site playbook", () => {
     expect(source).not.toContain('"https://{{ terrarium_auth_domain }}/.well-known/openid-configuration"');
   });
 
-  test("keeps local IdP output fallback provider-neutral and legacy-compatible", () => {
+  test("keeps local IdP output fallback provider-aware and legacy-compatible", () => {
     const source = readFileSync(join(repoRoot, "ansible/site.yml"), "utf8");
 
     expect(source).toContain("terrarium_local_idp_outputs_path_effective");
+    expect(source).toContain("terrarium_local_idp_outputs_path_default: /etc/terrarium/idp-apps.json");
+    expect(source).toContain("terrarium_idp_provider_effective == 'logto'");
     expect(source).toContain("terrarium_zitadel_outputs_path_effective");
     expect(source).toContain("/etc/terrarium/zitadel-apps.json");
+    expect(source.indexOf("terrarium_local_idp_outputs_path_default")).toBeLessThan(
+      source.indexOf("terrarium_zitadel_outputs_path | default('/etc/terrarium/zitadel-apps.json', true)")
+    );
     expect(source).toContain("'terrarium_local_idp_outputs_path': terrarium_local_idp_outputs_path_effective");
     expect(source).toContain("'terrarium_zitadel_outputs_path': terrarium_zitadel_outputs_path_effective");
+  });
+
+  test("LXD consumes provider-aware local IdP outputs with legacy ZITADEL fallback", () => {
+    const defaults = readFileSync(join(repoRoot, "ansible/roles/lxd/defaults/main.yml"), "utf8");
+    const tasks = readFileSync(join(repoRoot, "ansible/roles/lxd/tasks/main.yml"), "utf8");
+
+    expect(defaults).toContain("terrarium_local_idp_outputs_path_default: /etc/terrarium/idp-apps.json");
+    expect(tasks).toContain("Resolve local IdP output path for LXD");
+    expect(tasks).toContain("terrarium_lxd_local_idp_outputs_path_effective");
+    expect(tasks).toContain("terrarium_local_idp_outputs_path_effective");
+    expect(tasks).toContain("terrarium_local_idp_outputs_path_default");
+    expect(tasks).toContain("terrarium_idp_provider_effective | default(terrarium_idp_provider");
+    expect(tasks).toContain("'/etc/terrarium/idp-apps.json'");
+    expect(tasks).toContain("terrarium_zitadel_outputs_path_effective");
+    expect(tasks).toContain("'/etc/terrarium/zitadel-apps.json'");
+    expect(tasks).toContain("Read local IdP outputs for LXD local client configuration");
+    expect(tasks).toContain("terrarium_lxd_local_idp_outputs");
+    expect(tasks).toContain("get('lxd_client_id', {}).get('value', '')");
+    expect(tasks).not.toContain("Read ZITADEL outputs for LXD local client configuration");
+    expect(tasks).not.toContain("terrarium_lxd_zitadel_outputs");
   });
 
   test("orders local IdP roles with Logto gated after ZITADEL and before oauth2-proxy", () => {

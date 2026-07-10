@@ -1,8 +1,10 @@
 provider = "oidc"
 provider_display_name = "Terrarium"
 http_address = "127.0.0.1:{{ terrarium_oauth2_proxy_port }}"
+{% if (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('', true), true) | string | trim | lower) != 'logto' %}
 redirect_url = "/oauth2/callback"
 relative_redirect_url = true
+{% endif %}
 oidc_issuer_url = "{{ terrarium_oauth2_proxy_oidc_issuer }}"
 oidc_groups_claim = "{{ terrarium_oauth2_proxy_oidc_groups_claim }}"
 client_id = "{{ terrarium_oauth2_proxy_client_id }}"

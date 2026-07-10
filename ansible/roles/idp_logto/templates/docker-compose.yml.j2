@@ -1,6 +1,6 @@
 x-logto-env: &logto-env
   DB_URL: "postgresql://logto:{{ terrarium_logto_postgres_password }}@postgres:5432/logto"
-  ENDPOINT: "https://{{ terrarium_auth_domain }}/oidc"
+  ENDPOINT: "https://{{ terrarium_auth_domain }}"
   ADMIN_ENDPOINT: "https://{{ terrarium_auth_domain }}/console"
   TRUST_PROXY_HEADER: "1"
   SECRET_VAULT_KEK: "{{ terrarium_logto_secret_vault_kek }}"
@@ -29,8 +29,11 @@ services:
 
   logto-seed:
     image: {{ terrarium_logto_app_image_effective }}
+    profiles:
+      - seed
     restart: "no"
-    command: npm run cli db seed -- --swe
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["npm run cli db seed -- --swe"]
     environment:
       <<: *logto-env
     depends_on:
@@ -51,8 +54,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      logto-seed:
-        condition: service_completed_successfully
     ports:
       - "127.0.0.1:{{ terrarium_logto_core_port }}:3001"
       - "127.0.0.1:{{ terrarium_logto_admin_port }}:3002"

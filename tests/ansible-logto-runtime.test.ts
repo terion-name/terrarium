@@ -47,7 +47,11 @@ describe("Ansible Logto runtime role", () => {
 
   test("configures Logto in the shared LXD system instance without deleting provider state", () => {
     const tasks = roleFile("tasks/main.yml");
-    const disabledBlock = tasks.slice(tasks.indexOf("- name: Disable self-hosted Logto service when not enabled"));
+    const startServiceIndex = tasks.indexOf("Start or restart Logto compose service inside system instance");
+    const proxyIndex = tasks.indexOf("Ensure host loopback proxies reach the Logto system instance");
+    const syncIndex = tasks.indexOf("Run Logto reconciliation");
+    const disabledIndex = tasks.indexOf("- name: Disable self-hosted Logto service when not enabled");
+    const disabledBlock = tasks.slice(disabledIndex);
 
     expect(tasks).toContain("Stop legacy host Logto compose service");
     expect(tasks).toContain("Remove legacy host Logto systemd unit");
@@ -81,9 +85,19 @@ describe("Ansible Logto runtime role", () => {
     expect(tasks).toContain("Ensure host loopback proxies reach the Logto system instance");
     expect(tasks).toContain("ensure_proxy terrarium-logto-core {{ terrarium_logto_core_port }}");
     expect(tasks).toContain("ensure_proxy terrarium-logto-admin {{ terrarium_logto_admin_port }}");
+    expect(tasks).toContain("Run Logto reconciliation");
+    expect(tasks).toContain("/usr/local/bin/terrariumctl idp sync");
+    expect(tasks).toContain("environment:\n        TERRARIUM_LOGTO_ADMIN_PASSWORD: \"{{ terrarium_root_password_plaintext | default('', true) }}\"");
+    expect(tasks.slice(syncIndex, disabledIndex)).toContain("no_log: true");
+    expect(tasks).toContain("register: terrarium_logto_sync");
+    expect(tasks).toContain("until: terrarium_logto_sync.rc == 0");
+    expect(tasks).toContain("retries: 6");
+    expect(tasks).toContain("delay: 10");
+    expect(proxyIndex).toBeGreaterThan(startServiceIndex);
+    expect(syncIndex).toBeGreaterThan(proxyIndex);
+    expect(disabledIndex).toBeGreaterThan(syncIndex);
     expect(tasks.match(/no_log: true/g)?.length).toBeGreaterThanOrEqual(7);
 
-    expect(tasks).not.toContain("terrariumctl idp sync");
     expect(tasks).not.toContain("lxc delete");
     expect(disabledBlock).toContain("Stop and disable legacy host Logto compose service");
     expect(disabledBlock).toContain("Stop Logto service inside system instance when present");
@@ -105,14 +119,17 @@ describe("Ansible Logto runtime role", () => {
     expect(compose).toContain("pg_isready -d logto -U logto");
     expect(compose).toContain('"{{ terrarium_logto_postgres_dir }}:/var/lib/postgresql/data:rw"');
     expect(compose).toContain("DB_URL: \"postgresql://logto:{{ terrarium_logto_postgres_password }}@postgres:5432/logto\"");
-    expect(compose).toContain("ENDPOINT: \"https://{{ terrarium_auth_domain }}/oidc\"");
+    expect(compose).toContain("ENDPOINT: \"https://{{ terrarium_auth_domain }}\"");
+    expect(compose).not.toContain("ENDPOINT: \"https://{{ terrarium_auth_domain }}/oidc\"");
     expect(compose).toContain("TRUST_PROXY_HEADER: \"1\"");
     expect(compose).toContain("ADMIN_PORT: \"3002\"");
     expect(compose).toContain("ADMIN_ENDPOINT: \"https://{{ terrarium_auth_domain }}/console\"");
     expect(compose).toContain("SECRET_VAULT_KEK: \"{{ terrarium_logto_secret_vault_kek }}\"");
-    expect(compose).toContain("command: npm run cli db seed -- --swe");
+    expect(compose).toContain('entrypoint: ["/bin/sh", "-c"]');
+    expect(compose).toContain('command: ["npm run cli db seed -- --swe"]');
     expect(compose).toContain("logto-seed:");
-    expect(compose).toContain("condition: service_completed_successfully");
+    expect(compose).toContain("profiles:\n      - seed");
+    expect(compose).not.toContain("condition: service_completed_successfully");
     expect(compose).toContain('"127.0.0.1:{{ terrarium_logto_core_port }}:3001"');
     expect(compose).toContain('"127.0.0.1:{{ terrarium_logto_admin_port }}:3002"');
   });
@@ -126,7 +143,9 @@ describe("Ansible Logto runtime role", () => {
     expect(unit).toContain("RemainAfterExit=yes");
     expect(unit).toContain("WorkingDirectory={{ terrarium_logto_dir }}");
     expect(unit).toContain("docker compose --project-name terrarium-logto");
-    expect(unit).toContain("up -d --wait --wait-timeout 600 --remove-orphans");
+    expect(unit).toContain("ExecStartPre=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 postgres");
+    expect(unit).toContain("ExecStartPre=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml run --rm --no-deps logto-seed");
+    expect(unit).toContain("ExecStart=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 --remove-orphans postgres logto");
     expect(unit).toContain("ExecStop=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml down");
     expect(unit).toContain("TimeoutStartSec=900");
     expect(unit).toContain("WantedBy=multi-user.target");

@@ -2,7 +2,7 @@ import { cac } from "cac";
 import chalk from "chalk";
 import { registerInstallCommand } from "./terrarium-install";
 import { proxySyncCmd as syncProxyConfig } from "./terrarium-traefik-sync";
-import { idpSyncCmd as syncIdpConfig } from "./terrarium-zitadel-sync";
+import { idpSyncCmd as syncIdpConfig } from "./terrarium-idp-sync";
 import { TERRARIUM_VERSION } from "./generated/build-info";
 import { backupActionCmd } from "./ctl/backup";
 import {

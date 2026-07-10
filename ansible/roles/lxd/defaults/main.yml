@@ -1,3 +1,4 @@
+terrarium_local_idp_outputs_path_default: /etc/terrarium/idp-apps.json
 terrarium_lxd_snap_channel: latest/stable
 terrarium_lxd_auth_group: terrarium-management
 terrarium_lxd_oidc_groups_claim: ""

@@ -721,30 +721,56 @@
     - terrarium_lxd_oidc_scopes_effective | length > 0
   changed_when: false
 
-- name: Read ZITADEL outputs for LXD local client configuration
+- name: Resolve local IdP output path for LXD
+  ansible.builtin.set_fact:
+    terrarium_lxd_local_idp_outputs_path_effective: >-
+      {{
+        (terrarium_local_idp_outputs_path_effective | default('', true) | string | trim)
+        if (terrarium_local_idp_outputs_path_effective | default('', true) | string | trim | length > 0)
+        else (
+          (terrarium_local_idp_outputs_path | default('', true) | string | trim)
+          if (terrarium_local_idp_outputs_path | default('', true) | string | trim | length > 0)
+          else (
+            (terrarium_local_idp_outputs_path_default | default('/etc/terrarium/idp-apps.json', true))
+            if (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('', true), true) | string | trim | lower) == 'logto'
+            else (
+              (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim)
+              if (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim | length > 0)
+              else (
+                (terrarium_zitadel_outputs_path | default('', true) | string | trim)
+                if (terrarium_zitadel_outputs_path | default('', true) | string | trim | length > 0)
+                else '/etc/terrarium/zitadel-apps.json'
+              )
+            )
+          )
+        )
+      }}
+  when: terrarium_idp_mode == 'local'
+
+- name: Read local IdP outputs for LXD local client configuration
   ansible.builtin.slurp:
-    src: "{{ terrarium_zitadel_outputs_path_effective | default(terrarium_zitadel_outputs_path) }}"
-  register: terrarium_lxd_zitadel_outputs_raw
+    src: "{{ terrarium_lxd_local_idp_outputs_path_effective }}"
+  register: terrarium_lxd_local_idp_outputs_raw
   failed_when: false
   changed_when: false
   when:
     - terrarium_idp_mode == 'local'
-    - (terrarium_zitadel_outputs_path_effective | default(terrarium_zitadel_outputs_path, true)) | length > 0
+    - terrarium_lxd_local_idp_outputs_path_effective | default('', true) | length > 0
 
-- name: Parse ZITADEL outputs for LXD local client configuration
+- name: Parse local IdP outputs for LXD local client configuration
   ansible.builtin.set_fact:
-    terrarium_lxd_zitadel_outputs: "{{ terrarium_lxd_zitadel_outputs_raw.content | b64decode | from_json }}"
+    terrarium_lxd_local_idp_outputs: "{{ terrarium_lxd_local_idp_outputs_raw.content | b64decode | from_json }}"
   when:
     - terrarium_idp_mode == 'local'
-    - terrarium_lxd_zitadel_outputs_raw is defined
-    - terrarium_lxd_zitadel_outputs_raw.content is defined
+    - terrarium_lxd_local_idp_outputs_raw is defined
+    - terrarium_lxd_local_idp_outputs_raw.content is defined
 
 - name: Resolve LXD OIDC client ID
   ansible.builtin.set_fact:
     terrarium_lxd_oidc_client_id_effective: >-
       {{
         (
-          (terrarium_lxd_zitadel_outputs | default({})).get('lxd_client_id', {}).get('value', '')
+          (terrarium_lxd_local_idp_outputs | default({})).get('lxd_client_id', {}).get('value', '')
           if terrarium_idp_mode == 'local'
           else ((terrarium_lxd_oidc_client_id | default('', true)) or terrarium_oidc_client_id)
         ) | default('', true)

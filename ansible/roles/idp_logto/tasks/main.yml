@@ -262,6 +262,17 @@
         executable: /bin/bash
       changed_when: false
 
+    - name: Run Logto reconciliation
+      ansible.builtin.command: /usr/local/bin/terrariumctl idp sync
+      environment:
+        TERRARIUM_LOGTO_ADMIN_PASSWORD: "{{ terrarium_root_password_plaintext | default('', true) }}"
+      register: terrarium_logto_sync
+      until: terrarium_logto_sync.rc == 0
+      retries: 6
+      delay: 10
+      changed_when: false
+      no_log: true
+
 - name: Disable self-hosted Logto service when not enabled
   when: not (terrarium_logto_enabled | bool)
   block:

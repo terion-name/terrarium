@@ -8,7 +8,10 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory={{ terrarium_logto_dir }}
-ExecStart=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 --remove-orphans
+# Keep the expected-to-exit seed container out of the steady-state compose wait.
+ExecStartPre=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 postgres
+ExecStartPre=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml run --rm --no-deps logto-seed
+ExecStart=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml up -d --wait --wait-timeout 600 --remove-orphans postgres logto
 ExecStop=/usr/bin/docker compose --project-name terrarium-logto -f {{ terrarium_logto_dir }}/docker-compose.yml down
 TimeoutStartSec=900
 

@@ -10,13 +10,88 @@ const DEFAULT_LOGTO_DIR = "/var/lib/terrarium/logto";
 const DEFAULT_LOGTO_COMPOSE_PROJECT = "terrarium-logto";
 const DEFAULT_LOGTO_COMPOSE_FILE = "/var/lib/terrarium/logto/docker-compose.yml";
 const DEFAULT_LOGTO_MANAGEMENT_API_RESOURCE = "https://default.logto.app/api";
+const LOGTO_ADMIN_MANAGEMENT_API_RESOURCE = "https://admin.logto.app/api";
 const LOGTO_PROJECT_ID = "default";
 const WAIT_INTERVAL_MS = 5000;
 const WAIT_ATTEMPTS = 36;
 const LOGTO_HTTP_STATUS_MARKER = "__terrarium_logto_http_status__:";
 const DEFAULT_SYSTEM_CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const TERRARIUM_SECRET_NAME = "terrarium";
-const LOGTO_MANAGEMENT_SECRET_SQL = "select secret from applications where id = 'm-admin'";
+const LOGTO_ADMIN_PASSWORD_ENV = "TERRARIUM_LOGTO_ADMIN_PASSWORD";
+const LOGTO_MANAGEMENT_APP_CANDIDATES_SQL = `
+create function pg_temp.terrarium_logto_management_app_candidates()
+returns table(app_id text, secret text)
+language plpgsql
+as $terrarium$
+begin
+  create temporary table if not exists terrarium_logto_management_app_candidate_rows (
+    app_id text not null,
+    secret text not null,
+    app_priority integer not null,
+    source_priority integer not null
+  ) on commit drop;
+  truncate table terrarium_logto_management_app_candidate_rows;
+
+  begin
+    if to_regclass('public.application_secrets') is not null then
+      execute $sql$
+        insert into terrarium_logto_management_app_candidate_rows (app_id, secret, app_priority, source_priority)
+        select
+          app.id::text as app_id,
+          latest_secret.value::text as secret,
+          case when app.id = 'm-default' then 0 when app.id = 'm-admin' then 1 else 2 end as app_priority,
+          0 as source_priority
+        from applications app
+        join lateral (
+          select app_secret.value
+          from application_secrets app_secret
+          where app_secret.application_id = app.id
+            and coalesce(app_secret.value::text, '') <> ''
+            and (app_secret.expires_at is null or app_secret.expires_at > now())
+          order by app_secret.created_at desc nulls last
+          limit 1
+        ) latest_secret on true
+      $sql$;
+    end if;
+  exception
+    when undefined_table or undefined_column then
+      -- Older Logto versions do not have application_secrets or all of its current columns.
+  end;
+
+  begin
+    execute $sql$
+      insert into terrarium_logto_management_app_candidate_rows (app_id, secret, app_priority, source_priority)
+      select
+        id::text as app_id,
+        secret::text as secret,
+        case when id = 'm-default' then 0 when id = 'm-admin' then 1 else 2 end as app_priority,
+        1 as source_priority
+      from applications
+      where coalesce(secret::text, '') <> ''
+    $sql$;
+  exception
+    when undefined_table or undefined_column then
+      -- Newer Logto schemas may rely only on application_secrets.
+  end;
+
+  return query execute $sql$
+    select deduped.app_id, deduped.secret
+    from (
+      select distinct on (candidate_rows.app_id, candidate_rows.secret)
+        candidate_rows.app_id,
+        candidate_rows.secret,
+        candidate_rows.app_priority,
+        candidate_rows.source_priority
+      from terrarium_logto_management_app_candidate_rows candidate_rows
+      order by candidate_rows.app_id, candidate_rows.secret, candidate_rows.source_priority
+    ) deduped
+    order by deduped.app_priority, deduped.app_id, deduped.source_priority, deduped.secret
+  $sql$;
+end
+$terrarium$;
+
+select app_id, secret from pg_temp.terrarium_logto_management_app_candidates();
+`.trim();
 
 type EffectiveIdpProvider = "zitadel" | "logto" | "generic";
 
@@ -98,6 +173,31 @@ export type LogtoRuntime = {
 export type LogtoPostgresCommand = {
   cmd: string[];
   cwd?: string;
+};
+
+export type LogtoManagementAppCandidate = {
+  appId: string;
+  secret: string;
+};
+
+export type LogtoTokenAuthMethod = "basic" | "post";
+
+export type LogtoTokenRequest = {
+  url: string;
+  headers: string;
+  stdin: string;
+  authMethod: LogtoTokenAuthMethod;
+};
+
+export type LogtoManagementSession = {
+  token: string;
+  apiEndpoint: string;
+  tokenEndpoint: string;
+};
+
+export type LogtoManagementEndpoint = {
+  tokenEndpoint: string;
+  apiEndpoint: string;
 };
 
 export type LocalLogtoAppKey = "cockpit" | "lxd" | "routes";
@@ -281,18 +381,29 @@ export function buildLogtoCurlCommand(
 export function buildLogtoTokenRequest(
   endpoint: string,
   managementSecret: string,
-  resource = DEFAULT_LOGTO_MANAGEMENT_API_RESOURCE
-): { url: string; headers: string; stdin: string } {
+  resource = DEFAULT_LOGTO_MANAGEMENT_API_RESOURCE,
+  clientId = "m-admin",
+  authMethod: LogtoTokenAuthMethod = "basic"
+): LogtoTokenRequest {
   const body = new URLSearchParams();
   body.set("grant_type", "client_credentials");
   body.set("resource", resource);
   body.set("scope", "all");
 
-  const basicToken = Buffer.from(`m-admin:${managementSecret}`, "utf8").toString("base64");
+  const headers = ["Content-Type: application/x-www-form-urlencoded"];
+  if (authMethod === "basic") {
+    const basicToken = Buffer.from(`${clientId}:${managementSecret}`, "utf8").toString("base64");
+    headers.unshift(`Authorization: Basic ${basicToken}`);
+  } else {
+    body.set("client_id", clientId);
+    body.set("client_secret", managementSecret);
+  }
+
   return {
     url: `${endpoint.replace(/\/$/, "")}/oidc/token`,
-    headers: `Authorization: Basic ${basicToken}\nContent-Type: application/x-www-form-urlencoded\n`,
-    stdin: body.toString()
+    headers: `${headers.join("\n")}\n`,
+    stdin: body.toString(),
+    authMethod
   };
 }
 
@@ -305,7 +416,7 @@ export function buildLogtoRuntime(config: Record<string, unknown>): LogtoRuntime
   };
 }
 
-export function buildLogtoPostgresSecretCommand(runtime: LogtoRuntime, useLxdInstance: boolean): LogtoPostgresCommand {
+export function buildLogtoPostgresCandidateCommand(runtime: LogtoRuntime, useLxdInstance: boolean): LogtoPostgresCommand {
   const dockerCommand = [
     "docker",
     "compose",
@@ -323,14 +434,49 @@ export function buildLogtoPostgresSecretCommand(runtime: LogtoRuntime, useLxdIns
     "logto",
     "-t",
     "-A",
+    "-q",
     "-c",
-    LOGTO_MANAGEMENT_SECRET_SQL
+    LOGTO_MANAGEMENT_APP_CANDIDATES_SQL
   ];
 
   if (useLxdInstance) {
     return { cmd: ["lxc", "exec", runtime.instanceName, "--", ...dockerCommand] };
   }
   return { cmd: dockerCommand, cwd: runtime.logtoDir };
+}
+
+export function buildLogtoPostgresSecretCommand(runtime: LogtoRuntime, useLxdInstance: boolean): LogtoPostgresCommand {
+  return buildLogtoPostgresCandidateCommand(runtime, useLxdInstance);
+}
+
+export function parsePsqlManagementAppCandidatesOutput(stdout: string): LogtoManagementAppCandidate[] {
+  const candidates: LogtoManagementAppCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const line of stdout
+    .split("\n")
+    .map((row) => row.trim())
+    .filter(Boolean)) {
+    const delimiter = line.includes("\t") ? "\t" : "|";
+    const delimiterIndex = line.indexOf(delimiter);
+    if (delimiterIndex <= 0) {
+      throw new Error("Logto Management API candidate query returned a row without both app id and secret");
+    }
+
+    const appId = line.slice(0, delimiterIndex).trim();
+    const secret = line.slice(delimiterIndex + 1).trim();
+    if (!appId || !secret) {
+      throw new Error("Logto Management API candidate query returned an empty app id or secret");
+    }
+
+    const dedupeKey = `${appId}\u0000${secret}`;
+    if (!seen.has(dedupeKey)) {
+      seen.add(dedupeKey);
+      candidates.push({ appId, secret });
+    }
+  }
+
+  return candidates;
 }
 
 export function parsePsqlSingleSecretOutput(stdout: string): string {
@@ -344,7 +490,7 @@ export function parsePsqlSingleSecretOutput(stdout: string): string {
   if (candidates.length > 1) {
     throw new Error("Logto m-admin secret query returned multiple rows");
   }
-  return candidates[0];
+  return candidates[0] ?? "";
 }
 
 async function lxcInstanceExists(instanceName: string, dependencies: LogtoSyncDependencies): Promise<boolean> {
@@ -354,14 +500,26 @@ async function lxcInstanceExists(instanceName: string, dependencies: LogtoSyncDe
   return (await dependencies.runAllowFailure(["lxc", "info", instanceName])).exitCode === 0;
 }
 
-async function readLogtoManagementSecret(runtime: LogtoRuntime, dependencies: LogtoSyncDependencies): Promise<string> {
+async function readLogtoManagementAppCandidates(
+  runtime: LogtoRuntime,
+  dependencies: LogtoSyncDependencies
+): Promise<LogtoManagementAppCandidate[]> {
   const useLxdInstance = await lxcInstanceExists(runtime.instanceName, dependencies);
-  const command = buildLogtoPostgresSecretCommand(runtime, useLxdInstance);
+  const command = buildLogtoPostgresCandidateCommand(runtime, useLxdInstance);
   const stdout = await dependencies.runText(command.cmd, PREFIX, { cwd: command.cwd });
-  return parsePsqlSingleSecretOutput(stdout);
+  return parsePsqlManagementAppCandidatesOutput(stdout);
 }
 
-async function waitForTrustedHttpsDiscovery(authDomain: string, dependencies: LogtoSyncDependencies): Promise<string> {
+export function resolveLocalLogtoIssuer(authDomainOrIssuer: string): string {
+  const trimmed = authDomainOrIssuer.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    return "";
+  }
+  const issuer = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return issuer.endsWith("/oidc") ? issuer : `${issuer}/oidc`;
+}
+
+async function waitForTrustedHttpsDiscovery(authDomain: string, expectedIssuer: string, dependencies: LogtoSyncDependencies): Promise<void> {
   let lastError = "";
   for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
     const result = await dependencies.runAllowFailure([
@@ -381,11 +539,13 @@ async function waitForTrustedHttpsDiscovery(authDomain: string, dependencies: Lo
     if (result.exitCode === 0) {
       try {
         const discovery = JSON.parse(result.stdout) as Record<string, unknown>;
-        const issuer = String(discovery.issuer || "").trim();
-        if (issuer.includes("/oidc")) {
-          return issuer;
+        const issuer = String(discovery.issuer || "").trim().replace(/\/+$/, "");
+        if (issuer === expectedIssuer) {
+          return;
         }
-        lastError = issuer ? `OIDC discovery issuer does not include /oidc: ${issuer}` : "OIDC discovery is missing issuer";
+        lastError = issuer
+          ? `OIDC discovery issuer ${issuer} did not match expected local Logto issuer ${expectedIssuer}`
+          : "OIDC discovery is missing issuer";
       } catch (error) {
         lastError = `failed to parse OIDC discovery: ${String(error).replace(/^Error: /, "")}`;
       }
@@ -397,52 +557,233 @@ async function waitForTrustedHttpsDiscovery(authDomain: string, dependencies: Lo
   throw new Error(`timed out waiting for HTTPS Logto OIDC discovery on ${authDomain}: ${lastError}`);
 }
 
-async function requestLogtoManagementToken(
+function isInvalidClientTokenFailure(status: number, body: string): boolean {
+  if (status !== 400 && status !== 401) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(body || "null") as Record<string, unknown> | null;
+    if (stringValue(parsed?.error).toLowerCase() === "invalid_client") {
+      return true;
+    }
+  } catch {
+    // Fall through to the compact body check below. Some Logto errors may be plain text.
+  }
+
+  const lowered = compactLogtoBody(body).toLowerCase();
+  return lowered.includes("invalid_client") || lowered.includes("invalid client");
+}
+
+function tokenRedactions(candidate: LogtoManagementAppCandidate, request: LogtoTokenRequest): string[] {
+  const basicToken = Buffer.from(`${candidate.appId}:${candidate.secret}`, "utf8").toString("base64");
+  return [candidate.secret, basicToken, request.stdin];
+}
+
+function localLogtoAdminEndpoint(config: Record<string, unknown>): string {
+  const configuredEndpoint = configString(config, "terrarium_logto_admin_endpoint");
+  if (configuredEndpoint) {
+    return configuredEndpoint;
+  }
+
+  const adminPort = configString(config, "terrarium_logto_admin_port", "3002");
+  return `http://localhost:${adminPort}`;
+}
+
+export function localLogtoManagementEndpoints(authDomain: string, config: Record<string, unknown>): LogtoManagementEndpoint[] {
+  const apiEndpoint = `https://${authDomain}`;
+  const endpoints: LogtoManagementEndpoint[] = [];
+  const seen = new Set<string>();
+
+  for (const tokenEndpoint of [localLogtoAdminEndpoint(config), apiEndpoint]) {
+    const trimmed = tokenEndpoint.trim().replace(/\/+$/, "");
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      endpoints.push({ tokenEndpoint: trimmed, apiEndpoint });
+    }
+  }
+
+  return endpoints;
+}
+
+function candidatePriorityForResource(candidate: LogtoManagementAppCandidate, resource: string): number {
+  if (resource === DEFAULT_LOGTO_MANAGEMENT_API_RESOURCE) {
+    if (candidate.appId === "m-default") {
+      return 0;
+    }
+    if (candidate.appId === "m-admin") {
+      return 1;
+    }
+  }
+
+  if (resource === LOGTO_ADMIN_MANAGEMENT_API_RESOURCE) {
+    if (candidate.appId === "m-admin") {
+      return 0;
+    }
+    if (candidate.appId === "m-default") {
+      return 1;
+    }
+  }
+
+  return 2;
+}
+
+function orderLogtoManagementCandidates(
+  candidates: readonly LogtoManagementAppCandidate[],
+  resource: string
+): LogtoManagementAppCandidate[] {
+  return [...candidates].sort((left, right) => {
+    const priority = candidatePriorityForResource(left, resource) - candidatePriorityForResource(right, resource);
+    return priority === 0 ? 0 : priority;
+  });
+}
+
+export function localLogtoManagementApiResources(configuredResource: string): string[] {
+  const resources: string[] = [];
+  const seen = new Set<string>();
+  for (const resource of [configuredResource, LOGTO_ADMIN_MANAGEMENT_API_RESOURCE]) {
+    const trimmed = resource.trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      resources.push(trimmed);
+    }
+  }
+  return resources;
+}
+
+function formatTokenAttemptLabel(
+  candidate: LogtoManagementAppCandidate,
+  authMethod: LogtoTokenAuthMethod,
+  resource: string
+): string {
+  return `${candidate.appId} [${authMethod}, resource=${resource}]`;
+}
+
+function formatTokenCandidateFailures(
+  candidateIds: readonly string[],
+  resources: readonly string[],
+  failuresByAttempt: ReadonlyMap<string, string>
+): string {
+  const tried = candidateIds.join(", ") || "<none>";
+  const resourcesTried = resources.join(", ") || "<none>";
+  const failures = [...failuresByAttempt.entries()].map(([attempt, failure]) => `${attempt}: ${failure}`).join("; ") || "<none>";
+  return `failed to obtain Logto management token; candidates tried: ${tried}; resources tried: ${resourcesTried}; failures: ${failures}`;
+}
+
+export async function requestLogtoManagementToken(
   authDomain: string,
   endpoint: string,
-  managementSecret: string,
+  candidates: readonly LogtoManagementAppCandidate[],
   resource: string,
   dependencies: LogtoSyncDependencies
 ): Promise<string> {
-  const request = buildLogtoTokenRequest(endpoint, managementSecret, resource);
-  const headers = dependencies.writeHeaderFile(request.headers, "token");
-  const cmd = buildLogtoCurlCommand(authDomain, "POST", request.url, headers.path, true, dependencies.existsSync);
-  const redactions = [managementSecret, request.stdin];
-  let lastError = "";
-
-  try {
-    for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
-      const result = await dependencies.runAllowFailure(cmd, { stdin: request.stdin });
-      if (result.exitCode === 0) {
-        const response = parseLogtoHttpOutput(result.stdout);
-        if (response.status >= 200 && response.status < 300) {
-          try {
-            const parsed = JSON.parse(response.body || "null") as Record<string, unknown> | null;
-            const token = stringValue(parsed?.access_token);
-            if (!token) {
-              throw new Error("Logto token response did not include access_token");
-            }
-            return token;
-          } catch (error) {
-            throw new Error(redactLogtoSecrets(`failed to parse Logto token response: ${String(error).replace(/^Error: /, "")}`, redactions));
-          }
-        }
-        lastError = formatLogtoHttpFailure("POST", "/oidc/token", response.status, response.body);
-      } else {
-        lastError = result.stderr.trim() || result.stdout.trim() || "Logto token request failed";
-      }
-
-      lastError = redactLogtoSecrets(lastError, redactions);
-      if (!isRetriableLogtoApiError(lastError)) {
-        throw new Error(lastError);
-      }
-      await dependencies.sleep(WAIT_INTERVAL_MS);
-    }
-  } finally {
-    rmSync(headers.dir, { recursive: true, force: true });
+  if (candidates.length === 0) {
+    throw new Error("no Logto Management API candidate applications with non-empty secrets were found in Postgres");
   }
 
-  throw new Error(`timed out waiting for Logto management token: ${redactLogtoSecrets(lastError, redactions)}`);
+  const resources = localLogtoManagementApiResources(resource);
+  if (resources.length === 0) {
+    throw new Error("no Logto Management API resources were configured for token acquisition");
+  }
+
+  const attemptedCandidateIds: string[] = [];
+  const attemptedCandidateIdSet = new Set<string>();
+  const failuresByAttempt = new Map<string, string>();
+  const authMethods: readonly LogtoTokenAuthMethod[] = ["basic", "post"];
+
+  for (let attempt = 0; attempt < WAIT_ATTEMPTS; attempt += 1) {
+    let sawRetriableFailure = false;
+
+    for (const tokenResource of resources) {
+      for (const candidate of orderLogtoManagementCandidates(candidates, tokenResource)) {
+        if (!attemptedCandidateIdSet.has(candidate.appId)) {
+          attemptedCandidateIdSet.add(candidate.appId);
+          attemptedCandidateIds.push(candidate.appId);
+        }
+
+        for (const authMethod of authMethods) {
+          const request = buildLogtoTokenRequest(endpoint, candidate.secret, tokenResource, candidate.appId, authMethod);
+          const attemptLabel = formatTokenAttemptLabel(candidate, authMethod, tokenResource);
+          const headers = dependencies.writeHeaderFile(request.headers, "token");
+          const cmd = buildLogtoCurlCommand(authDomain, "POST", request.url, headers.path, true, dependencies.existsSync);
+          const redactions = tokenRedactions(candidate, request);
+
+          try {
+            const result = await dependencies.runAllowFailure(cmd, { stdin: request.stdin });
+            let failure = "";
+            let invalidClient = false;
+
+            if (result.exitCode === 0) {
+              const response = parseLogtoHttpOutput(result.stdout);
+              if (response.status >= 200 && response.status < 300) {
+                try {
+                  const parsed = JSON.parse(response.body || "null") as Record<string, unknown> | null;
+                  const token = stringValue(parsed?.access_token);
+                  if (!token) {
+                    throw new Error("Logto token response did not include access_token");
+                  }
+                  return token;
+                } catch (error) {
+                  throw new Error(
+                    redactLogtoSecrets(
+                      `failed to parse Logto token response for candidate ${candidate.appId} using ${authMethod} auth and resource ${tokenResource}: ${String(error).replace(/^Error: /, "")}`,
+                      redactions
+                    )
+                  );
+                }
+              }
+              failure = formatLogtoHttpFailure("POST", "/oidc/token", response.status, response.body);
+              invalidClient = isInvalidClientTokenFailure(response.status, response.body);
+            } else {
+              failure = result.stderr.trim() || result.stdout.trim() || "Logto token request failed";
+            }
+
+            failure = redactLogtoSecrets(failure, redactions);
+            failuresByAttempt.set(attemptLabel, failure);
+
+            if (invalidClient) {
+              continue;
+            }
+            if (isRetriableLogtoApiError(failure)) {
+              sawRetriableFailure = true;
+              continue;
+            }
+            throw new Error(formatTokenCandidateFailures(attemptedCandidateIds, resources, failuresByAttempt));
+          } finally {
+            rmSync(headers.dir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+
+    if (!sawRetriableFailure) {
+      throw new Error(formatTokenCandidateFailures(attemptedCandidateIds, resources, failuresByAttempt));
+    }
+    await dependencies.sleep(WAIT_INTERVAL_MS);
+  }
+
+  throw new Error(`timed out waiting for Logto management token: ${formatTokenCandidateFailures(attemptedCandidateIds, resources, failuresByAttempt)}`);
+}
+
+export async function requestLogtoManagementSession(
+  authDomain: string,
+  endpoints: readonly LogtoManagementEndpoint[],
+  candidates: readonly LogtoManagementAppCandidate[],
+  resource: string,
+  dependencies: LogtoSyncDependencies
+): Promise<LogtoManagementSession> {
+  const failures: string[] = [];
+
+  for (const endpoint of endpoints) {
+    try {
+      const token = await requestLogtoManagementToken(authDomain, endpoint.tokenEndpoint, candidates, resource, dependencies);
+      return { token, tokenEndpoint: endpoint.tokenEndpoint, apiEndpoint: endpoint.apiEndpoint };
+    } catch (error) {
+      failures.push(`${endpoint.tokenEndpoint}: ${String(error).replace(/^Error: /, "")}`);
+    }
+  }
+
+  throw new Error(`failed to obtain Logto management token from local endpoints: ${failures.join("; ") || "<none>"}`);
 }
 
 async function logtoApi<T>(
@@ -683,13 +1024,14 @@ async function ensureLocalLogtoApplications(
 }
 
 export function buildLocalIdpOutputs(projectId: string, apps: Record<LocalLogtoAppKey, LocalLogtoOidcApp>, issuer: string): string {
-  if (!issuer.includes("/oidc")) {
-    throw new Error(`Logto issuer must include /oidc: ${issuer}`);
+  const localLogtoIssuer = resolveLocalLogtoIssuer(issuer);
+  if (!localLogtoIssuer) {
+    throw new Error("Logto issuer is empty");
   }
   const output: Record<string, { sensitive: boolean; type: "string"; value: string }> = {
     cockpit_client_id: { sensitive: true, type: "string", value: apps.cockpit.clientId },
     cockpit_client_secret: { sensitive: true, type: "string", value: apps.cockpit.clientSecret ?? "" },
-    issuer: { sensitive: false, type: "string", value: issuer },
+    issuer: { sensitive: false, type: "string", value: localLogtoIssuer },
     lxd_client_id: { sensitive: true, type: "string", value: apps.lxd.clientId },
     project_id: { sensitive: false, type: "string", value: projectId },
     routes_client_id: { sensitive: true, type: "string", value: apps.routes.clientId },
@@ -760,9 +1102,13 @@ function emailsForLogtoUser(user: LogtoUser): string[] {
   return emails.filter(Boolean);
 }
 
-export function selectLogtoUserByEmail(users: LogtoUser[], email: string): LogtoUser {
+function logtoUsersMatchingEmail(users: LogtoUser[], email: string): LogtoUser[] {
   const normalized = email.trim().toLowerCase();
-  const matches = users.filter((user) => emailsForLogtoUser(user).some((candidate) => candidate.toLowerCase() === normalized));
+  return users.filter((user) => emailsForLogtoUser(user).some((candidate) => candidate.toLowerCase() === normalized));
+}
+
+export function selectLogtoUserByEmail(users: LogtoUser[], email: string): LogtoUser {
+  const matches = logtoUsersMatchingEmail(users, email);
   if (matches.length === 0) {
     throw new Error(`failed to find Logto user for email ${email}`);
   }
@@ -772,12 +1118,72 @@ export function selectLogtoUserByEmail(users: LogtoUser[], email: string): Logto
   return matches[0];
 }
 
+async function findLogtoAdminUser(api: LogtoApiCall, email: string): Promise<LogtoUser | null> {
+  const users = asArray(await api<unknown>("GET", "/api/users", undefined, { search: email })).map((user) => asRecord(user) as LogtoUser);
+  const matches = logtoUsersMatchingEmail(users, email);
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    throw new Error(`found multiple Logto users for email ${email}`);
+  }
+  return matches[0];
+}
+
+function buildLogtoAdminUserBody(email: string, password: string): Record<string, unknown> {
+  return {
+    primaryEmail: email,
+    name: "Terrarium Admin",
+    password,
+    emailVerified: true,
+    customData: {
+      terrarium: {
+        managed: true,
+        provider: "logto",
+        user: "admin"
+      }
+    }
+  };
+}
+
+function normalizeCreatedLogtoUser(user: LogtoUser, email: string): LogtoUser {
+  return {
+    ...user,
+    primaryEmail: stringValue(user.primaryEmail) || stringValue(user.email) || email
+  };
+}
+
+export async function ensureLogtoAdminUser(api: LogtoApiCall, email: string): Promise<LogtoUser> {
+  const existing = await findLogtoAdminUser(api, email);
+  if (existing) {
+    return existing;
+  }
+
+  const password = process.env[LOGTO_ADMIN_PASSWORD_ENV] ?? "";
+  if (!password) {
+    throw new Error(`${LOGTO_ADMIN_PASSWORD_ENV} is required to create missing Logto admin user ${email}`);
+  }
+
+  const created = normalizeCreatedLogtoUser(
+    asRecord(await api<unknown>("POST", "/api/users", buildLogtoAdminUserBody(email, password))) as LogtoUser,
+    email
+  );
+  if (created.id) {
+    return created;
+  }
+
+  const refreshed = await findLogtoAdminUser(api, email);
+  if (!refreshed?.id) {
+    throw new Error(`failed to create Logto user for email ${email}`);
+  }
+  return refreshed;
+}
+
 export async function ensureLogtoAdminUserRole(api: LogtoApiCall, email: string, role: LogtoRole): Promise<void> {
   if (!role.id) {
     throw new Error(`Logto admin role ${role.name ?? "<unknown>"} is missing an id`);
   }
-  const users = asArray(await api<unknown>("GET", "/api/users", undefined, { search: email })).map((user) => asRecord(user) as LogtoUser);
-  const user = selectLogtoUserByEmail(users, email);
+  const user = await ensureLogtoAdminUser(api, email);
   if (!user.id) {
     throw new Error(`Logto user for email ${email} is missing an id`);
   }
@@ -835,19 +1241,17 @@ export async function idpSyncCmd(configPath = DEFAULT_CONFIG_PATH, dependencies:
     throw new Error("terrarium_auth_domain is empty");
   }
 
-  const endpoint = `https://${authDomain}`;
   const runtime = buildLogtoRuntime(config);
   const outputsPath = resolveLocalIdpOutputsPath(config);
   const managementResource = configString(config, "terrarium_logto_management_api_resource", DEFAULT_LOGTO_MANAGEMENT_API_RESOURCE);
-  const managementSecret = await readLogtoManagementSecret(runtime, dependencies);
-  if (!managementSecret) {
-    throw new Error("Logto m-admin secret is empty");
-  }
+  const managementCandidates = await readLogtoManagementAppCandidates(runtime, dependencies);
+  const managementEndpoints = localLogtoManagementEndpoints(authDomain, config);
 
-  const issuer = await waitForTrustedHttpsDiscovery(authDomain, dependencies);
-  const token = await requestLogtoManagementToken(authDomain, endpoint, managementSecret, managementResource, dependencies);
+  const issuer = resolveLocalLogtoIssuer(authDomain);
+  await waitForTrustedHttpsDiscovery(authDomain, issuer, dependencies);
+  const managementSession = await requestLogtoManagementSession(authDomain, managementEndpoints, managementCandidates, managementResource, dependencies);
   const api: LogtoApiCall = async <T>(method: LogtoHttpMethod, path: string, body?: unknown, query?: Record<string, string>) =>
-    await logtoApi<T>(authDomain, endpoint, token, dependencies, method, path, body, query);
+    await logtoApi<T>(authDomain, managementSession.apiEndpoint, managementSession.token, dependencies, method, path, body, query);
 
   const apps = await ensureLocalLogtoApplications(config, api, outputsPath, issuer, dependencies);
   await ensureManagementGroupProvisioning(config, api);

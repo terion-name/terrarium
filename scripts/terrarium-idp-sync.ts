@@ -1,4 +1,5 @@
 import { configString, loadConfig } from "./lib/common";
+import { resolveEffectiveIdpProvider, type EffectiveIdpProvider } from "./lib/idp-provider";
 import { idpSyncCmd as logtoIdpSyncCmd } from "./terrarium-logto-sync";
 import { idpSyncCmd as zitadelIdpSyncCmd } from "./terrarium-zitadel-sync";
 
@@ -12,18 +13,6 @@ export type IdpSyncDependencies = {
 };
 
 type LocalIdpSyncProvider = "zitadel" | "logto";
-type EffectiveIdpProvider = LocalIdpSyncProvider | "generic";
-
-function resolveEffectiveIdpProvider(mode: string, explicitProvider = ""): EffectiveIdpProvider {
-  const provider = explicitProvider.trim().toLowerCase();
-  if (provider === "zitadel" || provider === "logto") {
-    return provider;
-  }
-  if (provider) {
-    throw new Error(`invalid IDP provider ${JSON.stringify(explicitProvider)}; expected one of: zitadel, logto`);
-  }
-  return mode.trim().toLowerCase() === "local" ? "zitadel" : "generic";
-}
 
 const defaultDependencies: IdpSyncDependencies = {
   loadConfig,

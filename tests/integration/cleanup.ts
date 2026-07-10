@@ -8,6 +8,11 @@ const MAIN_OAUTH2_PROXY_DIR = "/var/lib/terrarium/oauth2-proxy";
 const MAIN_OAUTH2_PROXY_COMPOSE_PROJECT = "terrarium-oauth2-proxy";
 const MAIN_OAUTH2_PROXY_COMPOSE_PATH = `${MAIN_OAUTH2_PROXY_DIR}/docker-compose.yml`;
 
+const LOGTO_INSTANCE_NAME = "terrarium-idp";
+const LOGTO_DIR = "/var/lib/terrarium/logto";
+const LOGTO_COMPOSE_PROJECT = "terrarium-logto";
+const LOGTO_COMPOSE_PATH = `${LOGTO_DIR}/docker-compose.yml`;
+
 const ROUTE_AUTH_DIR = "/var/lib/terrarium/oauth2-proxy-routes";
 const ROUTE_AUTH_COMPOSE_PATH = `${ROUTE_AUTH_DIR}/docker-compose.yml`;
 
@@ -60,6 +65,55 @@ timeout 8s curl -fsS --noproxy "*" --connect-timeout 2 --max-time 3 "http://127.
 echo
 echo "curl_exit=$?"
 `.trim();
+}
+
+function logtoInstanceCommand(command: string): string {
+  return `
+if lxc info ${shellEscape(LOGTO_INSTANCE_NAME)} >/dev/null 2>&1; then
+  lxc exec ${shellEscape(LOGTO_INSTANCE_NAME)} -- bash -lc ${shellEscape(command)}
+else
+  echo "${LOGTO_INSTANCE_NAME} instance is missing"
+fi
+`.trim();
+}
+
+function logtoComposeCommand(command: string): string {
+  return logtoInstanceCommand(`
+if [ -f ${shellEscape(LOGTO_COMPOSE_PATH)} ]; then
+  ${command}
+else
+  echo "${LOGTO_COMPOSE_PATH} is missing"
+fi
+`.trim());
+}
+
+function logtoConfigSummaryCommand(): string {
+  return logtoInstanceCommand(`
+set +e
+logto_dir=${shellEscape(LOGTO_DIR)}
+compose_file=${shellEscape(LOGTO_COMPOSE_PATH)}
+
+for path in "$logto_dir" "$compose_file" "$logto_dir/postgres" "$logto_dir/seed"; do
+  echo "== $path =="
+  if [ -e "$path" ]; then
+    stat -c 'type=%F mode=%a owner=%U group=%G size=%s' "$path" 2>&1
+  else
+    echo "missing"
+  fi
+  echo
+done
+
+if [ -d "$logto_dir" ]; then
+  echo "== $logto_dir entries =="
+  ls -la "$logto_dir" 2>&1
+fi
+
+if [ -f "$compose_file" ]; then
+  echo
+  echo "== compose services =="
+  timeout 15s docker compose --project-name ${shellEscape(LOGTO_COMPOSE_PROJECT)} -f "$compose_file" config --services 2>&1 || true
+fi
+`.trim());
 }
 
 function routeAuthComposeCommand(command: string): string {
@@ -266,6 +320,39 @@ function hostDiagnostics(host: ManagedHost): HostDiagnostic[] {
       name: "oauth2-proxy-listener-probe",
       command: mainOauth2ProxyProbeCommand(),
       timeoutMs: 45000
+    },
+    {
+      name: "logto-systemctl-status",
+      command: logtoInstanceCommand(
+        "timeout 30s systemctl status --no-pager --full --lines=120 terrarium-logto.service docker.service"
+      ),
+      timeoutMs: 40000
+    },
+    {
+      name: "logto-journal",
+      command: logtoInstanceCommand(
+        "timeout 60s journalctl -u terrarium-logto.service -u docker.service --no-pager -n 500"
+      ),
+      timeoutMs: 70000
+    },
+    {
+      name: "logto-compose-ps",
+      command: logtoComposeCommand(
+        `timeout 20s docker compose --project-name ${shellEscape(LOGTO_COMPOSE_PROJECT)} -f ${shellEscape(LOGTO_COMPOSE_PATH)} ps --all`
+      ),
+      timeoutMs: 30000
+    },
+    {
+      name: "logto-compose-logs",
+      command: logtoComposeCommand(
+        `timeout 60s docker compose --project-name ${shellEscape(LOGTO_COMPOSE_PROJECT)} -f ${shellEscape(LOGTO_COMPOSE_PATH)} logs --no-color --tail=300`
+      ),
+      timeoutMs: 70000
+    },
+    {
+      name: "logto-config-summary",
+      command: logtoConfigSummaryCommand(),
+      timeoutMs: 40000
     },
     {
       name: "route-auth-compose-ps",

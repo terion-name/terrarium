@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { IntegrationContext } from "../context";
-import type { ExternalOidcFixture, ManagedHost, VolumeRecord } from "../types";
+import type { ExternalOidcFixture, IntegrationIdpProvider, ManagedHost, VolumeRecord } from "../types";
 import { SshHost } from "../remote/ssh";
 import { expectHttpBodyContains, readHttpsResponse, waitForHttpStatusResolved, type HttpsResponse } from "../assertions/http";
 import { expectLxdUi, expectManagementSurfaces, expectManagementUi, expectProtectedRouteMatrix } from "../assertions/browser";
@@ -53,6 +53,10 @@ type DetachedCommandWaitOptions = {
 
 function baseEmail(ctx: IntegrationContext): string {
   return `terrarium+${ctx.config.slug}@${ctx.config.ipDnsDomain}`;
+}
+
+function localInstallRootPassword(ctx: IntegrationContext): string {
+  return `Terrarium!${ctx.config.slug}`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -178,10 +182,11 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     `--email ${shellArg(options.email || baseEmail(context))}`,
     `--acme-email ${shellArg(options.acmeEmail || baseEmail(context))}`,
     `--idp ${options.idpMode}`,
+    `--idp-provider ${shellArg(context.config.idpProvider)}`,
     `--storage-mode ${options.storageMode}`
   ];
   const rootPasswordPath = `/root/terrarium-install-${host.label}-root-password`;
-  await uploadSecretFile(ssh, rootPasswordPath, `Terrarium!${context.config.slug}`);
+  await uploadSecretFile(ssh, rootPasswordPath, localInstallRootPassword(context));
   secretFiles.push(rootPasswordPath);
   args.push(`--root-pwd-file ${shellArg(rootPasswordPath)}`);
 
@@ -201,7 +206,6 @@ export async function installTerrarium(context: IntegrationContext, host: Manage
     args.push(`--admin-group ${shellArg(options.adminGroup || "terrarium-admins")}`);
   } else {
     args.push(`--admin-group ${shellArg(options.adminGroup || "terrarium-admins")}`);
-    args.push(`--idp-provider ${shellArg(context.config.idpProvider)}`);
     args.push(`--oidc ${shellArg(options.oidcIssuer || "")}`);
     args.push(`--oidc-client ${shellArg(options.oidcClientId || "")}`);
     const oidcSecretPath = `/root/terrarium-install-${host.label}-oidc-secret`;
@@ -281,13 +285,34 @@ export async function readLocalZitadelAdmin(host: SshHost): Promise<{ email: str
   };
 }
 
+/** Returns the local management admin credentials for the configured local IDP provider. */
+export async function readLocalAdmin(context: IntegrationContext, host: SshHost): Promise<{ email: string; password: string }> {
+  if (context.config.idpProvider === "zitadel") {
+    return await readLocalZitadelAdmin(host);
+  }
+
+  return {
+    email: baseEmail(context),
+    password: localInstallRootPassword(context)
+  };
+}
+
+export function localAuthDiscoveryUrl(authDomain: string, provider: IntegrationIdpProvider): string {
+  const discoveryPath = provider === "logto" ? "/oidc/.well-known/openid-configuration" : "/.well-known/openid-configuration";
+  return `https://${authDomain}${discoveryPath}`;
+}
+
 /** Waits for the primary Terrarium public endpoints to be online. */
-export async function waitForTerrariumPublicEndpoints(host: ManagedHost, includeAuth: boolean): Promise<void> {
+export async function waitForTerrariumPublicEndpoints(
+  host: ManagedHost,
+  includeAuth: boolean,
+  localIdpProvider: IntegrationIdpProvider
+): Promise<void> {
   await waitForHttpStatusResolved(`https://${host.domains.manage}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
   await waitForHttpStatusResolved(`https://${host.domains.proxy}`, [302, 303], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
   await waitForHttpStatusResolved(`https://${host.domains.lxd}`, [200, 302], { timeoutMs: 300000, resolveIp: host.server.ipv4 });
   if (includeAuth) {
-    await waitForHttpStatusResolved(`https://${host.domains.auth}/.well-known/openid-configuration`, [200], {
+    await waitForHttpStatusResolved(localAuthDiscoveryUrl(host.domains.auth, localIdpProvider), [200], {
       timeoutMs: 300000,
       resolveIp: host.server.ipv4
     });
@@ -678,13 +703,13 @@ ${remoteCtl("set idp oidc")} \\
   await withStepTimeout(`external OIDC LXD API for ${host.label}`, 6 * 60 * 1000, () => verifyLxdApi(host, context));
 }
 
-/** Reconfigures the primary host back to local ZITADEL and validates its management UIs. */
+/** Reconfigures the primary host back to the configured local IDP and validates its management UIs. */
 export async function switchBackToLocalIdp(context: IntegrationContext, host: ManagedHost): Promise<void> {
   const ssh = context.ssh(host);
   await runDetachedRemoteCommand(ssh, "switch-local-idp", remoteCtl("set idp local"));
-  const admin = await readLocalZitadelAdmin(ssh);
-  await withStepTimeout(`local ZITADEL management surfaces for ${host.label}`, 15 * 60 * 1000, () => verifyManagementSurfaces(context, host, admin));
-  await withStepTimeout(`local ZITADEL LXD API for ${host.label}`, 6 * 60 * 1000, () => verifyLxdApi(host, context));
+  const admin = await readLocalAdmin(context, ssh);
+  await withStepTimeout(`local IDP management surfaces for ${host.label}`, 15 * 60 * 1000, () => verifyManagementSurfaces(context, host, admin));
+  await withStepTimeout(`local IDP LXD API for ${host.label}`, 6 * 60 * 1000, () => verifyLxdApi(host, context));
 }
 
 /** Runs a small route-auth matrix against the currently configured OIDC provider. */

@@ -10,7 +10,7 @@ import {
   installSyncoidKey,
   installTerrarium,
   provisionHost,
-  readLocalZitadelAdmin,
+  readLocalAdmin,
   switchBackToLocalIdp,
   switchToExternalOidc,
   verifyLxdApi,
@@ -69,9 +69,9 @@ export async function runSmokeSuite(context: IntegrationContext): Promise<void> 
 
     await assertInstalledHost(primarySsh);
     await assertInstalledHost(replicaSsh);
-    await waitForTerrariumPublicEndpoints(primary, true);
+    await waitForTerrariumPublicEndpoints(primary, true, context.config.idpProvider);
 
-    const localAdmin = await readLocalZitadelAdmin(primarySsh);
+    const localAdmin = await readLocalAdmin(context, primarySsh);
     await verifyManagementSurfaces(context, primary, localAdmin);
     await verifyLxdApi(primary, context);
 

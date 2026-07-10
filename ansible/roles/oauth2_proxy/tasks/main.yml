@@ -150,12 +150,16 @@
               (terrarium_local_idp_outputs_path | default('', true) | string | trim)
               if (terrarium_local_idp_outputs_path | default('', true) | string | trim | length > 0)
               else (
-                (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim)
-                if (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim | length > 0)
+                (terrarium_local_idp_outputs_path_default | default('/etc/terrarium/idp-apps.json', true))
+                if (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('', true), true) | string | trim | lower) == 'logto'
                 else (
-                  (terrarium_zitadel_outputs_path | default('', true) | string | trim)
-                  if (terrarium_zitadel_outputs_path | default('', true) | string | trim | length > 0)
-                  else '/etc/terrarium/zitadel-apps.json'
+                  (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim)
+                  if (terrarium_zitadel_outputs_path_effective | default('', true) | string | trim | length > 0)
+                  else (
+                    (terrarium_zitadel_outputs_path | default('', true) | string | trim)
+                    if (terrarium_zitadel_outputs_path | default('', true) | string | trim | length > 0)
+                    else '/etc/terrarium/zitadel-apps.json'
+                  )
                 )
               )
             )
@@ -168,7 +172,7 @@
       register: terrarium_oauth2_proxy_local_idp_outputs_raw
       when:
         - terrarium_idp_mode == 'local'
-        - terrarium_oauth2_proxy_local_idp_outputs_path_effective | length > 0
+        - terrarium_oauth2_proxy_local_idp_outputs_path_effective | default('', true) | length > 0
       no_log: true
 
     - name: Parse local IdP application outputs for oauth2-proxy
@@ -202,16 +206,34 @@
           {{
             (
               (
-                terrarium_oauth2_proxy_local_idp_outputs.issuer.value
-                | default(terrarium_oidc_issuer_effective | default('', true), true)
-              )
-              if terrarium_idp_mode == 'local'
-              else (
                 terrarium_oidc_issuer_effective | default(terrarium_oidc_issuer | default('', true), true)
+              )
+              if (
+                terrarium_idp_mode == 'local'
+                and (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('', true), true) | string | trim | lower) == 'logto'
+              )
+              else (
+                (
+                  terrarium_oauth2_proxy_local_idp_outputs.issuer.value
+                  | default(terrarium_oidc_issuer_effective | default('', true), true)
+                )
+                if terrarium_idp_mode == 'local'
+                else (
+                  terrarium_oidc_issuer_effective | default(terrarium_oidc_issuer | default('', true), true)
+                )
               )
             ) | default('', true)
           }}
       no_log: true
+
+    - name: Assert local Logto oauth2-proxy issuer uses OIDC path
+      ansible.builtin.assert:
+        that:
+          - (terrarium_oauth2_proxy_oidc_issuer_effective | string) is search('/oidc$')
+        fail_msg: local Logto oauth2-proxy issuer must end with /oidc; refusing to render root issuer
+      when:
+        - terrarium_idp_mode == 'local'
+        - (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('', true), true) | string | trim | lower) == 'logto'
 
     - name: Assert oauth2-proxy client credentials are present
       ansible.builtin.assert:
