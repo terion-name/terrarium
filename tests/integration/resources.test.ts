@@ -154,9 +154,30 @@ describe("integration cleanup resource manifest", () => {
       "hetzner:volume:2",
       "hetzner:ssh-key:1",
       "external-oidc:zitadel:user:user-1",
-      "external-oidc:zitadel:app:app-1",
       "external-oidc:zitadel:project:project-1"
     ]);
+  });
+
+  test("clears project-scoped ZITADEL resources after project deletion", () => {
+    let manifest = createEmptyResourceManifest("run-zitadel-cascade");
+    manifest = recordZitadelFixtureProject(manifest, {
+      slug: "run-zitadel-cascade",
+      projectId: "project-1",
+      projectName: "terrarium-run-zitadel-cascade",
+      adminGroup: "terrarium-admins",
+      routeGroups: ["agents"]
+    });
+    manifest = recordZitadelFixtureApp(manifest, {
+      slug: "run-zitadel-cascade",
+      projectId: "project-1",
+      appId: "app-1",
+      appName: "terrarium-run-zitadel-cascade-external"
+    });
+
+    manifest = removeZitadelFixtureProject(manifest, "run-zitadel-cascade");
+
+    expect(manifest.externalOidc.fixtures).toEqual([]);
+    expect(buildCleanupPlan(manifest)).toEqual([]);
   });
 
   test("loads and plans legacy ZITADEL manifests without external OIDC records", () => {
@@ -206,7 +227,6 @@ describe("integration cleanup resource manifest", () => {
       expect(manifest.zitadel.fixtures[0].routeGroups).toEqual([]);
       expect(buildCleanupPlan(manifest).map(stepKey)).toEqual([
         "external-oidc:zitadel:user:legacy-user",
-        "external-oidc:zitadel:app:legacy-app",
         "external-oidc:zitadel:project:legacy-project"
       ]);
 

@@ -10,25 +10,16 @@ const OAUTH2_PROXY_MIRROR_IMAGE =
 const OAUTH2_PROXY_FALLBACK_IMAGE =
   "quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd";
 
-const LOGTO_REDIRECT_CONDITION =
-  "{% if (terrarium_idp_provider_effective | default(terrarium_idp_provider | default('', true), true) | string | trim | lower) != 'logto' %}";
-const RELATIVE_REDIRECT_BLOCK = 'redirect_url = "/oauth2/callback"\nrelative_redirect_url = true\n';
-const CONDITIONAL_RELATIVE_REDIRECT_BLOCK = `${LOGTO_REDIRECT_CONDITION}\n${RELATIVE_REDIRECT_BLOCK}{% endif %}\n`;
-
 function oauth2ProxyTemplate() {
   return readFileSync(join(import.meta.dir, "../ansible/roles/oauth2_proxy/templates/oauth2-proxy.cfg.j2"), "utf8");
-}
-
-function renderOauth2ProxyTemplate(provider: string) {
-  const replacement = provider.trim().toLowerCase() === "logto" ? "" : RELATIVE_REDIRECT_BLOCK;
-  return oauth2ProxyTemplate().replace(CONDITIONAL_RELATIVE_REDIRECT_BLOCK, replacement);
 }
 
 describe("management oauth2-proxy template", () => {
   test("uses host-only cookies for management hosts", () => {
     const template = oauth2ProxyTemplate();
 
-    expect(template).toContain(CONDITIONAL_RELATIVE_REDIRECT_BLOCK);
+    expect(template).not.toContain('redirect_url = "/oauth2/callback"');
+    expect(template).not.toContain("relative_redirect_url = true");
     expect(template).toContain('cookie_name = "__Host-terrarium_admin_oauth2_proxy"');
     expect(template).toContain('cookie_path = "/"');
     expect(template).toContain('whitelist_domains = [ "{{ terrarium_manage_domain }}", "{{ terrarium_proxy_domain }}" ]');
@@ -40,15 +31,12 @@ describe("management oauth2-proxy template", () => {
     expect(template).not.toContain("terrarium_oauth2_proxy_cookie_domain");
   });
 
-  test("omits relative redirect settings for Logto while preserving other providers", () => {
-    const logtoConfig = renderOauth2ProxyTemplate("logto");
-    const zitadelConfig = renderOauth2ProxyTemplate("zitadel");
-    const genericConfig = renderOauth2ProxyTemplate("generic");
+  test("lets oauth2-proxy derive an absolute callback URL from reverse-proxy headers", () => {
+    const template = oauth2ProxyTemplate();
 
-    expect(logtoConfig).not.toContain('redirect_url = "/oauth2/callback"');
-    expect(logtoConfig).not.toContain("relative_redirect_url = true");
-    expect(zitadelConfig).toContain(RELATIVE_REDIRECT_BLOCK);
-    expect(genericConfig).toContain(RELATIVE_REDIRECT_BLOCK);
+    expect(template).not.toContain('redirect_url = "/oauth2/callback"');
+    expect(template).not.toContain("relative_redirect_url = true");
+    expect(template).toContain("reverse_proxy = true");
   });
 
   test("uses provider-aware OIDC claim and scope variables", () => {

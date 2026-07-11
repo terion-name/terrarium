@@ -707,7 +707,19 @@ export function removeZitadelFixtureUser(manifest: CleanupResourceManifest, slug
 }
 
 export function removeZitadelFixtureProject(manifest: CleanupResourceManifest, slug: string): CleanupResourceManifest {
-  const withoutCurrent = removeExternalOidcFixtureProject(manifest, "zitadel", slug);
+  let withoutCurrent = removeExternalOidcFixtureProject(manifest, "zitadel", slug);
+  const currentFixture = withoutCurrent.externalOidc.fixtures.find(
+    (fixture) => fixture.idpProvider === "zitadel" && fixture.slug === slug
+  );
+  if (currentFixture) {
+    withoutCurrent = removeEmptyExternalOidcFixture(withoutCurrent, {
+      ...currentFixture,
+      applications: [],
+      roles: [],
+      apiResources: [],
+      routeGroups: []
+    });
+  }
   return pruneLegacyZitadelFixture(withoutCurrent, slug, (fixture) => {
     if (fixture.users.length > 0) {
       const {
@@ -762,6 +774,9 @@ export function buildCleanupPlan(manifest: CleanupResourceManifest): CleanupStep
     }
   }
   for (const fixture of [...externalOidcFixtures].reverse()) {
+    if (fixture.idpProvider === "zitadel" && fixture.projectId) {
+      continue;
+    }
     for (const application of [...fixture.applications].reverse()) {
       steps.push({
         provider: "external-oidc",

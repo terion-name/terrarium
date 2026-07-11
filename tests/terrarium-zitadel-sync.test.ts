@@ -41,7 +41,7 @@ describe("terrarium local ZITADEL sync", () => {
     expect(output).toMatchObject({
       cockpit_client_id: { sensitive: true, type: "string", value: "cockpit-client" },
       cockpit_client_secret: { sensitive: true, type: "string", value: "cockpit-secret" },
-      issuer: { sensitive: false, type: "string", value: "https://auth.example.test/" },
+      issuer: { sensitive: false, type: "string", value: "https://auth.example.test" },
       lxd_client_id: { sensitive: true, type: "string", value: "lxd-client" },
       project_id: { sensitive: false, type: "string", value: "project-1" },
       routes_client_id: { sensitive: true, type: "string", value: "routes-client" },

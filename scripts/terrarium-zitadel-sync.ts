@@ -633,7 +633,7 @@ export function buildLocalIdpOutputs(projectId: string, apps: Record<LocalOidcAp
   const output = {
     cockpit_client_id: { sensitive: true, type: "string", value: apps.cockpit.clientId },
     cockpit_client_secret: { sensitive: true, type: "string", value: apps.cockpit.clientSecret ?? "" },
-    issuer: { sensitive: false, type: "string", value: `https://${authDomain}/` },
+    issuer: { sensitive: false, type: "string", value: `https://${authDomain}` },
     lxd_client_id: { sensitive: true, type: "string", value: apps.lxd.clientId },
     project_id: { sensitive: false, type: "string", value: projectId },
     routes_client_id: { sensitive: true, type: "string", value: apps.routes.clientId },
