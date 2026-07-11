@@ -73,7 +73,7 @@ Use local Logto instead:
 terrariumctl install --idp local --idp-provider logto
 ```
 
-Local Logto is heavier than local ZITADEL: Terrarium runs Logto and Postgres in the managed IDP system instance, seeds Logto unattended, and provisions the Terrarium OIDC clients during `terrariumctl idp sync`. The bootstrap admin email defaults to your Terrarium contact email and the username defaults to `terrarium_admin`; override them with `--logto-admin-email` and `--logto-admin-username`.
+Choose local ZITADEL when you want the lower-resource local IDP. Choose local Logto when you prefer richer identity functionality and a more polished admin/user experience; it is the heavier local option because it provides more of that product surface. With local Logto, Terrarium runs Logto and Postgres in the managed IDP system instance, seeds Logto unattended, and provisions the Terrarium OIDC clients during `terrariumctl idp sync`. The bootstrap admin email defaults to your Terrarium contact email and the username defaults to `terrarium_admin`; override them with `--logto-admin-email` and `--logto-admin-username`.
 
 Use external generic OIDC, preserving the existing `groups` claim and `openid profile email` scope defaults:
 

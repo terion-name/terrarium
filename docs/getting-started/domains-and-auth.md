@@ -175,7 +175,9 @@ With local ZITADEL, Terrarium will automatically:
 - Emit a flat `groups` claim for `oauth2-proxy` and LXD to read.
 - Keep route-auth callback URLs in the managed ZITADEL app up to date when you run `terrariumctl proxy sync`.
 
-With local Logto, Terrarium also uses the same `auth.<domain>` public endpoint, but it runs Logto plus Postgres in the managed IDP system instance. Bootstrap is unattended: Terrarium seeds the Logto database, creates the Terrarium OAuth clients, creates the admin role, assigns it to the bootstrap admin email when that user exists, and writes the local client outputs consumed by oauth2-proxy, LXD, and route auth. The bootstrap email defaults to your Terrarium contact email and the username defaults to `terrarium_admin`; override them with `--logto-admin-email` and `--logto-admin-username`. Logto defaults to the `roles` claim and `openid profile email roles` scopes for both management and LXD unless you override the claim/scope flags.
+Choose local ZITADEL when the lower-resource local IDP is the priority. Choose local Logto when richer identity functionality and a more polished admin/user experience are worth the heavier local footprint.
+
+With local Logto, Terrarium also uses the same `auth.<domain>` public endpoint and runs Logto plus Postgres in the managed IDP system instance. Bootstrap is unattended: Terrarium seeds the Logto database, creates the Terrarium OAuth clients, creates the admin role, assigns it to the bootstrap admin email when that user exists, and writes the local client outputs consumed by oauth2-proxy, LXD, and route auth. The bootstrap email defaults to your Terrarium contact email and the username defaults to `terrarium_admin`; override them with `--logto-admin-email` and `--logto-admin-username`. Logto defaults to the `roles` claim and `openid profile email roles` scopes for both management and LXD unless you override the claim/scope flags.
 
 ### Mode 2: External OIDC (`--idp oidc`)
 
