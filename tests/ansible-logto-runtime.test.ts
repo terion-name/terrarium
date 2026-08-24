@@ -40,7 +40,10 @@ describe("Ansible Logto runtime role", () => {
     expect(defaults).toContain('terrarium_logto_seed_dir: "{{ terrarium_logto_dir }}/seed"');
     expect(defaults).toContain('terrarium_logto_stage_dir: "{{ terrarium_state_dir }}/logto-container"');
     expect(defaults).toContain('terrarium_logto_app_image: ""');
-    expect(defaults).toContain('terrarium_logto_app_image_fallback: "ghcr.io/logto-io/logto:latest"');
+    expect(defaults).toContain(
+      'terrarium_logto_app_image_fallback: "ghcr.io/logto-io/logto:1.42.0@sha256:aac94e24ab7bef59be5d1809b1481b179495aaa75bb9dc2895ceae46e4117854"'
+    );
+    expect(defaults).not.toContain("logto:latest");
     expect(defaults).toContain('terrarium_logto_postgres_image: ""');
     expect(defaults).toContain("terrarium_logto_postgres_image_hardened");
     expect(defaults).toContain("terrarium_logto_postgres_image_mirror");

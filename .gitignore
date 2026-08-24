@@ -7,3 +7,4 @@ ansible/.ansible/
 tests/integration/output/
 tests/integration/.env
 .DS_Store
+.security

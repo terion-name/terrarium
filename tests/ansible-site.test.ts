@@ -162,7 +162,9 @@ describe("Ansible site playbook", () => {
     expect(play.vars.terrarium_logto_admin_email).toBe("{{ terrarium_email }}");
     expect(play.vars.terrarium_logto_admin_username).toBe("terrarium_admin");
     expect(play.vars.terrarium_logto_app_image).toBe("");
-    expect(play.vars.terrarium_logto_app_image_fallback).toBe("ghcr.io/logto-io/logto:latest");
+    expect(play.vars.terrarium_logto_app_image_fallback).toBe(
+      "ghcr.io/logto-io/logto:1.42.0@sha256:aac94e24ab7bef59be5d1809b1481b179495aaa75bb9dc2895ceae46e4117854"
+    );
     expect(play.vars.terrarium_logto_postgres_image).toBe("");
     expect(bundle.terrarium_logto_instance_name).toBe("{{ terrarium_logto_instance_name }}");
     expect(bundle.terrarium_logto_core_port).toBe("{{ terrarium_logto_core_port }}");

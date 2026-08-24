@@ -812,14 +812,20 @@ describe("terrarium local Logto sync", () => {
     });
   });
 
-  test("patches a missing username to the configured username before assigning the admin role to an existing Logto user", async () => {
+  test("patches a missing username before assigning the admin role to a Terrarium-managed Logto user", async () => {
     const previousPassword = process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
     delete process.env.TERRARIUM_LOGTO_ADMIN_PASSWORD;
     const calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string> }> = [];
     const api: LogtoApiCall = async (method, path, body, query) => {
       calls.push({ method, path, body, query });
       if (path === "/api/users") {
-        return [{ id: "user-1", primaryEmail: "admin@example.test" }] as never;
+        return [
+          {
+            id: "user-1",
+            primaryEmail: "admin@example.test",
+            customData: { terrarium: { managed: true, provider: "logto", user: "admin" } }
+          }
+        ] as never;
       }
       if (method === "PATCH" && path === "/api/users/user-1") {
         return { username: "configured_admin" } as never;
@@ -849,6 +855,22 @@ describe("terrarium local Logto sync", () => {
       { method: "GET", path: "/api/users/user-1/roles", body: undefined, query: undefined },
       { method: "POST", path: "/api/users/user-1/roles", body: { roleIds: ["role-1"] }, query: undefined }
     ]);
+  });
+
+  test("refuses to assign the admin role to an unmarked user with the configured email", async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string> }> = [];
+    const api: LogtoApiCall = async (method, path, body, query) => {
+      calls.push({ method, path, body, query });
+      if (path === "/api/users") {
+        return [{ id: "user-1", primaryEmail: "admin@example.test" }] as never;
+      }
+      throw new Error(`unexpected call: ${method} ${path}`);
+    };
+
+    await expect(
+      ensureLogtoAdminUserRole(api, "admin@example.test", { id: "role-1", name: "terrarium-admins", type: "User" })
+    ).rejects.toThrow("not marked as the Terrarium-managed admin");
+    expect(calls).toEqual([{ method: "GET", path: "/api/users", body: undefined, query: { search: "admin@example.test" } }]);
   });
 
   test("requires the Logto admin password only when creating a missing user", async () => {
@@ -883,7 +905,14 @@ describe("terrarium local Logto sync", () => {
     const api: LogtoApiCall = async (method, path, body, query) => {
       calls.push({ method, path, body, query });
       if (path === "/api/users") {
-        return [{ id: "user-1", primaryEmail: "admin@example.test", username: "existing_admin" }] as never;
+        return [
+          {
+            id: "user-1",
+            primaryEmail: "admin@example.test",
+            username: "existing_admin",
+            customData: { terrarium: { managed: true, provider: "logto", user: "admin" } }
+          }
+        ] as never;
       }
       if (path === "/api/users/user-1/roles") {
         return [{ id: "role-1", name: "terrarium-admins", type: "User" }] as never;

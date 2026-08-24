@@ -267,6 +267,7 @@ export type LogtoUser = Record<string, unknown> & {
   primaryEmail?: string;
   email?: string;
   username?: string;
+  customData?: unknown;
 };
 
 const defaultDependencies: LogtoSyncDependencies = {
@@ -1207,6 +1208,12 @@ function buildLogtoAdminUserBody(email: string, password: string, username: stri
   };
 }
 
+function isTerrariumManagedLogtoAdminUser(user: LogtoUser): boolean {
+  const customData = asRecord(user.customData);
+  const marker = asRecord(customData.terrarium);
+  return marker.managed === true && marker.provider === "logto" && marker.user === "admin";
+}
+
 function normalizeCreatedLogtoUser(user: LogtoUser, email: string, username: string): LogtoUser {
   return {
     ...user,
@@ -1235,6 +1242,11 @@ export async function ensureLogtoAdminUser(
 ): Promise<LogtoUser> {
   const existing = await findLogtoAdminUser(api, email);
   if (existing) {
+    if (!isTerrariumManagedLogtoAdminUser(existing)) {
+      throw new Error(
+        `Logto user for email ${email} is not marked as the Terrarium-managed admin; refusing to assign administrative access`
+      );
+    }
     return ensureLogtoAdminUsername(api, existing, username);
   }
 
@@ -1255,6 +1267,9 @@ export async function ensureLogtoAdminUser(
   const refreshed = await findLogtoAdminUser(api, email);
   if (!refreshed?.id) {
     throw new Error(`failed to create Logto user for email ${email}`);
+  }
+  if (!isTerrariumManagedLogtoAdminUser(refreshed)) {
+    throw new Error(`created Logto user for email ${email} is missing the Terrarium-managed admin marker`);
   }
   return ensureLogtoAdminUsername(api, refreshed, username);
 }

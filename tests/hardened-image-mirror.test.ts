@@ -95,7 +95,9 @@ describe("Docker Hardened Image mirror workflow", () => {
     const workflow = readWorkflow();
     const invocation = workflow.match(/\.github\/scripts\/mirror-dhi-image\.sh[\s\S]*?\n\n      - name: Make GHCR package public when permitted/)?.[0] ?? "";
 
-    expect(workflow).toContain("uses: docker/setup-buildx-action@v3");
+    expect(workflow).toContain("uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0");
+    expect(workflow).toContain("uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0");
+    expect(workflow).not.toMatch(/uses: (?:actions\/checkout|docker\/setup-buildx-action)@v\d/);
     expect(invocation.match(/\$\{\{ matrix\./g)).toHaveLength(10);
     expect(invocation).toContain('"${{ matrix.name }}"');
     expect(invocation).toContain('"${{ matrix.source }}"');
